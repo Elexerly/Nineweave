@@ -2,6 +2,8 @@ extends Node
 ## Deterministic HTTPRequest replacement. No sockets, DNS or network calls.
 signal request_completed(result: int, response: int, headers: PackedStringArray, body: PackedByteArray)
 var timeout: float = 0
+var download_file: String = ""
+var body_size_limit: int = -1
 var requests: Array = []
 var active: bool = false
 var immediate_error: int = OK
@@ -14,3 +16,10 @@ func respond(response: int, data, result: int = HTTPRequest.RESULT_SUCCESS):
 	active = false
 	var body = data if data is String else JSON.stringify(data)
 	request_completed.emit(result,response,PackedStringArray(),str(body).to_utf8_buffer())
+
+func respond_bytes(response: int, bytes: PackedByteArray, result: int = HTTPRequest.RESULT_SUCCESS, headers: PackedStringArray = PackedStringArray()):
+	active = false
+	if not download_file.is_empty():
+		var file = FileAccess.open(download_file,FileAccess.WRITE)
+		if file != null: file.store_buffer(bytes); file.close()
+	request_completed.emit(result,response,headers,PackedByteArray())

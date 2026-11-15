@@ -20,6 +20,7 @@ const Roster = preload("res://characters/roster.gd")
 const Profile = preload("res://characters/profile.gd")
 const HeroRig = preload("res://characters/art.gd")
 const HeroSelect = preload("res://characters/select.gd")
+const HeroVideo = preload("res://characters/hero_video.gd")
 const Cinematic = preload("res://characters/cinematic.gd")
 const Sound = preload("res://fx/sound.gd")
 ## Result panel appears at this fraction of the game-win animation (real flow and debug poses).
@@ -58,6 +59,7 @@ var _hero_changed: bool = false
 var rival_character: String = "auric_rex"
 var hero_select
 var cinematic
+var hero_video = HeroVideo.new()
 var field_heroes: Dictionary = {}
 var _pending_game: Dictionary = {}
 var _select_player: int = 0
@@ -127,7 +129,9 @@ func _ready():
 	add_child(fx_overlay)
 	sound = Sound.new(); add_child(sound)
 	callout = Callout.new(); callout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(callout)
-	cinematic = Cinematic.new(); cinematic.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(cinematic)
+	add_child(hero_video)
+	cinematic = Cinematic.new(); cinematic.video_source = hero_video; cinematic.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(cinematic)
+	cinematic.video_overlay.audio_active.connect(sound.set_hero_video_audio)
 	cinematic.finished.connect(_cinematic_finished)
 	cinematic.buttons_ready.connect(func(): _result_shown = true; overlay = "result"; _rebuild())
 	sound.voice_started.connect(func(id): callout.show_callout(id))
@@ -155,6 +159,7 @@ func _ready():
 		account.refresh()
 	_apply_preferences(); _relayout(); _rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
+	call_deferred("_clip_preview")
 func _on_viewport_resize():
 	if _manual_size != Vector2.ZERO: return
 	_resize_pending = true
@@ -226,6 +231,7 @@ func _apply_preferences():
 	sound.configure(settings.values)
 	callout.reduced_motion = board.reduced_motion
 	cinematic.reduced_motion = board.reduced_motion
+	cinematic.video_overlay.set_sound_enabled(sound.enabled)
 	if is_instance_valid(hero_select): hero_select.reduced_motion = board.reduced_motion
 	for rig in field_heroes.values(): rig.reduced_motion = board.reduced_motion
 func _process(delta):
@@ -349,12 +355,12 @@ func _show_spotlight():
 	cinematic.winner_name = side_name(winner); cinematic.loser_name = side_name(3-winner)
 	cinematic.result_score = "%d — %d  BOARDS CLAIMED" % [game.owners.count(winner),game.owners.count(3-winner)]
 	cinematic.show_scene("draw" if game.status == 3 else "spotlight",hero_for(winner),hero_for(3-winner),winner,layout)
-	if game.status != 3: sound.stinger(Roster.audio_index(hero_for(winner)),"full",-.35 if winner == human_mark else .35)
+	if game.status != 3 and not cinematic.video_playing(): sound.stinger(Roster.audio_index(hero_for(winner)),"full",-.35 if winner == human_mark else .35)
 func _begin_versus():
 	thinking = false; board.frozen = true
 	cinematic.winner_name = side_name(human_mark); cinematic.loser_name = side_name(3-human_mark)
 	cinematic.show_scene("versus",hero_for(human_mark),hero_for(3-human_mark),human_mark,layout)
-	sound.cue("route"); sound.stinger(Roster.audio_index(hero_for(human_mark)),"tag",-.35)
+	if not cinematic.video_playing(): sound.cue("route"); sound.stinger(Roster.audio_index(hero_for(human_mark)),"tag",-.35)
 func rematch():
 	if mode == "online":
 		message = ""
@@ -381,6 +387,7 @@ func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = fa
 		for h in Roster.DATA:
 			if h.id != profile.data.character_id: available.append(h.id)
 		rival_character = str(available[randi()%available.size()])
+	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	sound.prepare_character(Roster.audio_index(profile.data.character_id)); sound.prepare_character(Roster.audio_index(rival_character))
 	mode = new_mode; human_mark = mark; page = "game"; overlay = ""; _debug_capture = false
 	game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
@@ -518,6 +525,7 @@ func resume_game():
 	# A hand-edited/legacy save may name an unknown hero or the player's own; pick a valid rival.
 	if not Roster.valid(rival_character) or rival_character == str(profile.data.character_id):
 		rival_character = "auric_rex" if profile.data.character_id != "auric_rex" else "vesper_vale"
+	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	page = "game"; overlay = ""; board.clear_effects(); _result_shown = false; _spotlight_done = false; cinematic.clear()
 	_refresh_labels(); _rebuild(); _schedule_ai()
 func go_home():
@@ -553,7 +561,9 @@ func _attach_transport(t):
 	t.player_name = str(settings.values.player_name)
 	t.character_id = str(profile.data.character_id)
 	t.character_received.connect(func(mark,id):
-		if mark != t.seat: rival_character = id)
+		if mark != t.seat:
+			rival_character = Roster.canonical_id(id)
+			hero_video.prefetch_pair(str(profile.data.character_id),rival_character))
 	t.room_created.connect(func(code): room_code = code; online_state = "waiting"; message = "Waiting for opponent…"; _rebuild())
 	t.joined.connect(func(code,seat): room_code = code; human_mark = seat)
 	t.opponent_joined.connect(_online_ready)
@@ -588,6 +598,7 @@ func _online_ready():
 	remote_ready = true; opponent_name = transport.remote_name; rival_character = transport.remote_character_id
 	human_mark = transport.seat; _reset_online_match()
 func _reset_online_match():
+	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	_spotlight_done = false; cinematic.clear(); _debug_capture = false
 	game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
 	board.clear_effects(); thinking = false; _result_shown = false; match_seconds = 0; message = ""
@@ -761,10 +772,11 @@ func _rebuild():
 		hero_select.heading = "PLAYER %d · CHOOSE HERO" % _select_player if _select_player > 0 else "CHOOSE YOUR HERO"
 		hero_select.blocked_id = str(profile.data.character_id) if _select_player == 2 else ""
 		if _select_player > 0: hero_select.display_name = "PLAYER %d" % _select_player
-		hero_select.focused.connect(func(id): _hero_changed = true; _hero_focus = id; sound.prepare_character(Roster.audio_index(id)); sound.cue("ui",-.35))
+		hero_select.focused.connect(func(id): hero_video.prefetch_hero(id); _hero_changed = true; _hero_focus = id; sound.prepare_character(Roster.audio_index(id)); sound.cue("ui",-.35))
 		hero_select.name_changed.connect(func(value): _name_draft = value)
 		hero_select.confirmed.connect(_confirm_hero)
 		hero_select.back.connect(func(): _pending_game = {}; go_home())
+		hero_video.prefetch_hero(hero_select.selected_id)
 		add_child(hero_select); ui_nodes.append(hero_select)
 		if _select_player > 0: hero_select.field.editable = false
 	elif page == "game":
@@ -1410,6 +1422,67 @@ func _debug_stage(moves: Array) -> Vector2i:
 	game.play(last[0],last[1])
 	_refresh_labels(); _rebuild()
 	return Vector2i(last[0],last[1])
+
+## Web QA hook: ?nw_scenario=versus|winner|winner_cpu&nw_hero=shard_jack&nw_rival=max_granite
+## Starts a live clip (no analytic seek) so a browser can verify playback. No-ops without params.
+## On web the clips are downloaded first; this hook may wait for them (QA only, never used in play).
+func _clip_preview():
+	var scenario = OS.get_environment("NW_SCENARIO") if OS.has_environment("NW_SCENARIO") else ""
+	var hero = OS.get_environment("NW_HERO") if OS.has_environment("NW_HERO") else ""
+	var rival = OS.get_environment("NW_RIVAL") if OS.has_environment("NW_RIVAL") else ""
+	if OS.has_feature("web"):
+		var qs_scenario = str(JavaScriptBridge.eval("(new URLSearchParams(window.location.search)).get('nw_scenario')||''"))
+		var qs_hero = str(JavaScriptBridge.eval("(new URLSearchParams(window.location.search)).get('nw_hero')||''"))
+		var qs_rival = str(JavaScriptBridge.eval("(new URLSearchParams(window.location.search)).get('nw_rival')||''"))
+		if not qs_scenario.is_empty() and qs_scenario != "null": scenario = qs_scenario
+		if not qs_hero.is_empty() and qs_hero != "null": hero = qs_hero
+		if not qs_rival.is_empty() and qs_rival != "null": rival = qs_rival
+	if scenario.is_empty() or scenario == "null": return
+	if hero.is_empty() or hero == "null": hero = "shard_jack"
+	if rival.is_empty() or rival == "null": rival = "max_granite"
+	if not Roster.valid(hero): hero = "shard_jack"
+	hero = Roster.canonical_id(hero)
+	if not Roster.valid(rival) or Roster.canonical_id(rival) == hero:
+		rival = "max_granite" if hero != "max_granite" else "shard_jack"
+	rival = Roster.canonical_id(rival)
+	test_online_bypass = true
+	profile.data.onboarded = true
+	profile.data.character_id = hero
+	profile.data.display_name = "Patrick"
+	settings.values.player_name = "Patrick"
+	settings.values.reduced_motion = false
+	rival_character = rival
+	hero_video.prefetch_pair(hero, rival)
+	var needed: Array = []
+	if scenario == "versus":
+		if hero_video.has_clip(hero,"intro"): needed.append([hero,"intro"])
+		if hero_video.has_clip(rival,"intro"): needed.append([rival,"intro"])
+	elif scenario in ["winner","winner_cpu"]:
+		var winner_id = rival if scenario == "winner_cpu" else hero
+		if hero_video.has_clip(winner_id,"victory"): needed.append([winner_id,"victory"])
+	var deadline = Time.get_ticks_msec() + 20000
+	while Time.get_ticks_msec() < deadline and not needed.is_empty():
+		var ready = true
+		for item in needed:
+			if not hero_video.is_ready(item[0],item[1]): ready = false; break
+		if ready: break
+		await get_tree().process_frame
+	if scenario == "versus":
+		start_game("computer",1,true,true); return
+	if scenario in ["winner","winner_cpu"]:
+		# Do not use debug_load_position: that is debug-build only and would no-op in a release web export.
+		human_mark = 1; mode = "computer"; page = "game"; overlay = ""; _debug_capture = false
+		var result_mark = 2 if scenario == "winner_cpu" else 1
+		var patterns: Array = []
+		for i in range(9): patterns.append(".........")
+		patterns[0] = "OOOXX...." if result_mark == 2 else "XXXOO...."
+		patterns[1] = patterns[0]
+		patterns[2] = "OO.XX...." if result_mark == 2 else "XX.OO...."
+		var staged = Rules.new(); staged.deserialize({"v":1,"cells":"".join(patterns),"turn":result_mark,"active":2,"history":[]})
+		game.deserialize(staged.serialize()); board.clear_effects(); _result_shown = false; _spotlight_done = false
+		game.play(2,2)
+		_refresh_labels(); _rebuild(); _show_spotlight()
+
 func debug_scenario(scenario: String, progress: float = .45):
 	if not OS.is_debug_build(): return
 	_debug_capture = true; clock = 4; backdrop.clock = 4; P.clock = 4
@@ -1454,7 +1527,7 @@ func debug_scenario(scenario: String, progress: float = .45):
 			var staged_winner = Rules.new(); staged_winner.deserialize({"v":1,"cells":"".join(patterns),"turn":result_mark,"active":2,"history":[]})
 			debug_load_position(staged_winner.serialize())
 			game.play(2,2)
-		_refresh_labels(); _show_spotlight(); cinematic.age = progress*5; cinematic.buttons_shown = cinematic.age >= cinematic.buttons_at()
+		_refresh_labels(); _show_spotlight(); cinematic.seek(progress*5)
 		cinematic.frozen = true; cinematic.pose(); _result_shown = true
 		if cinematic.buttons_shown: overlay = "result"; _rebuild()
 		return
@@ -1472,7 +1545,7 @@ func debug_scenario(scenario: String, progress: float = .45):
 		return
 	if scenario == "win_spotlight":
 		_debug_stage(WIN_GAME); board.preview_win(game.big_lines[0],game.status,RESULT_AT)
-		_show_spotlight(); cinematic.age = progress*cinematic.duration(); cinematic.frozen = true; cinematic.pose()
+		_show_spotlight(); cinematic.seek(0); cinematic.seek(progress*cinematic.duration())
 		return
 	if scenario == "duo_panel":
 		var ahead = Rules.new()

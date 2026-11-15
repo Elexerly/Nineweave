@@ -16,7 +16,7 @@ const STANCES = [
 	[-1.0,-.55,.15,1.3,-.16,.12,.26,1.2], # Quill: raised brush
 	[-.22,-.36,.2,.7,.1,-.08,.2,.58], # Lumen: lantern held level
 	[-.62,.35,-.8,.6,-.18,-.14,.34,.35], # Jack: balancing on glass
-	[-1.15,-.5,.75,1.0,.17,.16,.24,.8], # Solstice: fan flourish
+	[-1.15,-.5,.75,1.0,.17,.16,.24,.8], # Beth Solstice (madame_solstice): fan flourish
 	[-.13,-.2,.12,.38,.07,-.07,.12,.3], # Ox: relaxed massive guardian
 	[-1.9,.45,.6,.8,-.15,.13,.28,.9], # Kite: windward salute
 	[-.5,1.0,.25,-.55,.19,-.12,.17,-.5], # Gilt: inspecting a watch

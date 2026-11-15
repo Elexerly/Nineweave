@@ -30,6 +30,8 @@ var _release_unlocked: bool = false
 var volumes: Dictionary = {"sfx_volume":.85,"announcer_volume":.9,"music_volume":.45}
 var cache: Dictionary = {}
 var duck_db: float = 0.0
+var hero_video_audio: bool = false
+func set_hero_video_audio(value: bool): hero_video_audio = value
 var _announcer_left: float = 0.0
 var _players: Array = []
 var _voice: AudioStreamPlayer
@@ -122,7 +124,7 @@ func advance_mix(delta: float):
 		if _announcer_left == 0: voice_id = ""; _gap_left = VOICE_GAP
 	if _announcer_left == 0: _gap_left = maxf(0,_gap_left-remaining); _drain_voice()
 	# Lines waiting for the first gesture are silent; they must not hold music/SFX ducked.
-	var target = -4.5 if _announcer_left > 0 or (unlocked and enabled and not voice_queue.is_empty()) else 0.0
+	var target = -4.5 if _announcer_left > 0 or (enabled and hero_video_audio) or (unlocked and enabled and not voice_queue.is_empty()) else 0.0
 	duck_db = lerpf(duck_db,target,1.0-exp(-delta/(.035 if target < duck_db else .16)))
 	if absf(duck_db-target) < .01: duck_db = target
 	_apply_mix()

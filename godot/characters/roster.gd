@@ -10,7 +10,7 @@ const DATA = [
 	{"id":"ember_quill","name":"Ember Quill","concept":"Fire-ink cartoonist · spells in brushstrokes","palette":["ee6544","33252b","ffe8ba"],"mark":"ember_brush","pop":"Inked it!","victory":"That's going in the next issue!","defeat":"Sketchbook closes; she waves away smoke.","action":"INKED!","stinger":"F-sharp · hot reed, syncopated rise","body":"light","prop":"brush"},
 	{"id":"lumen_pike","name":"Lumen Pike","concept":"Lantern keeper · a flame that never yields","palette":["48ada6","173f49","ffe5a0"],"mark":"lantern_flame","pop":"Lights out!","victory":"I told you I'd leave a light on for ya!","defeat":"Shields the lantern's last coal.","action":"ILLUMINATED!","stinger":"G · warm chime, suspended fourth","body":"athletic","prop":"lantern"},
 	{"id":"shard_jack","name":"Jack Sovereign","concept":"Anime strategist-commander · dark hair, gold-trimmed black high collar, black-purple cape, gold-violet sigil eye and chess-king crystal","palette":["8a4dff","15121f","e8c060"],"mark":"sovereign_king","pop":"Checkmate was decided three moves ago.","victory":"Every square had a purpose. This one is victory.","defeat":"His king crystal dims; he quietly plans the rematch.","action":"CHECKMATED!","stinger":"A-flat · bright saw-glass, leaping sixth","body":"commander","prop":"chess_king"},
-	{"id":"madame_solstice","name":"Madame Solstice","concept":"Sun-and-moon duelist · a grand entrance","palette":["c05d77","492440","f8d584"],"mark":"eclipse","pop":"Eclipse!","victory":"Day, night, and you? Totally outshone.","defeat":"Split mask opens; she bows as she sinks.","action":"ECLIPSED!","stinger":"D · silver/gold antiphonal thirds","body":"theatrical","prop":"fan"},
+	{"id":"madame_solstice","name":"Beth Solstice","concept":"Sun-and-moon duelist · a grand entrance","palette":["c05d77","492440","f8d584"],"mark":"eclipse","pop":"Eclipse!","victory":"Day, night, and you? Totally outshone.","defeat":"Split mask opens; she bows as she sinks.","action":"ECLIPSED!","stinger":"D · silver/gold antiphonal thirds","body":"theatrical","prop":"fan"},
 	{"id":"bramble_ox","name":"Bramble Ox","concept":"Gentle horned guardian · rose-quartz vines","palette":["76a772","283e37","e9a6af"],"mark":"antler_vine","pop":"Rooted!","victory":"Easy, friend. The garden always wins.","defeat":"Vines wilt; a small bird returns to his shoulder.","action":"ROOTED!","stinger":"E-flat · wooden low pulse, blossom chime","body":"massive","prop":"vines"},
 	{"id":"kite_hollow","name":"Kite Hollow","concept":"Sky messenger · a crystal-kite cloak","palette":["80c9ed","2b496b","ff9b87"],"mark":"kite_spiral","pop":"Airmail!","victory":"Special delivery: you just got schooled!","defeat":"Cloak deflates; he bounces to a seat.","action":"AIRMAILED!","stinger":"E · airy whistle, ascending octave","body":"petite","prop":"kite"},
 	{"id":"professor_gilt","name":"Professor Gilt","concept":"Clockwork scholar · glass and brass","palette":["b6a06d","27384b","80dbb6"],"mark":"clock_gear","pop":"Tick-tock!","victory":"Precisely as calculated. Sorry, not sorry!","defeat":"A spring escapes; he taps the jammed glass.","action":"CALCULATED!","stinger":"F · clock chime, offset arpeggio","body":"angular_elder","prop":"watch"},
@@ -38,7 +38,14 @@ const ALIASES = {"erik_comet":"erick_comet","ak_shade":"simon_shade","derrick_to
 static func canonical_id(id: String) -> String: return ALIASES.get(id,id)
 static func tile_label(id: String) -> String:
 	var h = get_hero(id)
-	return "JAMES II" if h.id == "james_ii" else h.name.get_slice(" ",0).to_upper()
+	if h.id == "james_ii": return "JAMES II"
+	if h.id == "madame_solstice": return "BETH SOLSTICE"
+	return h.name.get_slice(" ",0).to_upper()
+static func tile_lines(id: String) -> PackedStringArray:
+	var label = tile_label(id)
+	var at = label.rfind(" ")
+	if at > 0: return PackedStringArray([label.substr(0,at),label.substr(at+1)])
+	return PackedStringArray([label])
 static func index_of(id: String) -> int:
 	id = canonical_id(id)
 	for i in range(DATA.size()):

@@ -17,7 +17,7 @@ fi
 if [ ! -f "$XDG_DATA_HOME/godot/export_templates/4.7.2.stable/web_nothreads_release.zip" ]; then
   printf 'WEB EXPORT: FAIL (4.7.2.stable web_nothreads_release.zip template is missing)\n'; exit 2
 fi
-(cd "$ROOT" && tar cf - --exclude=./.godot --exclude='*.log' --exclude='*.import' .) | (cd "$STAGE/project" && tar xf -)
+(cd "$ROOT" && tar cf - --exclude=./.godot --exclude='*.log' --exclude='*.import' --exclude=./assets/hero_video_src .) | (cd "$STAGE/project" && tar xf -)
 # Hero-specific lossy import settings must survive the isolated re-import.
 (cd "$ROOT" && find assets/heroes -name '*.import' -print | tar cf - -T -) | (cd "$STAGE/project" && tar xf -)
 # Disable editor-only network listeners in the isolated import/export process.
@@ -39,15 +39,24 @@ mkdir -p "$OUT/LICENSES"
 cp "$ROOT/assets/fonts/"*OFL.txt "$OUT/LICENSES/"
 SHA=unqueried
 BRANCH=unqueried
-TREE="Owner requested no git commands"
+TREE=unqueried
+TAG=
+REPO=$(CDPATH= cd -- "$ROOT/.." && pwd)
+if git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  SHA=$(git -C "$REPO" rev-parse HEAD)
+  BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD)
+  TREE=$(git -C "$REPO" status --porcelain | awk '{print $2}' | tr '\n' ' ')
+  TAG=$(git -C "$REPO" describe --tags --exact-match 2>/dev/null || true)
+fi
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 4c (online)
+Nineweave Round 4d (hero video)
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE
 built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 source SHA: $SHA
 branch: $BRANCH
+tag: ${TAG:-pending}
 tree: $TREE
 staging: $STAGE/project
 notices: THIRD_PARTY_NOTICES.md and LICENSES/*OFL.txt
@@ -56,6 +65,13 @@ if rg -q 'SCRIPT ERROR|Parse Error|ERROR:.*(export|Export|template|Template|reso
 for file in index.html index.js index.wasm index.pck; do
   [ -s "$OUT/$file" ] || { printf 'missing %s\n' "$OUT/$file"; status=1; }
 done
+# Streamed Theora sidecars live beside index.html, never in the web PCK.
+find "$ROOT/assets/hero_video" -type f -name '*.ogv' | while IFS= read -r clip; do
+  rel=${clip#"$ROOT/assets/hero_video/"}
+  mkdir -p "$OUT/hero_video/$(dirname "$rel")"
+  cp "$clip" "$OUT/hero_video/$rel"
+done
+python3 "$ROOT/tools/check_hero_video_pack.py" "$ROOT" "$OUT" || status=1
 # Round 3b: every owner recording must be packed as an imported stream.
 oggs=0
 for ogg in "$ROOT"/assets/audio/*/*.ogg; do

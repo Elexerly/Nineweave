@@ -5,9 +5,12 @@ const Rig = preload("res://characters/art.gd")
 const P = preload("res://ui/paint.gd")
 const Motion = preload("res://characters/cinematic_motion.gd")
 const Sway = preload("res://characters/victory_sway.gdshader")
+const VideoOverlay = preload("res://characters/hero_video_overlay.gd")
 const Badge = preload("res://characters/loser_badge.gdshader")
 signal finished(kind: String)
 signal buttons_ready
+var video_source
+var video_overlay
 var buttons_shown: bool = false
 var winner_name: String = "YOU"
 var loser_name: String = "COMPUTER"
@@ -42,13 +45,20 @@ func _ready():
 	hero = Rig.new(); add_child(hero)
 	loser = Rig.new(); loser.bust = true; loser.bust_view = LOSER_VIEW; loser.bust_lift = LOSER_LIFT; add_child(loser)
 	front = Control.new(); front.mouse_filter = Control.MOUSE_FILTER_IGNORE; front.draw.connect(_draw_front); add_child(front)
+	video_overlay = VideoOverlay.new(); video_overlay.source = video_source; front.add_child(video_overlay)
+	video_overlay.finished.connect(complete)
+func video_playing() -> bool: return is_instance_valid(video_overlay) and video_overlay.visible
 func duration() -> float:
+	# Videos end on decoder signals (the longer intro wins), never the old 3s clock.
+	if video_playing(): return INF
 	if kind in ["versus","spotlight","draw"]:
 		if reduced_motion: return .65 if kind == "versus" else 1.0
 		return Motion.VERSUS_SECONDS if kind == "versus" else Motion.RESULT_SECONDS
 	if reduced_motion: return {"lock_in":.35,"pop":.55,"spotlight":1.0}.get(kind,.5)
 	return {"lock_in":.95,"pop":1.2,"spotlight":3.0}.get(kind,1.0)
 func show_scene(scene_kind: String, winner: String, rival: String, mark: int, layout: Dictionary, claimed_board: int = 4):
+	video_overlay.clear()
+	hero.visible = true
 	mouse_filter = Control.MOUSE_FILTER_STOP if scene_kind in ["versus","spotlight","draw"] else Control.MOUSE_FILTER_IGNORE
 	kind = scene_kind; winner_id = winner; loser_id = rival; player = mark
 	front.visible = kind in ["versus","spotlight","draw"]
@@ -74,6 +84,8 @@ func show_scene(scene_kind: String, winner: String, rival: String, mark: int, la
 		loser.material = _badge
 	clip_word = R.get_hero(winner_id).action
 	pose()
+	video_overlay.source = video_source
+	if not reduced_motion: video_overlay.begin(kind,winner_id,loser_id,player,region.size)
 ## Recompute regions for the current scene after a resize; age/clips are untouched.
 func relayout(layout: Dictionary):
 	if not visible: return
@@ -82,6 +94,7 @@ func relayout(layout: Dictionary):
 		if region.size.x <= 0: clear(); return
 		hero.configure(winner_id,true); hero.expression = "smug"; hero.refresh_texture()
 	pose()
+	if video_playing(): video_overlay.relayout(region.size)
 func _place(layout: Dictionary, claimed_board: int):
 	_layout = layout; _claimed_board = claimed_board
 	var s: Vector2 = layout.size; var seam: Rect2 = layout.hinge
@@ -202,7 +215,9 @@ static func free_rects(view: Rect2, blocks: Array, min_size: Vector2) -> Array:
 	return out
 func advance(delta: float):
 	if not active or frozen: return
+	if reduced_motion and video_playing(): video_overlay.clear(); age = 0; pose()
 	age += delta
+	if video_playing(): return
 	if kind in ["spotlight","draw"] and age >= buttons_at() and not buttons_shown:
 		buttons_shown = true; buttons_ready.emit()
 	if age >= duration(): complete(); return
@@ -212,11 +227,13 @@ func skip() -> bool:
 	complete(); return true
 func complete():
 	if not active: return
+	video_overlay.clear()
 	var was = kind; age = duration(); active = false
 	visible = kind in ["spotlight","draw"]
 	if visible: buttons_shown = true; pose()
 	finished.emit(was)
 func clear():
+	if is_instance_valid(video_overlay): video_overlay.clear()
 	active = false; visible = false; kind = ""; buttons_shown = false; mouse_filter = Control.MOUSE_FILTER_IGNORE
 	position = Vector2.ZERO; scale = Vector2.ONE; modulate.a = 1
 func buttons_at() -> float: return .25 if reduced_motion else Motion.BUTTONS_AT
@@ -224,6 +241,8 @@ func buttons_progress() -> float:
 	return clampf((age-buttons_at())/(.15 if reduced_motion else .28),0,1)
 ## Tool-only seek. Never emits controller signals or advances the match/AI.
 func seek(seconds: float):
+	# Analytic capture always uses the original code animation, even after a live video.
+	if is_instance_valid(video_overlay): video_overlay.clear()
 	age = clampf(seconds,0,duration()); frozen = true; active = age < duration()
 	visible = kind != "versus" or active
 	buttons_shown = kind in ["spotlight","draw"] and age >= buttons_at()
@@ -244,6 +263,9 @@ func versus_cover_alpha() -> float:
 func loser_badge_rect() -> Rect2:
 	return Rect2(loser.position,loser.size)
 func pose():
+	if video_playing():
+		position = Vector2.ZERO; scale = Vector2.ONE; modulate.a = 1
+		return
 	if kind in ["versus","spotlight","draw"]:
 		var s = region.size
 		pivot_offset = s*.5
@@ -335,7 +357,8 @@ func _draw():
 		P.text(self,"LEGEND LOCKED" if kind == "lock_in" else "THE WEAVE IS YOURS",Rect2(r.position+Vector2(14,10),Vector2(r.size.x-28,38)),27,P.PALE,P.SERIF)
 		var plaque = spotlight_plaque(r)
 		P.panel(self,plaque,false,1,true)
-		P.text(self,h.name.to_upper(),Rect2(plaque.position+Vector2(6,2),Vector2(plaque.size.x-12,plaque.size.y*.48)),28,P.PALE,P.SERIF)
+		var name_box = Rect2(plaque.position+Vector2(6,2),Vector2(plaque.size.x-12,plaque.size.y*.48))
+		P.text(self,h.name.to_upper(),name_box,P.fit_box(h.name.to_upper(),name_box,28,P.SERIF),P.PALE,P.SERIF)
 		var line = h.pop if kind == "lock_in" else h.victory
 		# Split long lines into two rows instead of shrinking them to unreadable type.
 		var words = str(line).split(" "); var half = int(ceil(words.size()*.5))

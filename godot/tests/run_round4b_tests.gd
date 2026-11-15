@@ -111,8 +111,9 @@ func selection(ui):
 				seen[tile.index] = true
 				var minimum = 56 if g.per_page == 32 else 44
 				ok(tile.size.x >= minimum and tile.size.y >= minimum and view.encloses(tile.get_rect()),"tile size/viewport "+str(s)+str(tile.index))
-				var text = R.tile_label(R.DATA[tile.index].id)
-				ok(P.text_width(text,P.fit_size(text,tile.size.x-8,14)) <= tile.size.x-8,"tile label fits "+text+str(s)+str(tile.size))
+				var lines = R.tile_lines(R.DATA[tile.index].id)
+				for line in lines:
+					ok(P.text_width(line,P.fit_size(line,tile.size.x-8,14)) <= tile.size.x-8,"tile label fits "+line+str(s)+str(tile.size))
 				ok(tile.rig.texture != null and tile.rig.visible_art_rect().has_area(),"visible page head "+str(tile.index))
 		ok(seen.size() == 32,"every hero reachable "+str(s))
 		for key in ["hero","plaque","field","confirm"]: ok(view.encloses(g[key]) and g[key].has_area(),"detail/control fits "+key+str(s))
@@ -134,8 +135,9 @@ func selection(ui):
 	for tile in folded.tiles:
 		ok(not tile.intersects(Rect2(426,0,15,553)) and tile.size.x >= 44 and tile.size.y >= 44,"fold-safe roster")
 		for h in R.DATA:
-			var text = R.tile_label(h.id)
-			ok(P.text_width(text,P.fit_size(text,tile.size.x-8,14)) <= tile.size.x-8,"folded tile captions fit "+text)
+			var lines = R.tile_lines(h.id)
+			for line in lines:
+				ok(P.text_width(line,P.fit_size(line,tile.size.x-8,14)) <= tile.size.x-8,"folded tile captions fit "+line)
 	ui.set_view_size(Vector2(390,844)); ui.profile.data.character_id = "ethan_ricochet"
 	var rivals = {}; seed(42004)
 	for i in range(320):

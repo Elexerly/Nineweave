@@ -16,12 +16,20 @@ class Portrait extends Button:
 		for state in ["normal","hover","pressed","focus","disabled"]: add_theme_stylebox_override(state,StyleBoxEmpty.new())
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		rig = Rig.new(); rig.hero_id = R.DATA[index].id; rig.bust = true; rig.frozen = true
-		rig.position = Vector2(3,0); rig.size = Vector2(size.x-6,size.y-18); add_child(rig)
+		var band = 28 if R.tile_lines(R.DATA[index].id).size() > 1 else 18
+		rig.position = Vector2(3,0); rig.size = Vector2(size.x-6,size.y-band); add_child(rig)
 	func _draw():
 		var r = Rect2(Vector2(2,2),size-Vector2(4,4))
 		draw_style_box(_frame(),r)
-		var label = R.tile_label(R.DATA[index].id)
-		P.text(self,label,Rect2(3,size.y-20,size.x-6,18),P.fit_size(label,size.x-8,14),P.PALE,P.SANS)
+		var lines = R.tile_lines(R.DATA[index].id)
+		var band = 28 if lines.size() > 1 else 18
+		if lines.size() == 1:
+			P.text(self,lines[0],Rect2(3,size.y-band,size.x-6,band),P.fit_size(lines[0],size.x-8,14),P.PALE,P.SANS)
+		else:
+			var fs = mini(P.fit_size(lines[0],size.x-8,13),P.fit_size(lines[1],size.x-8,13))
+			var half = band*.5
+			P.text(self,lines[0],Rect2(3,size.y-band,size.x-6,half),fs,P.PALE,P.SANS)
+			P.text(self,lines[1],Rect2(3,size.y-band+half,size.x-6,half),fs,P.PALE,P.SANS)
 		if selected: P.outline(self,r.grow(-1),P.BLUE,2)
 	func _frame() -> StyleBoxFlat:
 		var style = StyleBoxFlat.new(); style.bg_color = Color("14243a") if not selected else Color("25425c")

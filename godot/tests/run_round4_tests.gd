@@ -25,7 +25,8 @@ func run():
 	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.profile = Profile.new("user://r4-main-profile.cfg"); ui.settings = Store.new("user://r4-main-settings.cfg")
 	ui.profile.data.character_id = "cryon"; ui.profile.data.display_name = "Patrick"; ui.profile.data.onboarded = true
 	ui.settings.values.sound = false; ui.settings.values.player_name = "Patrick"; ui.settings.values.reduced_motion = false
-	root.add_child(ui); ui.set_process(false); ui.set_view_size(Vector2(390,844)); await frames()
+	# This suite pins the pre-video fallback clock; hero_video covers ready clips.
+	root.add_child(ui); ui.cinematic.video_source = null; ui.set_process(false); ui.set_view_size(Vector2(390,844)); await frames()
 	await selection(ui)
 	versus_flow(ui)
 	winner_flow(ui)

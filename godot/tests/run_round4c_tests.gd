@@ -220,6 +220,8 @@ func make_ui(name: String, bypass: bool = false):
 	var ui = Main.instantiate(); ui.test_online_bypass = bypass
 	ui.account.store = clean_store(name); ui.profile = Profile.new("user://r4c-"+name+"-profile.cfg"); ui.settings = Settings.new("user://r4c-"+name+"-settings.cfg")
 	ui.settings.values.sound = false; ui.settings.saved_game = {}
+	# These controller fixtures exercise established players; Round 4e covers first play.
+	ui.settings.values.tutorial_completed = true
 	var fake = Fake.new(); ui.account.api.request_factory = func(): return fake
 	var lobby_fake = Fake.new(); ui.online_api.request_factory = func(): return lobby_fake
 	return {"ui":ui,"fake":fake,"lobby":lobby_fake}
@@ -253,6 +255,8 @@ func onboarding_ui():
 	ui.go_home(); ui.request_online(); ok(ui.page == "onboarding","live online requires successful consent")
 	ui.controls.screen_name.text_changed.emit("Patrick"); ui.controls.create_name.pressed.emit()
 	fake.respond(201,{"token":"nwd_onboard","player":{"screen_name":"Patrick"}}); fake.respond(200,{"screen_name":"Patrick"})
+	ok(ui.page == "email","name creation offers optional email before entering online")
+	ui.controls.continue_email.pressed.emit()
 	ok(ui.page == "online" and ui.online_state == "lobby" and ui.account.store.complete(),"online entry continues to lobby after consent")
 	ok(bundle.lobby.requests.back().url.ends_with("/rooms") and not ui.lobby_timer.is_stopped(),"lobby fetch and 2.5-second refresh active")
 	bundle.lobby.respond(200,{"rooms":[{"code":"N9ABC","host_name":"Dana","host_hero":"nova_sable"}]})
@@ -261,6 +265,7 @@ func onboarding_ui():
 	ui.free(); await frames()
 	bundle = make_ui("first-success"); ui = bundle.ui; fake = bundle.fake; root.add_child(ui); ui.set_process(false)
 	ui.controls.screen_name.text_changed.emit("First"); ui.controls.create_name.pressed.emit(); fake.respond(201,{"token":"nwd_first","player":{"screen_name":"First"}}); fake.respond(200,{"screen_name":"First"})
+	ui.controls.continue_email.pressed.emit()
 	ok(ui.page == "title","first launch success continues to title")
 	ui.free(); await frames()
 func controller_online():

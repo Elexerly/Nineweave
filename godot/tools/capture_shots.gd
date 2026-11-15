@@ -25,7 +25,7 @@ func capture():
 		elif arg.begins_with("--time="): seconds = float(arg.trim_prefix("--time="))
 		elif arg.begins_with("--progress="): progress = float(arg.trim_prefix("--progress="))
 		i += 1
-	if not scenario in ["onboarding","online_lobby","online_private","online_leaderboard","online_unranked","select_p1","select_p2","select_p3","select_p4","versus_t","winner_t","winner_cpu_t","draw_t","versus","midgame_heads","winner","winner_cpu","draw","title","midgame","thinking","claim","claim_end","win","win_end","duo","duo_hinge","hinge","settings","online","character_select","lock_in","claim_pop","win_spotlight","duo_panel","last_move","reaction"]:
+	if not scenario in ["tutorial","tutorial_claim","tutorial_win","email","account_email","onboarding","online_lobby","online_private","online_leaderboard","online_unranked","select_p1","select_p2","select_p3","select_p4","versus_t","winner_t","winner_cpu_t","draw_t","versus","midgame_heads","winner","winner_cpu","draw","title","midgame","thinking","claim","claim_end","win","win_end","duo","duo_hinge","hinge","settings","online","character_select","lock_in","claim_pop","win_spotlight","duo_panel","last_move","reaction"]:
 		print("CAPTURE FAIL: unknown scenario ",scenario); quit(2); return
 	var main = Main.instantiate(); main.test_online_bypass = true; root.add_child(main)
 	main.set_view_size(Vector2(root.size)); main.settings.values.sound = false; main.sound.enabled = false

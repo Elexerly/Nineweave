@@ -2,7 +2,7 @@ class_name NineweaveSettings
 extends RefCounted
 const Themes = preload("res://themes/registry.gd")
 var path: String = "user://nineweave.cfg"
-const DEFAULTS = {"sound":true,"music":false,"reduced_motion":false,"difficulty":"Hard","show_hints":true,"player_name":"You","sfx_volume":.85,"announcer_volume":.9,"music_volume":.45,"audio_version":3,"background_theme":"crystal","board_theme":"crystal"}
+const DEFAULTS = {"sound":true,"music":false,"reduced_motion":false,"difficulty":"Hard","show_hints":true,"player_name":"You","sfx_volume":.85,"announcer_volume":.9,"music_volume":.45,"audio_version":3,"background_theme":"crystal","board_theme":"crystal","tutorial_completed":false}
 var values: Dictionary = DEFAULTS.duplicate()
 var saved_game = {}
 func _init(file_path: String = "user://nineweave.cfg"):

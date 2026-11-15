@@ -13,6 +13,8 @@ const HTTP = preload("res://net/http_polling_transport.gd")
 const JsonAPI = preload("res://net/json_api.gd")
 const DeviceAccount = preload("res://net/device_account.gd")
 const OnlineScreen = preload("res://ui/online_screen.gd")
+const EmailScreen = preload("res://ui/email_screen.gd")
+const Tutorial = preload("res://ui/tutorial.gd")
 const Announcer = preload("res://fx/announcer.gd")
 const Callout = preload("res://fx/comic_callout.gd")
 const Themes = preload("res://themes/registry.gd")
@@ -47,6 +49,10 @@ var online_api = JsonAPI.new()
 ## Explicit harness/capture opt-out; never derived from character-select onboarding.
 var test_online_bypass: bool = false
 var online_view
+var email_view
+var _email_draft: String = ""
+var tutorial
+var _tutorial_return_overlay: String = ""
 var lobby_timer: Timer
 var public_rooms: Array = []
 var leaderboard_players: Array = []
@@ -146,6 +152,7 @@ func _ready():
 	title_label.add_theme_constant_override("shadow_outline_size",9)
 	var mat = ShaderMaterial.new(); mat.shader = preload("res://assets/shaders/gold.gdshader"); title_label.material = mat
 	add_child(title_label)
+	tutorial = Tutorial.new(); add_child(tutorial); tutorial.finished.connect(_tutorial_finished)
 	if not profile.data.onboarded: profile.data.display_name = str(settings.values.player_name)
 	account.player_received.connect(_account_player)
 	account.name_updated.connect(_account_name)
@@ -155,7 +162,10 @@ func _ready():
 	lobby_timer = Timer.new(); lobby_timer.wait_time = 2.5; add_child(lobby_timer); lobby_timer.timeout.connect(_refresh_lobby)
 	if not test_online_bypass:
 		if not account.store.complete(): page = "onboarding"; _onboarding_name = account.store.data.screen_name
-		else: _account_name(account.store.data.screen_name)
+		else:
+			_account_name(account.store.data.screen_name)
+			if not account.store.data.email_prompt_done:
+				page = "email"; _email_draft = account.store.data.email
 		account.refresh()
 	_apply_preferences(); _relayout(); _rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
@@ -187,6 +197,7 @@ func _relayout():
 	board.place(layout.board)
 	# Rotation/resize mid-cinematic: recompute its panels against the new board/HUD.
 	if cinematic and cinematic.visible: cinematic.relayout(layout)
+	if tutorial and tutorial.active: tutorial.relayout(layout)
 	callout.region = Rect2(layout.board.position+Vector2(8,-8),Vector2(layout.board.size.x-16,52))
 	_title = _title_geometry()
 	backdrop.title_anchor = _title.anchor; backdrop.title_region = _title.region
@@ -231,6 +242,7 @@ func _apply_preferences():
 	sound.configure(settings.values)
 	callout.reduced_motion = board.reduced_motion
 	cinematic.reduced_motion = board.reduced_motion
+	if tutorial: tutorial.reduced_motion = board.reduced_motion
 	cinematic.video_overlay.set_sound_enabled(sound.enabled)
 	if is_instance_valid(hero_select): hero_select.reduced_motion = board.reduced_motion
 	for rig in field_heroes.values(): rig.reduced_motion = board.reduced_motion
@@ -258,7 +270,7 @@ func _process(delta):
 			hint_busy = false
 			# Only show a hint computed for the position still on the board.
 			if _hint_ply == game.history.size() and game.is_legal(hint_ai.best_move.x,hint_ai.best_move.y): board.hint_move = hint_ai.best_move
-	if page == "game" and game.status != 0 and not board.win_fx.is_empty() and board.win_progress() >= RESULT_AT and not _result_shown:
+	if page == "game" and not tutorial.active and game.status != 0 and not board.win_fx.is_empty() and board.win_progress() >= RESULT_AT and not _result_shown:
 		if not _spotlight_done:
 			if not cinematic.active:
 				board.frozen = true
@@ -330,7 +342,8 @@ func _confirm_hero(id: String, display_name: String):
 func _cinematic_finished(kind: String):
 	if kind == "lock_in": go_home()
 	elif kind == "versus":
-		board.frozen = false; overlay = ""; _rebuild(); _schedule_ai(); _announce("ready")
+		board.frozen = false; overlay = ""
+		if not _maybe_tutorial(): _rebuild(); _schedule_ai(); _announce("ready")
 	elif kind in ["spotlight","draw"]:
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
@@ -395,7 +408,7 @@ func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = fa
 	_refresh_labels(); _rebuild()
 	sound.clear_announcer()
 	if present: _begin_versus()
-	else: _schedule_ai(); _announce("ready")
+	elif not _maybe_tutorial(): _schedule_ai(); _announce("ready")
 func _schedule_ai():
 	if _debug_capture or game.status != 0 or not overlay.is_empty() or (cinematic.active and cinematic.kind == "versus"): return
 	var should = mode == "computer" and game.turn != human_mark
@@ -412,6 +425,10 @@ func play_cell(b: int, c: int) -> bool:
 		transport.send_move(b,c,online_sequence+1); return true
 	return _apply_move(b,c)
 func _apply_move(b: int, c: int) -> bool:
+	# Online polling stays authoritative while the instructional board is showing.
+	if tutorial.active:
+		if not game.play(b,c): return false
+		_refresh_labels(); _save_match(); return true
 	var previous = Announcer.snapshot(game)
 	var player: int = game.turn
 	var pan = -.35 if player == human_mark else .35
@@ -527,12 +544,15 @@ func resume_game():
 		rival_character = "auric_rex" if profile.data.character_id != "auric_rex" else "vesper_vale"
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	page = "game"; overlay = ""; board.clear_effects(); _result_shown = false; _spotlight_done = false; cinematic.clear()
-	_refresh_labels(); _rebuild(); _schedule_ai()
+	_refresh_labels(); _rebuild()
+	if not _maybe_tutorial(): _schedule_ai()
 func go_home():
+	if tutorial.active: tutorial.skip()
 	_pending_game = {}; _select_player = 0
 	sound.clear_announcer()
 	_save_match(); _leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
 func show_settings():
+	if tutorial.active: return
 	# A non-modal claim pop (z 30) would paint over the modal; it is only flavour, drop it.
 	if cinematic.active and cinematic.kind == "pop": cinematic.clear()
 	overlay = "settings"; thinking = false; _rebuild()
@@ -610,7 +630,9 @@ func _receive_move(b: int, c: int, seq: int):
 func _receive_state(state: Dictionary, seq: int):
 	if seq == online_sequence and state.get("cells","") == game.serialize().cells: return
 	if game.deserialize(state):
-		online_sequence = seq; board.clear_effects(); _refresh_labels(); _refresh_history(); _schedule_ai()
+		online_sequence = seq; _refresh_labels(); _refresh_history()
+		if tutorial.active: return
+		board.clear_effects(); _schedule_ai()
 		if game.status != 0:
 			board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
 
@@ -621,7 +643,8 @@ func _online_room_update(data: Dictionary):
 		var winner = int(result.get("winner",-1))
 		if winner in [0,1,2]:
 			game.status = 3 if winner == 0 else winner; thinking = false
-			board.start_win([],game.status); _refresh_labels()
+			if not tutorial.active: board.start_win([],game.status)
+			_refresh_labels()
 	if data.get("status","") == "closed" and page == "online":
 		message = "This room is closed. Return to the lobby to play again."; _online_status()
 func _show_onboarding(destination: String):
@@ -638,11 +661,12 @@ func _account_player(player: Dictionary):
 func _account_completed():
 	message = ""
 	if page != "onboarding": return
-	if _onboarding_destination == "online": open_online()
-	else: go_home()
+	page = "email"; _email_draft = account.store.data.email; _rebuild()
 func _account_error(value: String):
 	message = value
-	if page == "onboarding":
+	if page == "email" or overlay == "account":
+		if is_instance_valid(email_view): email_view.set_status(message)
+	elif page == "onboarding":
 		if "not available" in value or "configured" in value or "reach" in value:
 			message = "Online server not available. You can still play vs Computer or Pass & Play."
 		if is_instance_valid(online_view):
@@ -650,6 +674,46 @@ func _account_error(value: String):
 			if online_view.controls.has("create_name"): online_view.controls.create_name.disabled = false
 	elif overlay == "settings": _settings_name_status()
 	elif page == "online": _online_status()
+func open_account_email():
+	_email_draft = account.store.data.email; message = ""; overlay = "account"; thinking = false; _rebuild()
+func _email_action(kind: String, value: String):
+	if kind == "save_email":
+		if not account.save_email(value): return
+	elif kind == "continue_email":
+		if page == "email": account.continue_without_email()
+	else: return
+	if page == "email":
+		if _onboarding_destination == "online": open_online()
+		else: go_home()
+	else:
+		message = "Email saved on this device. Not verified." if kind == "save_email" else ""
+		overlay = "settings"; _rebuild()
+func _build_email_screen(s: Vector2):
+	# Block keyboard focus as well as pointer input on the screen underneath.
+	for item in controls.values(): item.release_focus(); item.focus_mode = Control.FOCUS_NONE
+	email_view = EmailScreen.new(); email_view.size = s; email_view.email = _email_draft
+	email_view.verification_status = account.store.data.email_status
+	email_view.onboarding = page == "email"; email_view.status = message; email_view.z_index = 70
+	email_view.action.connect(_email_action); email_view.draft_changed.connect(func(value): _email_draft = value)
+	add_child(email_view); ui_nodes.append(email_view); controls.merge(email_view.controls,true)
+func _maybe_tutorial() -> bool:
+	if test_online_bypass or _debug_capture or settings.values.tutorial_completed: return false
+	start_tutorial(); return true
+func start_tutorial(replay: bool = false):
+	if tutorial.active: return
+	_tutorial_return_overlay = overlay if replay else ""
+	thinking = false; hint_busy = false; sound.clear_announcer(); callout.callout = ""
+	# A non-modal claim animation must not cover or finish during the demo.
+	if cinematic.active and cinematic.kind == "pop": cinematic.clear()
+	overlay = "tutorial"; tutorial.begin(board,layout,replay); _rebuild()
+func _tutorial_finished(_skipped: bool):
+	settings.set_value("tutorial_completed",true)
+	board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
+	_skip_guard_until = Time.get_ticks_msec()+SKIP_GUARD_MS
+	overlay = _tutorial_return_overlay; _refresh_labels(); _rebuild(); _schedule_ai()
+	if page == "game" and game.status != 0 and overlay.is_empty():
+		board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
+	elif page == "game" and overlay.is_empty(): _announce("ready")
 func _settings_name_status():
 	if controls.has("name_status"): controls.name_status.text = message
 func _online_status():
@@ -724,7 +788,7 @@ func _build_online_screen(s: Vector2):
 func _clear_nodes():
 	for n in ui_nodes:
 		if is_instance_valid(n): remove_child(n); n.queue_free()
-	ui_nodes.clear(); controls.clear(); online_view = null; history_label = null; _result_bases.clear(); field_heroes.clear(); hero_select = null
+	ui_nodes.clear(); controls.clear(); online_view = null; email_view = null; history_label = null; _result_bases.clear(); field_heroes.clear(); hero_select = null
 func _button(id: String, caption: String, rect: Rect2, callback: Callable, accent: bool = false, icon: String = ""):
 	var b = OrnateButton.new(); b.name = id; b.caption = caption; b.tooltip_text = caption if not caption.is_empty() else id.capitalize()
 	b.icon_kind = icon
@@ -758,10 +822,10 @@ func _u() -> float:
 func _rebuild():
 	if not is_instance_valid(board): return
 	_clear_nodes()
-	board.visible = page == "game"
+	board.visible = page == "game" or tutorial.active
 	board.mouse_filter = Control.MOUSE_FILTER_STOP if overlay.is_empty() else Control.MOUSE_FILTER_IGNORE
-	backdrop.title_mode = page != "game"
-	title_label.visible = page == "title"
+	backdrop.title_mode = page != "game" and not tutorial.active
+	title_label.visible = page == "title" and not tutorial.active
 	var s: Vector2 = layout.size
 	if page == "title": _title_controls(s)
 	elif page == "character_select":
@@ -799,12 +863,17 @@ func _rebuild():
 		if layout.has("history"): _create_history(layout.history)
 		_create_field_heroes()
 	elif page in ["online","onboarding","leaderboard"]: _build_online_screen(s)
+	elif page == "email": _build_email_screen(s)
 	if is_instance_valid(lobby_timer):
 		if page == "online" and online_state == "lobby" and not test_online_bypass and not _debug_capture:
 			if lobby_timer.is_stopped(): lobby_timer.start()
 		else:
 			lobby_timer.stop(); online_api.cancel_all(); _lobby_pending = false
-	if overlay == "result": _winner_controls(s)
+	if overlay == "tutorial":
+		for item in controls.values(): item.release_focus(); item.focus_mode = Control.FOCUS_NONE
+		tutorial.relayout(layout)
+	elif overlay == "account": _build_email_screen(s)
+	elif overlay == "result": _winner_controls(s)
 	elif not overlay.is_empty(): _overlay_controls(s)
 	queue_redraw()
 func _create_field_heroes():
@@ -867,12 +936,12 @@ func _title_controls(s: Vector2):
 		for item in items:
 			_button(item[0],item[1],Rect2(menu_x,y,bw,bh),item[2],item[3]); y += gap
 		_button("settings","Settings",Rect2(menu_x,y,bw*.48,44),show_settings)
-		_button("how","How to Play",Rect2(menu_x+bw*.52,y,bw*.48,44),func(): overlay = "how"; _rebuild())
+		_button("how","How to Play",Rect2(menu_x+bw*.52,y,bw*.48,44),func(): start_tutorial(true))
 	elif _title.landscape:
 		bh = clampf(s.y*.12,44,58)
 		var bw = minf(310,(s.x-40)*.36); var gap = bh+(8 if s.y < 420 else 14)
 		items.append(["settings","Settings",show_settings,false])
-		items.append(["how","How to Play",func(): overlay = "how"; _rebuild(),false])
+		items.append(["how","How to Play",func(): start_tutorial(true),false])
 		var y = maxf(_title.tagline.end.y+(8 if s.y < 420 else 12),s.y*.4 if s.y >= 420 else 0)
 		for i in range(items.size()):
 			var item = items[i]
@@ -885,7 +954,7 @@ func _title_controls(s: Vector2):
 		for item in items:
 			_button(item[0],item[1],Rect2(x,y,bw,bh),item[2],item[3]); y += gap
 		_button("settings","Settings",Rect2(x,y,bw*.48,44),show_settings)
-		_button("how","How to Play",Rect2(x+bw*.52,y,bw*.48,44),func(): overlay = "how"; _rebuild())
+		_button("how","How to Play",Rect2(x+bw*.52,y,bw*.48,44),func(): start_tutorial(true))
 func _create_history(rect: Rect2):
 	history_label = RichTextLabel.new(); history_label.position = rect.position+Vector2(10,24); history_label.size = rect.size-Vector2(20,30)
 	history_label.add_theme_font_override("normal_font",P.SANS); history_label.add_theme_font_size_override("normal_font_size",15)
@@ -905,9 +974,10 @@ func _overlay_controls(s: Vector2):
 	# An actual input shield prevents taps from reaching controls beneath a modal.
 	var shield = Control.new(); shield.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shield.mouse_filter = Control.MOUSE_FILTER_STOP; add_child(shield); ui_nodes.append(shield)
-	var short = s.x > s.y and s.y < 500
+	var short = s.x > s.y and (s.y < 500 or (overlay == "settings" and not layout.hinge.has_area()))
 	var pw = minf(740 if short else 480,s.x-28); var ph = minf(600,s.y-24)
 	if overlay == "setup": ph = minf(410,s.y-24)
+	if overlay == "settings" and not short: ph = minf(670,s.y-24)
 	if overlay == "result": pw = minf(pw,460); ph = minf(340,s.y-24)
 	_modal_rect = Rect2((s.x-pw)/2,(s.y-ph)/2,pw,ph)
 	if layout.hinge.size.x > 0:
@@ -926,9 +996,9 @@ func _overlay_controls(s: Vector2):
 		_button("choose_x","Play first",Rect2(r.position.x+24,y+(60 if short else 88),pw-48,48 if short else 56),func(): request_game("computer",1),true,"x")
 		_button("choose_o","Play second",Rect2(r.position.x+24,y+(118 if short else 156),pw-48,48 if short else 56),func(): request_game("computer",2),false,"o")
 	elif overlay == "settings":
-		var sw = (pw-72)*.5 if short else pw-48
+		var sw = (pw-88)/3 if short else pw-48
 		var lx = r.position.x+24
-		var rx = r.position.x+pw*.5+12 if short else lx
+		var rx = lx+sw+20 if short else lx
 		var y = r.position.y+70
 		for pair in [["sound","Sound"],["reduced_motion","Reduced motion"],["show_hints","Show hints"]]:
 			var key = pair[0]; var caption = pair[1]
@@ -940,13 +1010,16 @@ func _overlay_controls(s: Vector2):
 		_button("difficulty","AI: "+str(settings.values.difficulty),Rect2(rx,y,sw,44),func():
 			var levels = ["Easy","Medium","Hard"]; settings.set_value("difficulty",levels[(levels.find(settings.values.difficulty)+1)%3]); _rebuild())
 		y += 52
-		var name_field = _field("player_name","Screen name",Rect2(rx,y,sw,44),str(settings.values.player_name))
+		var name_x = rx+sw+20 if short else rx
+		var name_y = r.position.y+70 if short else y
+		var name_field = _field("player_name","Screen name",Rect2(name_x,name_y,sw,44),str(settings.values.player_name))
 		name_field.max_length = 24
 		if not test_online_bypass and not str(account.store.data.device_token).is_empty():
-			name_field.size.x = sw-90
-			_button("save_name","Save",Rect2(rx+sw-82,y,82,44),func(): account.rename(str(controls.player_name.text)))
+			var save_width = 60 if short else 82
+			name_field.size.x = sw-save_width-8
+			_button("save_name","Save",Rect2(name_x+sw-save_width,name_y,save_width,44),func(): account.rename(str(controls.player_name.text)))
 			name_field.text_submitted.connect(account.rename)
-			var notice = Label.new(); notice.position = Vector2(rx,y+46); notice.size = Vector2(sw,34)
+			var notice = Label.new(); notice.position = Vector2(lx,r.position.y+210) if short else Vector2(rx,y+46); notice.size = Vector2(pw-48,22) if short else Vector2(sw,34)
 			notice.text = message; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			notice.add_theme_font_override("font",P.SANS); notice.add_theme_font_size_override("font_size",16); notice.add_theme_color_override("font_color",P.PALE)
 			add_child(notice); ui_nodes.append(notice); controls["name_status"] = notice
@@ -954,8 +1027,15 @@ func _overlay_controls(s: Vector2):
 			name_field.text_changed.connect(func(value):
 				var clean = value.strip_edges().left(24)
 				settings.set_value("player_name",clean); profile.data.display_name = clean; profile.save())
+		_button("account_email","Account email",Rect2(lx,r.end.y-116,sw*.52-4,44),open_account_email)
+		_button("replay_tutorial","How to play",Rect2(lx+sw*.52+4,r.end.y-116,sw*.48-4,44),func(): start_tutorial(true))
 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
 		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
+		if short:
+			controls.account_email.position = Vector2(name_x,r.position.y+120); controls.account_email.size = Vector2(sw,44)
+			controls.replay_tutorial.position = Vector2(name_x,r.position.y+170); controls.replay_tutorial.size = Vector2(sw,44)
+			controls.done.size.x = (pw-48)*.48
+			controls.cosmetics.position.x = lx+(pw-48)*.52; controls.cosmetics.size.x = (pw-48)*.48
 	elif overlay == "cosmetics":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
 		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.BACKGROUNDS).name,Rect2(x,y,w,44),func():
@@ -1354,8 +1434,7 @@ func _draw_modal(node: Control):
 		if not short: P.text(node,"Choose difficulty, then your sigil",Rect2(r.position+Vector2(20,65),Vector2(r.size.x-40,25)),17,P.MUTED)
 		if not short: P.text(node,"X always weaves the first thread.",Rect2(r.position.x+20,r.end.y-48,r.size.x-40,24),16,P.GOLD)
 	elif overlay == "settings":
-		pass
-		if not short: P.text(node,"Preferences saved on this device.",Rect2(r.position.x+24,r.end.y-93,r.size.x-48,24),14,P.MUTED)
+		pass # The Account and tutorial row occupies this lane.
 	elif overlay == "cosmetics":
 		if not short: P.text(node,"Only your view changes. Heroes are shared.",Rect2(r.position.x+24,r.position.y+242,r.size.x-48,34),17,P.MUTED)
 	elif overlay == "how":
@@ -1486,6 +1565,15 @@ func _clip_preview():
 func debug_scenario(scenario: String, progress: float = .45):
 	if not OS.is_debug_build(): return
 	_debug_capture = true; clock = 4; backdrop.clock = 4; P.clock = 4
+	if scenario in ["tutorial","tutorial_claim","tutorial_win"]:
+		start_game("local"); start_tutorial(true)
+		var target = 3 if scenario == "tutorial_claim" else (4 if scenario == "tutorial_win" else 1)
+		for i in range(target): tutorial.next_step()
+		tutorial.age = 1; tutorial.set_process(false); tutorial.queue_redraw(); return
+	if scenario in ["email","account_email"]:
+		if scenario == "email": page = "email"; overlay = ""
+		else: page = "title"; overlay = "account"
+		_email_draft = "" if scenario == "email" else "weaver@example.com"; message = ""; _rebuild(); return
 	if scenario == "title": page = "title"; overlay = ""; board.clear_effects(); _rebuild(); return
 	if scenario in ["onboarding","online_lobby","online_private","online_leaderboard","online_unranked"]:
 		_leave_online(); cinematic.clear(); overlay = ""; message = ""

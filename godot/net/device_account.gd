@@ -5,6 +5,7 @@ const Roster = preload("res://characters/roster.gd")
 signal player_received(player: Dictionary)
 signal onboarding_complete
 signal name_updated(screen_name: String)
+signal email_changed(email: String, verification_status: String)
 signal error(message: String)
 var store = Store.new()
 var api = API.new()
@@ -12,6 +13,15 @@ var busy: bool = false
 var _name_draft: String = ""
 var _consent: Dictionary = {}
 var _rename: String = ""
+## Local-only boundary until PATCH /me explicitly supports email. Never probe by
+## sending personal data to an older API. Future verification belongs here.
+func save_email(value: String) -> bool:
+	if not store.keep_email(value):
+		error.emit("Enter a valid email, such as name@example.com."); return false
+	email_changed.emit(store.data.email,store.data.email_status)
+	return true
+func continue_without_email():
+	store.skip_email()
 func _ready():
 	api.completed.connect(_completed); add_child(api)
 func refresh():

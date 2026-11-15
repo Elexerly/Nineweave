@@ -73,17 +73,21 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 			r.history = Rect2(x+mh+12,310,pw-mh-12,maxf(44,mh-54))
 			r.controls = Rect2(x,h-70,pw,56)
 	else:
-		var left = clampf(w*.135,110,210)
-		var right = clampf(w*.21,190,300)
+		# Tablet composition from the art: tall player cards fill the left column, the board
+		# sits centre, and the right panel (header, Turn, Active Board card, controls) fills its column.
+		var left = clampf(w*.165,130,300)
+		var right = clampf(w*.23,210,380)
 		var bs = minf(h-64,w-left-right-80)
 		var bx = left+34+(w-left-right-80-bs)*.5
 		r.board = Rect2(bx,(h-bs)/2,bs,bs)
-		r.players = Rect2(20,h*.18,left-12,h*.62)
-		var rx = w-right+4
-		r.header = Rect2(rx,24,right-24,44)
-		r.turn = Rect2(rx,h*.22,right-24,48)
-		r.info = Rect2(rx,h*.22+62,right-24,minf(240,h*.38))
-		r.controls = Rect2(rx,h-100,right-24,64)
+		r.players = Rect2(20,h*.08,left-12,h*.84)
+		var rx = w-right+4; var rw = right-24
+		r.header = Rect2(rx,24,rw,52)
+		r.turn = Rect2(rx,92,rw,clampf(h*.075,48,76))
+		var ch = clampf(h*.08,56,80)
+		r.controls = Rect2(rx,h-24-ch,rw,ch)
+		var iy = r.turn.end.y+16
+		r.info = Rect2(rx,iy,rw,r.controls.position.y-16-iy)
 		if seam.size.x > 0:
 			# Also safe for a wide external display with an explicit seam.
 			var panel_left = seam.end.x+16

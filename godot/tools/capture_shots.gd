@@ -19,7 +19,7 @@ func capture():
 		elif arg.begins_with("--out="): out = arg.trim_prefix("--out=")
 		elif arg.begins_with("--progress="): progress = float(arg.trim_prefix("--progress="))
 		i += 1
-	if not scenario in ["title","midgame","claim","win","duo","duo_hinge","hinge","settings","online"]:
+	if not scenario in ["title","midgame","thinking","claim","claim_end","win","win_end","duo","duo_hinge","hinge","settings","online"]:
 		print("CAPTURE FAIL: unknown scenario ",scenario); quit(2); return
 	var main = Main.instantiate(); root.add_child(main)
 	main.set_view_size(Vector2(root.size)); main.settings.values.sound = false; main.sound.enabled = false
@@ -28,7 +28,9 @@ func capture():
 	main.set_process(false); main.backdrop.set_process(false); main.board.set_process(false)
 	main.clock = 4; main.backdrop.clock = 4; main.board.clock = 4
 	for particle in main.backdrop.find_children("*","CPUParticles2D",true,false): particle.emitting = false
-	main.queue_redraw(); main.backdrop.queue_redraw(); main.board.queue_redraw()
+	# Posed effects (particles, flashes, rays, result panel) are pure functions of progress;
+	# repaint every layer once with the pinned clocks.
+	main.debug_refresh()
 	for frame in range(8): await process_frame
 	await RenderingServer.frame_post_draw
 	var image = root.get_texture().get_image()

@@ -12,11 +12,11 @@ for suite in rules ai layout ui; do
   status=0
   "$GODOT" --headless --path "$ROOT" --script "res://tests/run_${suite}_tests.gd" >"$LOGS/$suite.log" 2>&1 || status=$?
   cat "$LOGS/$suite.log"
-  if [ "$status" -ne 0 ] || rg -q 'SCRIPT ERROR|Parse Error|^ERROR:|NINEWEAVE_.* FAIL' "$LOGS/$suite.log"; then failed=$((failed+1)); fi
+  if [ "$status" -ne 0 ] || rg -q 'SCRIPT ERROR|Parse Error|^ERROR:|^WARNING:|NINEWEAVE_.* FAIL' "$LOGS/$suite.log"; then failed=$((failed+1)); fi
 done
 if [ "$failed" -eq 0 ]; then
-  printf 'NINEWEAVE ROUND1 TEST SUMMARY: PASS (4/4 suites; rules, AI, layout, UI)\n'
+  printf 'NINEWEAVE ROUND2 TEST SUMMARY: PASS (4/4 suites; rules, AI, layout, UI)\n'
 else
-  printf 'NINEWEAVE ROUND1 TEST SUMMARY: FAIL (%s suites failed)\n' "$failed"
+  printf 'NINEWEAVE ROUND2 TEST SUMMARY: FAIL (%s suites failed)\n' "$failed"
 fi
 exit "$failed"

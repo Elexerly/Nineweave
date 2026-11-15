@@ -48,9 +48,51 @@ func run():
 	ok(ui.display_player() == 1,"winning player keeps the crown through victory")
 	ui.board.advance(4); ui._process(.01); await frames()
 	ok(ui.game.winner() == 1 and ui.overlay == "result" and ui.controls.has("again"),"win finishes in victory panel")
+	ok(ui._result_t >= .99 and ui.controls.again.visible and ui.controls.again.modulate.a > .95,"win panel fully visible at end of win animation")
+	ok(ui.info_lines()[0] == "Victory! X wins the game" and ui.active_label == "Victory! X wins the game","info pill shows the result after game over")
+	ok(not "Active Board" in ui.info_lines()[0] and not "Play your" in ui.info_lines()[1],"info pill no longer prompts a move after game over")
+	var states = ui.minimap_states()
+	var tint_ok = not states.has("active")
+	for b in range(9):
+		var want = {1:"x",2:"o",3:"sealed"}.get(ui.game.owners[b],"open")
+		tint_ok = tint_ok and states[b] == want
+	ok(tint_ok,"mini-map only tints owned boards after a win, no active board "+str(states))
+	ok(ui.mode == "computer" and ui._rival_name() == "Rival AI" and ui.side_name(2) == "Rival AI" and ui.is_rival_ai_shown(),"vs-computer shows Rival AI")
 	var digest = ui.game.compact()
 	ui.debug_preview_claim(4,2,.4); ui.debug_preview_win([0,4,8],1,.5)
 	ok(ui.game.compact() == digest,"preview effects cannot alter rules")
+	# Posed scenarios use real positions: drawn lines match genuine marks/owners.
+	ui.debug_scenario("claim",.45)
+	var claimed = ui.board.claims[0].board if not ui.board.claims.is_empty() else -1
+	ok(claimed >= 0 and ui.game.owners[claimed] == 1 and not ui.game.small_lines[claimed].is_empty(),"claim scenario poses a genuine claimed board")
+	var line_ok = claimed >= 0
+	if line_ok:
+		for c in ui.game.small_lines[claimed][0]: line_ok = line_ok and ui.game.cells[claimed*9+c] == 1
+	ok(line_ok,"claim beam passes through three real X marks")
+	ok(ui.mode == "computer" and ui._rival_name() == "Rival AI","capture scenarios use vs-computer with Rival AI")
+	var live = 0
+	if claimed >= 0:
+		for i in range(ui.board.CLAIM_PARTICLES):
+			if ui.board._particle(ui.board.claims[0],i,ui.board.tile_rect(claimed),.45).alpha > 0: live += 1
+	ok(live >= 60,"posed claim at 0.45 shows %d deterministic particles" % live)
+	ok(ui.board.scale.x > 1.0 or ui.board.reduced_motion,"posed claim applies the camera punch-in")
+	ok(ui.board.screen_flash().a > .02,"posed claim at 0.45 still shows the screen tint flash")
+	ui.debug_scenario("win",.45)
+	var big: Array = ui.board.win_fx.line
+	ok(big.size() == 3 and ui.game.status == 1 and ui.game.owners[big[0]] == 1 and ui.game.owners[big[1]] == 1 and ui.game.owners[big[2]] == 1,"win beam passes through three boards owned by the winner")
+	ok(ui.overlay == "","win panel hidden early in the win animation")
+	ok(ui.board.screen_flash().a > .01,"posed win at 0.45 keeps a colour wash")
+	ui.debug_scenario("win",.95)
+	ok(ui.overlay == "result" and ui.controls.has("again") and ui.controls.again.modulate.a > .95,"debug_preview_win at 0.95 shows the victory panel")
+	ui.debug_preview_win(big,1,.95)
+	ok(ui.overlay == "result" and ui._result_t >= .99,"debug_preview_win(line,player,0.95) keeps the panel visible")
+	ui.debug_scenario("win_end")
+	ok(ui.overlay == "result" and ui._victory_title() == "VICTORY","win_end scenario shows VICTORY panel")
+	ui.debug_scenario("claim_end")
+	ok(ui.board.claims.size() == 1 and is_equal_approx(ui.board.claim_phase(ui.board.claims[0]),1.0),"claim_end poses the settled emblem")
+	ui.debug_scenario("thinking")
+	ok(ui.thinking and ui.game.turn == 2 and ui._rival_name() == "Rival AI","thinking scenario shows the Rival AI thinking")
+	ui.thinking = false; ui._debug_capture = false; ui.overlay = ""
 	ui.show_settings(); await frames()
 	ui.controls.toggle_reduced_motion.pressed.emit()
 	ok(ui.settings.values.reduced_motion and ui.board.reduced_motion,"reduced motion setting applies")

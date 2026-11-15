@@ -40,6 +40,7 @@ func run():
 	await player_actions_preempt_polls()
 	await real_leave_dispatch()
 	await account_flow()
+	await outage_registration()
 	await onboarding_ui()
 	await controller_online()
 	await leaderboard_and_layout()
@@ -60,7 +61,16 @@ func urls_and_storage():
 	var copy = DeviceStore.new(store.path)
 	ok(copy.complete() and copy.data.device_token == "nwd_saved","device and consent persist")
 	ok(not copy.keep_device("nws_seat","Bad") and copy.data.device_token == "nwd_saved","seat cannot replace persistent device")
+	ok(not copy.keep_device("nwd_","Bad") and copy.data.device_token == "nwd_saved","empty device-token prefix cannot become an online credential")
 	copy.data.tos_version = "old"; ok(not copy.complete(),"new legal version requires onboarding")
+	var local = clean_store("local-consent")
+	local.accept_consent("Weaver",consent); local.data.pending_sync = true; local.save()
+	ok(local.complete() and not local.online_ready() and not local.has_device_token(),"local consent unlocks play without inventing a credential")
+	ok(DeviceStore.new(local.path).data.pending_sync,"pending sync survives restart")
+	for name in ["", "   ", "x".repeat(25)]:
+		local.data.screen_name = name; ok(not local.complete(),"stored invalid name cannot complete onboarding")
+	for name in ["X", "x".repeat(24)]:
+		local.data.screen_name = name; ok(local.complete(),"stored 1–24 character name completes onboarding")
 func json_boundary():
 	var api = API.new(); var fake = Fake.new(); api.base_url = ""; api.request_factory = func(): return fake
 	root.add_child(api); await frames(1)
@@ -197,9 +207,10 @@ func account_flow():
 	ok(patch.method == HTTPClient.METHOD_PATCH and patch.url.ends_with("/me") and patch.headers.has("Authorization: Bearer nwd_new"),"consent PATCH uses device")
 	ok(patch.body.age_confirmed == true and patch.body.tos_version == "2026-11-15" and patch.body.privacy_version == "2026-11-15" and str(patch.body.accepted_at).ends_with("Z"),"UTC consent payload on PATCH")
 	fake.respond(503,{"error":"Online server not available"})
-	ok(not a.store.complete() and a.store.data.device_token == "nwd_new" and complete.count == 0,"failed consent PATCH retains token and permits retry")
-	a.create_screen_name("Patrick"); ok(fake.requests.back().url.ends_with("/me"),"retry PATCHes existing account instead of registering again")
-	fake.respond(200,{"screen_name":"Patrick"}); ok(a.store.complete() and complete.count == 1 and DeviceStore.new(a.store.path).complete(),"consent saved only after successful server confirmation")
+	ok(a.store.complete() and not a.store.online_ready() and a.store.data.pending_sync and a.store.data.device_token == "nwd_new" and complete.count == 1,"consent outage completes locally and retains real token for sync")
+	var accepted_at = a.store.data.accepted_at
+	a.sync_pending(); ok(fake.requests.back().url.ends_with("/me") and fake.requests.back().body.accepted_at == accepted_at,"sync PATCHes existing account with original consent")
+	fake.respond(200,{"screen_name":"Patrick"}); ok(a.store.online_ready() and not a.store.data.pending_sync and complete.count == 1 and DeviceStore.new(a.store.path).online_ready(),"successful sync persists and never repeats onboarding completion")
 	a.rename("Taken"); fake.respond(409,{"error":"Name taken"}); ok(a.store.data.screen_name == "Patrick" and errors.back() == "Name taken","rename rejection keeps last accepted name")
 	# Current production rejects consent columns; local consent must still complete.
 	var legacy_bundle = make_account("legacy"); var legacy = legacy_bundle.account; var legacy_http = legacy_bundle.fake
@@ -215,6 +226,47 @@ func account_flow():
 	a.choose_hero("derrick_torque"); ok(fake.requests.back().body == {"last_hero_id":"devin_torque"},"hero PATCH canonicalized"); fake.respond(200,{})
 	var count = fake.requests.size(); a.choose_hero("unknown"); ok(fake.requests.size() == count,"unknown hero not patched")
 	a.refresh(); ok(fake.requests.back().method == HTTPClient.METHOD_GET and fake.requests.back().headers.has("Authorization: Bearer nwd_new"),"launch /me authentication"); fake.respond(200,{"screen_name":"Dana"})
+	a.free(); await frames()
+func outage_registration():
+	for outage in ["connect","timeout","immediate","server","unavailable","invalid-json"]:
+		var bundle = make_account("outage-"+outage); var a = bundle.account; var fake = bundle.fake
+		root.add_child(a)
+		var done = {"count":0}; a.onboarding_complete.connect(func(): done.count += 1)
+		if outage == "immediate": fake.immediate_error = ERR_CANT_CONNECT
+		a.create_screen_name("Local Weaver")
+		match outage:
+			"connect": fake.respond(0,{},HTTPRequest.RESULT_CANT_CONNECT)
+			"timeout": fake.respond(0,{},HTTPRequest.RESULT_TIMEOUT)
+			"server": fake.respond(503,{"error":"Maintenance"})
+			"unavailable": fake.respond(502,{"error":"Can't reach the server"})
+			"invalid-json": fake.respond(503,"<html>Service unavailable</html>")
+		ok(a.store.complete() and not a.store.online_ready() and not a.busy and done.count == 1,"outage completes locally: "+outage)
+		var stored = DeviceStore.new(a.store.path)
+		ok(stored.complete() and stored.data.pending_sync and stored.data.screen_name == "Local Weaver" and stored.data.device_token.is_empty(),"outage persists name, consent and pending registration without fake token: "+outage)
+		var original_consent = stored.data.accepted_at
+		var path = a.store.path; a.free(); await frames()
+		a = Account.new(); a.store = DeviceStore.new(path); fake = Fake.new(); a.api.request_factory = func(): return fake
+		root.add_child(a); a.refresh()
+		ok(a.store.complete() and fake.requests.size() == 1 and fake.requests[0].url.ends_with("/auth/device"),"next launch retries without blocking local play: "+outage)
+		ok(fake.requests[0].headers == API.authorization(""),"pending registration sends no bearer credential: "+outage)
+		fake.respond(201,{"token":"nwd_synced","player":{"screen_name":"Local Weaver"}})
+		ok(fake.requests.back().headers.has("Authorization: Bearer nwd_synced") and fake.requests.back().body.accepted_at == original_consent,"only real server token and original consent used for sync: "+outage)
+		fake.respond(200,{"screen_name":"Local Weaver"})
+		ok(DeviceStore.new(path).online_ready() and not a.busy,"successful background sync persists online readiness: "+outage)
+		a.free(); await frames()
+	# 4xx errors stay rejections even when fallback copy mentions availability.
+	for response in [400,401,403,404,409,422,429]:
+		var bundle = make_account("reject-"+str(response)); var a = bundle.account; var fake = bundle.fake
+		root.add_child(a); a.create_screen_name("Rejected"); fake.respond(response,{"error":"Online server not available"})
+		ok(not a.store.complete() and not a.store.data.pending_sync and not a.busy,"reachable rejection never accepts locally: "+str(response))
+		a.free(); await frames()
+	var bundle = make_account("consent-conflict"); var a = bundle.account; var fake = bundle.fake
+	root.add_child(a); a.create_screen_name("Rejected")
+	fake.respond(201,{"token":"nwd_registered","player":{"screen_name":"Rejected"}})
+	fake.respond(409,{"error":"Name taken"})
+	ok(not a.store.complete() and not a.store.data.pending_sync and not a.busy,"consent PATCH 409 never falls back to local acceptance")
+	a.create_screen_name("Available"); fake.respond(200,{"screen_name":"Available"})
+	ok(a.store.online_ready() and a.store.data.screen_name == "Available","consent conflict can retry against existing real token")
 	a.free(); await frames()
 func make_ui(name: String, bypass: bool = false):
 	var ui = Main.instantiate(); ui.test_online_bypass = bypass
@@ -239,6 +291,50 @@ func onboarding_ui():
 	ok(ui.online_view.agreement.get_theme_font_size("normal_font_size") == 18,"phone agreement comfortable body size")
 	ok(Screen.TERMS_URL in ui.online_view.agreement.text and Screen.PRIVACY_URL in ui.online_view.agreement.text,"Terms and Privacy absolute URLs wired into tappable links")
 	ok(ui.controls.create_name.caption == "Create Screen Name","exact create label")
+	ok(not ui.controls.has("offline") and not ui.controls.has("back") and not ui.controls.has("home"),"no offline, back or home control on mandatory name screen")
+	var agreement = "By creating a screen name, you agree to our Terms of Service and Privacy Policy and confirm you are 13 or older or have a parent or guardian's permission."
+	ok(ui.online_view.agreement.get_parsed_text() == agreement,"round 4e consent text unchanged exactly")
+	var saved_game = {"state":Rules.new().serialize(),"human":1,"seconds":12}
+	ui.settings.saved_game = saved_game
+	var paths = {
+		"go_home":func(): ui.go_home(),
+		"computer":func(): ui.request_game("computer"),
+		"pass-and-play":func(): ui.request_game("local"),
+		"request online":func(): ui.request_game("online"),
+		"resume_game":func(): ui.resume_game(),
+		"request_resume":func(): ui.request_resume(),
+		"open_online":func(): ui.open_online(),
+		"start_game":func(): ui.start_game("local"),
+		"character select":func(): ui.open_character_select(),
+		"demo create":func(): ui.create_online(true),
+		"demo join":func(): ui.join_online("N9ABC",true),
+		"live create":func(): ui.create_online(),
+		"live join":func(): ui.join_online("N9ABC"),
+		"leaderboard":func(): ui.open_leaderboard(),
+		"stale home action":func(): ui._online_action("home",""),
+		"settings":func(): ui.show_settings(),
+		"tutorial":func(): ui.start_tutorial(true),
+		"email":func(): ui.open_account_email(),
+		"close overlay":func(): ui._close_overlay(),
+		"QA position":func(): ui.debug_load_position(Rules.new().serialize()),
+	}
+	for path in paths:
+		paths[path].call()
+		ok(ui.page == "onboarding" and ui.overlay.is_empty() and not ui.board.visible and not ui.title_label.visible and not ui.cinematic.active,"first-run guard: "+path)
+		ok(ui.controls.has("create_name") and not ui.controls.has("computer") and ui.transport == null,"guard leaves only name form: "+path)
+	for key in [KEY_ESCAPE,KEY_BACK]:
+		var event = InputEventKey.new(); event.keycode = key; event.pressed = true; ui._input(event)
+		ok(ui.page == "onboarding" and ui.overlay.is_empty(),"Escape/back cannot dismiss onboarding: "+str(key))
+	ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST); ui.notification(Node.NOTIFICATION_WM_CLOSE_REQUEST)
+	ok(ui.page == "onboarding" and not auto_accept_quit and not quit_on_go_back,"Android back and window close cannot bypass or auto-dismiss first run")
+	for event in [InputEventMouseButton.new(),InputEventScreenTouch.new()]:
+		event.position = Vector2(1,1); event.pressed = true; ui._input(event)
+		ok(ui.page == "onboarding" and ui.online_view.mouse_filter == Control.MOUSE_FILTER_STOP,"outside pointer cannot dismiss name panel")
+	OS.set_environment("NW_SCENARIO","versus"); ui._clip_preview(); OS.unset_environment("NW_SCENARIO")
+	ok(ui.page == "onboarding" and not ui.test_online_bypass and not ui.cinematic.active,"QA deep link cannot opt real first launch out")
+	ui.page = "game"; ui.overlay = "setup"; ui._rebuild()
+	ok(ui.page == "onboarding" and ui.overlay.is_empty() and not ui.play_cell(0,0),"rebuild repairs stale/deep-linked playable screen")
+	ok(fake.requests.is_empty() and bundle.lobby.requests.is_empty(),"blocked routes perform no account or lobby requests")
 	var opened: Array = []; ui.online_view.link_opener = func(url): opened.append(url)
 	ui.online_view.agreement.meta_clicked.emit(Screen.TERMS_URL); ui.online_view.agreement.meta_clicked.emit(Screen.PRIVACY_URL)
 	ui.online_view.open_legal("https://example.invalid")
@@ -247,17 +343,16 @@ func onboarding_ui():
 	ui.controls.screen_name.text = "Patrick"; ui.controls.screen_name.text_changed.emit("Patrick"); ui.controls.create_name.pressed.emit()
 	ok(ui.controls.create_name.disabled,"submission guarded against duplicate registration")
 	fake.respond(409,{"error":"Name taken"}); ok(ui.page == "onboarding" and ui.online_view.status == "Name taken" and not ui.account.store.complete(),"name rejection stays on visible retry screen")
+	ui.go_home(); ok(ui.page == "onboarding" and not ui.controls.create_name.disabled,"409 cannot be bypassed and form remains retryable")
 	ui.controls.create_name.pressed.emit(); fake.respond(0,{},HTTPRequest.RESULT_CANT_CONNECT)
-	ok("You can still play vs Computer or Pass & Play." in ui.online_view.status and not ui.controls.create_name.disabled,"offline error and retry remain usable")
-	ui.controls.offline.pressed.emit(); ok(ui.page == "title" and ui.controls.has_all(["computer","local","online"]),"offline escape reaches playable title")
+	ok(ui.page == "email" and ui.account.store.complete() and ui.account.store.data.pending_sync,"outage creates local name and continues to optional email")
+	ui.controls.continue_email.pressed.emit(); ui.go_home()
+	ok(ui.page == "title" and ui.controls.has_all(["computer","local","online"]),"local name permits playable title after optional email")
 	ui.request_game("computer"); ok(ui.page == "character_select","computer not blocked by server")
 	ui.request_game("local"); ok(ui.page == "character_select","pass-and-play not blocked by server")
-	ui.go_home(); ui.request_online(); ok(ui.page == "onboarding","live online requires successful consent")
-	ui.controls.screen_name.text_changed.emit("Patrick"); ui.controls.create_name.pressed.emit()
+	ui.go_home(); ui.request_online(); ok(ui.page == "online" and fake.active and bundle.lobby.requests.is_empty(),"opening Online syncs local registration before fetching lobby")
 	fake.respond(201,{"token":"nwd_onboard","player":{"screen_name":"Patrick"}}); fake.respond(200,{"screen_name":"Patrick"})
-	ok(ui.page == "email","name creation offers optional email before entering online")
-	ui.controls.continue_email.pressed.emit()
-	ok(ui.page == "online" and ui.online_state == "lobby" and ui.account.store.complete(),"online entry continues to lobby after consent")
+	ok(ui.page == "online" and ui.online_state == "lobby" and ui.account.store.online_ready(),"synced registration unlocks live lobby without repeating optional email")
 	ok(bundle.lobby.requests.back().url.ends_with("/rooms") and not ui.lobby_timer.is_stopped(),"lobby fetch and 2.5-second refresh active")
 	bundle.lobby.respond(200,{"rooms":[{"code":"N9ABC","host_name":"Dana","host_hero":"nova_sable"}]})
 	ok(ui.public_rooms.size() == 1 and ui.online_view.list.get_child_count() == 1,"public rooms mapped into tappable list")

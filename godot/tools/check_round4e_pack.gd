@@ -17,8 +17,12 @@ func run():
 	ui.settings = Settings.new(settings_path); ui.settings.values.sound = false
 	ui.account.store = DeviceStore.new(device_path)
 	root.add_child(ui); ui.set_process(false); ui.set_view_size(Vector2(390,844))
-	# Enable first-play checks only after tree entry; startup HTTP stays disabled.
-	ui.test_online_bypass = false; ui.start_game("local")
+	# Real first-run checks stay offline, including in the packed release.
+	ui.test_online_bypass = false; ui.go_home(); ui.start_game("local")
+	check(ui.page == "onboarding" and not ui.controls.has("offline") and not ui.board.visible,"packed first-run name gate cannot be skipped")
+	ui.account.store.data.pending_sync = true
+	ui.account.store.accept_consent("Pack Weaver",DeviceStore.consent_payload())
+	ui.start_game("local")
 	check(ui.tutorial.active and ui.board.frozen,"packed first-play tutorial starts")
 	check(ui.tutorial.caption.text == "You play in any open square.","packed tutorial text loaded")
 	ui.tutorial.skip()

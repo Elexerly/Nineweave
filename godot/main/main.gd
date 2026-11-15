@@ -125,6 +125,8 @@ var _skip_guard_until: int = 0
 var _hint_ply: int = -1
 
 func _ready():
+	# Handle close/Android back ourselves so first-run onboarding cannot dismiss.
+	get_tree().auto_accept_quit = false; get_tree().quit_on_go_back = false
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop = Backdrop.new(); backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(backdrop)
 	board = Board.new(); board.game = game; board.cell_pressed.connect(play_cell); add_child(board)
@@ -157,6 +159,7 @@ func _ready():
 	account.player_received.connect(_account_player)
 	account.name_updated.connect(_account_name)
 	account.onboarding_complete.connect(_account_completed)
+	account.sync_finished.connect(_account_sync_finished)
 	account.error.connect(_account_error); add_child(account)
 	online_api.completed.connect(_online_response); add_child(online_api)
 	lobby_timer = Timer.new(); lobby_timer.wait_time = 2.5; add_child(lobby_timer); lobby_timer.timeout.connect(_refresh_lobby)
@@ -247,6 +250,8 @@ func _apply_preferences():
 	if is_instance_valid(hero_select): hero_select.reduced_motion = board.reduced_motion
 	for rig in field_heroes.values(): rig.reduced_motion = board.reduced_motion
 func _process(delta):
+	if _name_required() and (page != "onboarding" or not overlay.is_empty()):
+		_require_screen_name(); return
 	if _resize_pending and not get_viewport().gui_get_focus_owner() is LineEdit:
 		_resize_pending = false; _relayout(); _rebuild()
 	clock += delta
@@ -305,15 +310,18 @@ func _apply_result_anim():
 			controls[id].position = _result_bases[id]+Vector2(0,(1-e)*60)
 			controls[id].modulate.a = clampf(_result_t*1.4,0,1)
 func request_game(new_mode: String = "computer", mark: int = 1):
+	if _require_screen_name("online" if new_mode == "online" else "title"): return
 	if new_mode == "online": open_online(); return
 	_pending_game = {"mode":new_mode,"mark":mark}
 	_select_player = 1 if new_mode == "local" else 0; _local_picked = false
 	open_character_select()
 func open_character_select():
+	if _require_screen_name(): return
 	thinking = false; page = "character_select"; overlay = ""
 	_hero_focus = str(profile.data.character_id); _name_draft = str(profile.data.display_name)
 	_rebuild()
 func _confirm_hero(id: String, display_name: String):
+	if _require_screen_name(): return
 	if not Roster.valid(id): return
 	id = Roster.canonical_id(id)
 	if _select_player == 2:
@@ -348,6 +356,11 @@ func _cinematic_finished(kind: String):
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
 func _input(event):
+	if _name_required():
+		_require_screen_name()
+		if event is InputEventKey and (event.keycode in [KEY_ESCAPE,KEY_BACK] or event.is_action_pressed("ui_cancel")):
+			get_viewport().set_input_as_handled()
+		return
 	var pointer = event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT)
 	# A touch that skipped a modal cinematic is followed by its emulated mouse press and the
 	# release; swallow that one gesture so it cannot land on the newly shown Play Again/Menu.
@@ -392,6 +405,8 @@ func _result_controls_refresh():
 ## `rematch` (Play Again) keeps the same rival hero; a new game from the menu/setup
 ## re-rolls. Round 3c product default, reversible: pass rematch=false to always re-roll.
 func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false, present: bool = false):
+	if _require_screen_name(): return
+	if new_mode == "online" and not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
 	_leave_online()
 	cinematic.clear(); callout.callout = ""; _spotlight_done = false
 	var keep = (rematch or (new_mode == "local" and _local_picked)) and Roster.valid(rival_character) and rival_character != str(profile.data.character_id)
@@ -417,6 +432,7 @@ func _schedule_ai():
 		thinking = true; thinking_age = 0
 		ai.begin(game,str(settings.values.difficulty),ai_seed+game.history.size()*17)
 func play_cell(b: int, c: int) -> bool:
+	if _require_screen_name(): return false
 	if cinematic.active and cinematic.kind == "versus": return false
 	if page != "game" or not overlay.is_empty() or thinking or game.status != 0 or _input_beat > 0: return false
 	if mode == "computer" and game.turn != human_mark: return false
@@ -533,6 +549,7 @@ func _save_match():
 		settings.saved_game = {"state":game.serialize(),"human":human_mark,"seconds":match_seconds,"character":profile.data.character_id,"rival_character":rival_character} if game.status == 0 else {}
 		settings.save()
 func resume_game():
+	if _require_screen_name(): return
 	if settings.saved_game.is_empty(): return
 	if not game.deserialize(settings.saved_game.state): settings.saved_game = {}; return
 	mode = "computer"; _debug_capture = false; human_mark = int(settings.saved_game.human)
@@ -547,11 +564,13 @@ func resume_game():
 	_refresh_labels(); _rebuild()
 	if not _maybe_tutorial(): _schedule_ai()
 func go_home():
+	if _require_screen_name(): return
 	if tutorial.active: tutorial.skip()
 	_pending_game = {}; _select_player = 0
 	sound.clear_announcer()
 	_save_match(); _leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
 func show_settings():
+	if _require_screen_name(): return
 	if tutorial.active: return
 	# A non-modal claim pop (z 30) would paint over the modal; it is only flavour, drop it.
 	if cinematic.active and cinematic.kind == "pop": cinematic.clear()
@@ -565,14 +584,17 @@ func _leave_online():
 func request_online():
 	_pending_game = {}; _select_player = 0; open_online()
 func request_resume():
+	if _require_screen_name(): return
 	if not profile.data.onboarded:
 		_pending_game = {"mode":"resume","mark":human_mark}; open_character_select(); return
 	resume_game()
 func open_online():
+	if _require_screen_name("online"): return
 	_leave_online(); message = ""; room_code = ""; _room_password = ""
-	if not test_online_bypass and not _debug_capture and not account.store.complete():
-		_show_onboarding("online"); return
-	page = "online"; overlay = ""; online_state = "lobby"; _rebuild(); _refresh_lobby()
+	page = "online"; overlay = ""; online_state = "lobby"
+	if not test_online_bypass and not _debug_capture and not account.store.online_ready():
+		message = "Syncing your screen name for online play…"; _rebuild(); account.sync_pending(); return
+	_rebuild(); _refresh_lobby()
 func _attach_transport(t):
 	_leave_online(); transport = t
 	if t is HTTP: t.device_token = account.store.data.device_token
@@ -597,14 +619,16 @@ func _attach_transport(t):
 	t.error.connect(func(msg): message = msg; _rebuild())
 	if t is HTTP: t.room_updated.connect(_online_room_update)
 func create_online(demo: bool = false, private_game: bool = false, password: String = ""):
-	if not demo and not test_online_bypass and not account.store.complete(): _show_onboarding("online"); return
+	if _require_screen_name("online"): return
+	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
 	if private_game and (password.is_empty() or password.length() > 64):
 		message = "Use a private-room password with 1–64 characters."; _online_status(); return
 	_attach_transport(Loopback.new() if demo else HTTP.new())
 	if transport is HTTP: transport.private_room = private_game; transport.password = password
 	transport.create_room()
 func join_online(code: String, demo: bool = false, password: String = ""):
-	if not demo and not test_online_bypass and not account.store.complete(): _show_onboarding("online"); return
+	if _require_screen_name("online"): return
+	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
 	_attach_transport(Loopback.new() if demo else HTTP.new())
 	if transport is HTTP: transport.password = password
 	transport.join_room(code)
@@ -618,6 +642,8 @@ func _online_ready():
 	remote_ready = true; opponent_name = transport.remote_name; rival_character = transport.remote_character_id
 	human_mark = transport.seat; _reset_online_match()
 func _reset_online_match():
+	if _require_screen_name("online"): return
+	if not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	_spotlight_done = false; cinematic.clear(); _debug_capture = false
 	game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
@@ -647,8 +673,22 @@ func _online_room_update(data: Dictionary):
 			_refresh_labels()
 	if data.get("status","") == "closed" and page == "online":
 		message = "This room is closed. Return to the lobby to play again."; _online_status()
+func _name_required() -> bool:
+	return not test_online_bypass and not _debug_capture and not account.store.complete()
+func _require_screen_name(destination: String = "title") -> bool:
+	if not _name_required(): return false
+	if page != "onboarding" or not overlay.is_empty(): _show_onboarding(destination)
+	elif destination == "online": _onboarding_destination = destination
+	return true
+func _notification(what: int):
+	if what in [NOTIFICATION_WM_GO_BACK_REQUEST,NOTIFICATION_WM_CLOSE_REQUEST] and is_node_ready():
+		if _require_screen_name(): return
+		get_tree().quit()
 func _show_onboarding(destination: String):
 	_leave_online(); _onboarding_destination = destination; page = "onboarding"; overlay = ""
+	_pending_game = {}; _select_player = 0; thinking = false; hint_busy = false
+	if tutorial.active:
+		tutorial.active = false; tutorial.hide(); board.game = game
 	_onboarding_name = account.store.data.screen_name; message = ""; cinematic.clear(); _rebuild()
 func _account_name(value: String):
 	settings.set_value("player_name",value); profile.data.display_name = value; profile.save()
@@ -662,21 +702,28 @@ func _account_completed():
 	message = ""
 	if page != "onboarding": return
 	page = "email"; _email_draft = account.store.data.email; _rebuild()
+func _account_sync_finished():
+	if _require_screen_name("online" if page == "online" else "title"): return
+	if page != "online": return
+	message = "" if account.store.online_ready() else "Your screen name is saved on this device. Online server not available. Open Online again to retry."
+	_rebuild()
+	if account.store.online_ready(): _refresh_lobby()
 func _account_error(value: String):
+	_require_screen_name("online" if page == "online" else "title")
 	message = value
 	if page == "email" or overlay == "account":
 		if is_instance_valid(email_view): email_view.set_status(message)
 	elif page == "onboarding":
-		if "not available" in value or "configured" in value or "reach" in value:
-			message = "Online server not available. You can still play vs Computer or Pass & Play."
 		if is_instance_valid(online_view):
 			online_view.set_status(message)
 			if online_view.controls.has("create_name"): online_view.controls.create_name.disabled = false
 	elif overlay == "settings": _settings_name_status()
 	elif page == "online": _online_status()
 func open_account_email():
+	if _require_screen_name(): return
 	_email_draft = account.store.data.email; message = ""; overlay = "account"; thinking = false; _rebuild()
 func _email_action(kind: String, value: String):
+	if _require_screen_name(): return
 	if kind == "save_email":
 		if not account.save_email(value): return
 	elif kind == "continue_email":
@@ -700,6 +747,7 @@ func _maybe_tutorial() -> bool:
 	if test_online_bypass or _debug_capture or settings.values.tutorial_completed: return false
 	start_tutorial(); return true
 func start_tutorial(replay: bool = false):
+	if _require_screen_name(): return
 	if tutorial.active: return
 	_tutorial_return_overlay = overlay if replay else ""
 	thinking = false; hint_busy = false; sound.clear_announcer(); callout.callout = ""
@@ -720,9 +768,12 @@ func _online_status():
 	if is_instance_valid(online_view): online_view.set_status(message)
 func _refresh_lobby():
 	if test_online_bypass or _debug_capture or page != "online" or online_state != "lobby" or _lobby_pending: return
+	if _require_screen_name("online") or not account.store.online_ready(): return
 	_lobby_pending = true
 	online_api.submit("/rooms",HTTPClient.METHOD_GET,{},"lobby",account.store.data.device_token)
 func open_leaderboard():
+	if _require_screen_name("online"): return
+	if not test_online_bypass and not _debug_capture and not account.store.online_ready(): open_online(); return
 	_leave_online(); page = "leaderboard"; overlay = ""; message = "Loading match records…"; _rebuild()
 	if not test_online_bypass: online_api.submit("/leaderboard",HTTPClient.METHOD_GET,{},"leaderboard",account.store.data.device_token)
 func _online_response(operation: String, _response: int, data: Dictionary, problem: String):
@@ -752,6 +803,7 @@ static func leaderboard_payload(data: Dictionary) -> Dictionary:
 		if me.rank != null: me.rank = int(me.rank)
 	return {"players":players,"me":me}
 func _online_action(kind: String, value: String):
+	if kind != "register" and _require_screen_name("online" if kind != "home" else "title"): return
 	sound.cue("ui")
 	match kind:
 		"home": go_home()
@@ -821,6 +873,8 @@ func _u() -> float:
 	return 1.0
 func _rebuild():
 	if not is_instance_valid(board): return
+	if _name_required() and (page != "onboarding" or not overlay.is_empty()):
+		_show_onboarding("title"); return
 	_clear_nodes()
 	board.visible = page == "game" or tutorial.active
 	board.mouse_filter = Control.MOUSE_FILTER_STOP if overlay.is_empty() else Control.MOUSE_FILTER_IGNORE
@@ -865,7 +919,7 @@ func _rebuild():
 	elif page in ["online","onboarding","leaderboard"]: _build_online_screen(s)
 	elif page == "email": _build_email_screen(s)
 	if is_instance_valid(lobby_timer):
-		if page == "online" and online_state == "lobby" and not test_online_bypass and not _debug_capture:
+		if page == "online" and online_state == "lobby" and not test_online_bypass and not _debug_capture and account.store.online_ready():
 			if lobby_timer.is_stopped(): lobby_timer.start()
 		else:
 			lobby_timer.stop(); online_api.cancel_all(); _lobby_pending = false
@@ -1014,7 +1068,7 @@ func _overlay_controls(s: Vector2):
 		var name_y = r.position.y+70 if short else y
 		var name_field = _field("player_name","Screen name",Rect2(name_x,name_y,sw,44),str(settings.values.player_name))
 		name_field.max_length = 24
-		if not test_online_bypass and not str(account.store.data.device_token).is_empty():
+		if not test_online_bypass and account.store.complete():
 			var save_width = 60 if short else 82
 			name_field.size.x = sw-save_width-8
 			_button("save_name","Save",Rect2(name_x+sw-save_width,name_y,save_width,44),func(): account.rename(str(controls.player_name.text)))
@@ -1484,6 +1538,7 @@ func debug_preview_win(line: Array, player: int, progress: float):
 		_result_shown = true; overlay = "result"; _rebuild()
 	_sync_fx()
 func debug_load_position(serialized, as_mode: String = "computer") -> bool:
+	if _require_screen_name(): return false
 	if not OS.is_debug_build(): return false
 	thinking = false; hint_busy = false; _input_beat = 0; _debug_capture = true
 	if not game.deserialize(serialized): return false
@@ -1506,6 +1561,9 @@ func _debug_stage(moves: Array) -> Vector2i:
 ## Starts a live clip (no analytic seek) so a browser can verify playback. No-ops without params.
 ## On web the clips are downloaded first; this hook may wait for them (QA only, never used in play).
 func _clip_preview():
+	# URL/environment QA parameters cannot opt a real incomplete account out.
+	# Capture scripts must explicitly set test_online_bypass or debug_scenario.
+	if _require_screen_name(): return
 	var scenario = OS.get_environment("NW_SCENARIO") if OS.has_environment("NW_SCENARIO") else ""
 	var hero = OS.get_environment("NW_HERO") if OS.has_environment("NW_HERO") else ""
 	var rival = OS.get_environment("NW_RIVAL") if OS.has_environment("NW_RIVAL") else ""

@@ -17,7 +17,7 @@ func _initialize(): run.call_deferred()
 func frames(count: int = 2):
 	for i in range(count): await process_frame
 func path_for(id: String, kind: String) -> String: return "user://r4e-"+id+"-"+kind+".cfg"
-func make_ui(id: String, registered: bool = true, fresh: bool = true):
+func make_ui(id: String, registered: bool = true, fresh: bool = true, startup_reply: bool = true):
 	if fresh:
 		for kind in ["device","settings","profile"]:
 			var path = path_for(id,kind)
@@ -34,7 +34,7 @@ func make_ui(id: String, registered: bool = true, fresh: bool = true):
 	var fake = Fake.new(); ui.account.api.request_factory = func(): return fake
 	var lobby = Fake.new(); ui.online_api.request_factory = func(): return lobby
 	root.add_child(ui); ui.set_process(false); ui.set_view_size(Vector2(390,844))
-	if fake.active: fake.respond(200,{"screen_name":"Weaver"})
+	if fake.active and startup_reply: fake.respond(200,{"screen_name":"Weaver"})
 	return {"ui":ui,"http":fake,"lobby":lobby}
 func run():
 	await tutorial_first_play()
@@ -42,6 +42,7 @@ func run():
 	await tutorial_online_updates()
 	await tutorial_input()
 	await email_creation_paths()
+	await offline_first_play()
 	await email_editing_and_restart()
 	email_validation()
 	await responsive_forms()
@@ -168,10 +169,64 @@ func email_creation_paths():
 		ok(ui.page == "title","email choice is not prompted again after restart")
 		ui.free(); await frames()
 	var bundle = make_ui("email-online",false); var ui = bundle.ui
-	ui.controls.offline.pressed.emit(); ui.request_online(); create_name(bundle,"Weaver")
+	ok(not ui.controls.has("offline"),"first run has no offline/main-menu skip")
+	ui.request_online(); ok(ui.page == "onboarding","online request remains behind mandatory name")
+	create_name(bundle,"Weaver")
 	ok(ui.page == "email" and bundle.lobby.requests.is_empty(),"online destination waits for optional step")
 	ui.controls.continue_email.pressed.emit()
 	ok(ui.page == "online" and bundle.lobby.requests.size() == 1,"continue without email preserves online destination")
+	ui.free(); await frames()
+func offline_first_play():
+	var bundle = make_ui("offline-first",false); var ui = bundle.ui
+	ui.controls.screen_name.text_changed.emit("Offline Weaver"); ui.controls.create_name.pressed.emit()
+	bundle.http.respond(0,{},HTTPRequest.RESULT_TIMEOUT)
+	var consent_time = ui.account.store.data.accepted_at
+	ok(ui.page == "email" and ui.account.store.complete() and ui.account.store.data.pending_sync,"timeout creates local name and shows optional email")
+	ok(ui.account.store.data.device_token.is_empty() and ui.account.store.data.age_confirmed,"offline completion saves consent without a token")
+	ui.free(); await frames()
+	# A restart during optional email attempts sync but never blocks that step.
+	bundle = make_ui("offline-first",false,false,false); ui = bundle.ui
+	ok(ui.page == "email" and bundle.http.active and bundle.http.requests[0].url.ends_with("/auth/device"),"next launch syncs in background and resumes optional email")
+	bundle.http.respond(503,{"error":"Service unavailable"})
+	ok(ui.page == "email" and ui.account.store.complete() and not ui.account.busy,"repeated outage leaves optional email usable")
+	ui.controls.email.text = "offline@example.com"; ui.controls.save_email.pressed.emit()
+	ok(ui.page == "title" and ui.account.store.data.email == "offline@example.com","optional email still saves locally during outage")
+	ui.start_game("computer",1,false,true)
+	ok(ui.cinematic.active and not ui.tutorial.active,"offline local account keeps hero intro")
+	ui.cinematic.advance(.81); ui.cinematic.skip()
+	ok(ui.tutorial.active and ui.overlay == "tutorial","offline local account keeps first-play tutorial")
+	ui.tutorial.skip(); ui.go_home(); ui.open_online()
+	ok(ui.page == "online" and bundle.lobby.requests.is_empty() and bundle.http.active,"Online retries pending registration without unauthenticated lobby requests")
+	ui.create_online(); ui.join_online("N9ABC")
+	ok(ui.transport == null and bundle.lobby.requests.is_empty(),"pending registration cannot create or join live matches")
+	bundle.http.respond(0,{},HTTPRequest.RESULT_CANT_CONNECT)
+	ok(ui.page == "online" and "saved on this device" in ui.online_view.status and ui.account.store.data.pending_sync,"failed sync keeps local name with honest online status")
+	ui.go_home(); ui.resume_game()
+	ok(ui.page == "game" and not ui.tutorial.active,"local match remains resumable after failed online sync")
+	ui.go_home(); ui.free(); await frames()
+	bundle = make_ui("offline-first",false,false,false); ui = bundle.ui
+	ok(ui.page == "title" and ui.account.store.data.email_prompt_done and ui.settings.values.tutorial_completed,"restart preserves offline name, email decision and tutorial completion")
+	bundle.http.respond(201,{"token":"nwd_offline_synced","player":{"screen_name":"Offline Weaver"}})
+	ok(bundle.http.requests.back().body.accepted_at == consent_time,"later sync preserves original consent timestamp")
+	bundle.http.respond(200,{"screen_name":"Offline Weaver"})
+	ok(ui.page == "title" and ui.account.store.online_ready() and not DeviceStore.new(ui.account.store.path).data.pending_sync,"successful launch sync preserves menu and clears persisted pending flag")
+	ui.open_online()
+	ok(bundle.lobby.requests.size() == 1 and bundle.lobby.requests[0].headers.has("Authorization: Bearer nwd_offline_synced"),"live lobby uses actual server-issued token after sync")
+	ui.free(); await frames()
+	# If a locally chosen name is taken when service returns, resolve it on the
+	# mandatory form; retries and restarts must never silently accept a 409.
+	bundle = make_ui("offline-conflict",false); ui = bundle.ui
+	ui.controls.screen_name.text_changed.emit("Taken"); ui.controls.create_name.pressed.emit()
+	bundle.http.respond(503,{"error":"Unavailable"}); ui.controls.continue_email.pressed.emit(); ui.open_online()
+	bundle.http.respond(409,{"error":"Name taken"})
+	ok(ui.page == "onboarding" and "Name taken" in ui.online_view.status and not ui.account.store.complete(),"sync 409 returns to name form for retry")
+	ui.go_home(); ui.request_game("local"); ui.resume_game()
+	ok(ui.page == "onboarding","sync conflict cannot escape via navigation")
+	ui.free(); await frames()
+	bundle = make_ui("offline-conflict",false,false,false); ui = bundle.ui
+	ok(ui.page == "onboarding" and bundle.http.requests.is_empty(),"unresolved conflict remains on name screen after restart")
+	create_name(bundle,"Available")
+	ok(ui.page == "email" and ui.account.store.online_ready(),"replacement name can complete normally after conflict")
 	ui.free(); await frames()
 func email_editing_and_restart():
 	var bundle = make_ui("edit"); var ui = bundle.ui

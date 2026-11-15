@@ -36,7 +36,7 @@ class PublicRoomButton extends "res://ui/ornate_button.gd":
 		P.text(self,room,Rect2(size.x-92,5,80,30),20,P.BLUE)
 		P.text(self,hero_name,Rect2(12,35,size.x-24,24),17,P.WHITE,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 func _ready():
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mouse_filter = Control.MOUSE_FILTER_STOP if screen == "onboarding" else Control.MOUSE_FILTER_IGNORE
 	match screen:
 		"onboarding": _onboarding()
 		"leaderboard": _leaderboard()
@@ -102,7 +102,6 @@ func _onboarding():
 	add_child(agreement)
 	var create = _button("create_name","Create Screen Name",Rect2(x+8,top+330,width-16,52),"register","",true)
 	create.disabled = busy
-	_button("offline","Play Offline / Main Menu",Rect2(x+8,top+394,width-16,46),"home")
 	_status(Rect2(x+8,top+450,width-16,88))
 func _lobby():
 	_header("THE CELESTIAL ARENA")

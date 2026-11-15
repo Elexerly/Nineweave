@@ -3,7 +3,7 @@ extends RefCounted
 const TOS_VERSION = "2026-11-15"
 const PRIVACY_VERSION = "2026-11-15"
 var path: String
-var data: Dictionary = {"device_token":"","screen_name":"","tos_version":"","privacy_version":"","accepted_at":"","age_confirmed":false,"email":"","email_status":"not_verified","email_prompt_done":false}
+var data: Dictionary = {"device_token":"","screen_name":"","tos_version":"","privacy_version":"","accepted_at":"","age_confirmed":false,"pending_sync":false,"registration_rejected":false,"email":"","email_status":"not_verified","email_prompt_done":false}
 func _init(file_path: String = "user://nineweave-device.cfg"):
 	path = file_path; data = data.duplicate(true)
 	var cfg = ConfigFile.new()
@@ -17,7 +17,14 @@ func _init(file_path: String = "user://nineweave-device.cfg"):
 	data.email_status = "not_verified"
 	if not str(data.email).is_empty() and not valid_email(data.email): data.email = ""
 func complete() -> bool:
-	return str(data.device_token).begins_with("nwd_") and not str(data.screen_name).strip_edges().is_empty() and data.tos_version == TOS_VERSION and data.privacy_version == PRIVACY_VERSION and not str(data.accepted_at).is_empty() and data.age_confirmed
+	return valid_screen_name(data.screen_name) and data.tos_version == TOS_VERSION and data.privacy_version == PRIVACY_VERSION and not str(data.accepted_at).is_empty() and data.age_confirmed and not data.registration_rejected
+func has_device_token() -> bool:
+	return str(data.device_token).begins_with("nwd_") and str(data.device_token).length() > 4
+func online_ready() -> bool:
+	return complete() and has_device_token() and not data.pending_sync
+static func valid_screen_name(value: String) -> bool:
+	var clean = value.strip_edges()
+	return not clean.is_empty() and clean.length() <= 24
 static func consent_payload(utc: String = "") -> Dictionary:
 	return {"tos_version":TOS_VERSION,"privacy_version":PRIVACY_VERSION,"accepted_at":utc if not utc.is_empty() else Time.get_datetime_string_from_system(true)+"Z","age_confirmed":true}
 func save():
@@ -25,7 +32,7 @@ func save():
 	for key in data: cfg.set_value("device",key,data[key])
 	cfg.save(path)
 func keep_device(credential: String, screen_name: String):
-	if not credential.begins_with("nwd_"): return false
+	if not credential.begins_with("nwd_") or credential.length() <= 4: return false
 	data.device_token = credential; data.screen_name = screen_name; save(); return true
 func accept_consent(screen_name: String, payload: Dictionary):
 	data.screen_name = screen_name

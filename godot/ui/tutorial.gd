@@ -1,6 +1,7 @@
 extends Control
 ## Guided examples on the actual board renderer, with a separate rules model.
 ## No demo move enters the real match, undo stack, transport or resume save.
+## Auto-advances about three seconds per step; Skip remains, and a tap can jump ahead.
 const Rules = preload("res://kernel/rules.gd")
 const P = preload("res://ui/paint.gd")
 const ButtonArt = preload("res://ui/ornate_button.gd")
@@ -12,6 +13,8 @@ const STEPS = [
 	"Win three big boards in a row to win the match.",
 	"If sent to a full or won board, play in any open square.",
 ]
+## Long enough for the arrow to finish (0.65s) with a readable pause after.
+const STEP_SECONDS = 3.0
 signal finished(skipped: bool)
 var active: bool = false
 var step: int = 0
@@ -26,14 +29,14 @@ var counter: Label
 var _board_rect: Rect2
 var _caption_rect: Rect2
 var _advance_guard_until: int = 0
+var _mouse_echo: bool = false
+var _ignore_next_delta: bool = false
 func _ready():
 	z_index = 80; mouse_filter = Control.MOUSE_FILTER_STOP; hide()
 	counter = _label(17,P.GOLD); caption = _label(22,P.PALE)
-	for id in ["skip","next"]:
-		var button = ButtonArt.new(); button.name = id; button.font_size = 20; button.accent = id == "next"
-		button.pressed.connect(skip if id == "skip" else next_step)
-		add_child(button); controls[id] = button
-	controls.skip.caption = "Skip"
+	var button = ButtonArt.new(); button.name = "skip"; button.font_size = 20
+	button.caption = "Skip"; button.pressed.connect(skip)
+	add_child(button); controls.skip = button
 func _label(font_size: int, color: Color) -> Label:
 	var label = Label.new(); label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER; label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -51,12 +54,13 @@ func relayout(layout: Dictionary):
 	var w = size.x-x-16
 	counter.position = Vector2(x,12); counter.size = Vector2(w-100,44)
 	controls.skip.position = Vector2(x+w-90,12); controls.skip.size = Vector2(90,44)
-	_caption_rect = Rect2(x,62,w,maxf(56,_board_rect.position.y-70)) if portrait else Rect2(x,76,w,size.y-162)
+	# Next was removed; the caption can use the space that button used to occupy.
+	_caption_rect = Rect2(x,62,w,maxf(56,_board_rect.position.y-70)) if portrait else Rect2(x,76,w,size.y-100)
 	caption.position = _caption_rect.position; caption.size = _caption_rect.size
-	controls.next.position = Vector2(x,size.y-62); controls.next.size = Vector2(w,48)
 	queue_redraw()
 func _show_step():
-	age = 0; demo.new_game(); board.clear_effects(); board.frozen = true
+	age = 0; _ignore_next_delta = true
+	demo.new_game(); board.clear_effects(); board.frozen = true
 	if step <= 2:
 		demo.play(0,5)
 		if step == 0: demo.active_board = -1 # Reveal the destination on the next tap.
@@ -72,7 +76,6 @@ func _show_step():
 	elif step == 2: board.notify_move(5,7)
 	counter.text = "HOW TO PLAY · %d / %d" % [step+1,STEPS.size()]
 	caption.text = STEPS[step]
-	controls.next.caption = ("Return" if replay else "Let’s play") if step == STEPS.size()-1 else "Next · tap to continue"
 	board._dirty = true; board.refresh(); queue_redraw()
 func next_step():
 	if not active: return
@@ -83,21 +86,45 @@ func skip():
 func _finish(skipped: bool):
 	active = false; hide(); finished.emit(skipped)
 func _process(delta: float):
-	if active:
-		age += delta
-		for key in board.mark_ages: board.mark_ages[key] = age
-		board.refresh(); queue_redraw()
+	if not active: return
+	if _ignore_next_delta:
+		_ignore_next_delta = false
+		delta = 0
+	age += delta
+	for key in board.mark_ages: board.mark_ages[key] = age
+	board.refresh(); queue_redraw()
+	if age >= STEP_SECONDS: next_step()
 func arrow_progress() -> float:
 	return 1.0 if reduced_motion else smoothstep(0,.65,age)
+func _over_skip(point: Vector2) -> bool:
+	return is_instance_valid(controls.skip) and controls.skip.get_global_rect().grow(6).has_point(point)
+func _clear_mouse_echo(): _mouse_echo = false
+func _pointer_release(event) -> bool:
+	# Prefer _input so a sibling game-chrome button cannot swallow the gesture on web.
+	# Touch plus its emulated mouse must only advance once (350ms guard).
+	# The same mouse event can also arrive through both _input and _gui_input;
+	# _mouse_echo swallows that duplicate without blocking a later touch.
+	var is_touch = event is InputEventScreenTouch
+	var is_mouse = event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT
+	if not is_touch and not is_mouse: return false
+	if event.pressed: return true
+	var now = Time.get_ticks_msec()
+	if is_touch:
+		if now >= _advance_guard_until:
+			next_step(); _advance_guard_until = now+350
+		return true
+	if _mouse_echo or now < _advance_guard_until: return true
+	next_step(); _mouse_echo = true; _clear_mouse_echo.call_deferred()
+	return true
+func _input(event):
+	if not active or not visible: return
+	if _over_skip(event.position if event is InputEventFromWindow else Vector2(-1,-1)): return
+	if _pointer_release(event): get_viewport().set_input_as_handled()
 func _gui_input(event):
-	# Advance on release: one touch plus its synthetic mouse cannot skip two steps.
-	if event is InputEventScreenTouch:
-		if not event.pressed:
-			_advance_guard_until = Time.get_ticks_msec()+350; next_step()
-		accept_event()
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if not event.pressed and Time.get_ticks_msec() >= _advance_guard_until: next_step()
-		accept_event()
+	# Keep a GUI-path advance so a click on this overlay still jumps ahead when
+	# _input is not dispatched (unit tests call _gui_input directly).
+	if _over_skip(event.position if event is InputEventFromWindow else Vector2(-1,-1)): return
+	if _pointer_release(event): accept_event()
 func _unhandled_key_input(event):
 	if not active or not event is InputEventKey or not event.pressed or event.echo: return
 	if event.keycode == KEY_ESCAPE: skip()

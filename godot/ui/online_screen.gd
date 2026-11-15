@@ -76,7 +76,7 @@ func set_status(value: String):
 func _onboarding():
 	# Scroll only on short landscape. Phone body stays 18px and never shrinks to fit.
 	var width = minf(460,size.x-40); var x = (size.x-width)/2
-	var top = maxf(20,(size.y-566)/2)
+	var top = maxf(20,(size.y-498)/2)
 	if size.y < 600:
 		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,12); scroll.size = Vector2(width,size.y-24)
 		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; add_child(scroll)
@@ -84,7 +84,7 @@ func _onboarding():
 		content.busy = busy; content.size = Vector2(width-14,600); content.custom_minimum_size = Vector2(width-14,600)
 		content.action.connect(func(kind,value): action.emit(kind,value)); content.draft_changed.connect(func(kind,value): draft_changed.emit(kind,value))
 		scroll.add_child(content); controls = content.controls; agreement = content.agreement; status_label = content.status_label; return
-	_panel = Rect2(x-10,top,width+20,550)
+	_panel = Rect2(x-10,top,width+20,482)
 	_label("ENTER THE NINEWEAVE",Rect2(x+8,top+14,width-16,38),24,P.PALE,true)
 	_label("Choose the name your rivals will remember.",Rect2(x+8,top+58,width-16,48),18)
 	_name_rect = Rect2(x+8,top+118,width-16,64)
@@ -102,7 +102,7 @@ func _onboarding():
 	add_child(agreement)
 	var create = _button("create_name","Create Screen Name",Rect2(x+8,top+330,width-16,52),"register","",true)
 	create.disabled = busy
-	_status(Rect2(x+8,top+450,width-16,88))
+	_status(Rect2(x+8,top+394,width-16,76))
 func _lobby():
 	_header("THE CELESTIAL ARENA")
 	_button("leaderboard","Leaderboard",Rect2(size.x-164,12,148,44),"leaderboard")

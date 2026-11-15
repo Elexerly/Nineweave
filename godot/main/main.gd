@@ -51,6 +51,7 @@ var test_online_bypass: bool = false
 var online_view
 var email_view
 var _email_draft: String = ""
+var _email_code_draft: String = ""
 var tutorial
 var _tutorial_return_overlay: String = ""
 var lobby_timer: Timer
@@ -160,6 +161,7 @@ func _ready():
 	account.name_updated.connect(_account_name)
 	account.onboarding_complete.connect(_account_completed)
 	account.sync_finished.connect(_account_sync_finished)
+	account.email_flow_changed.connect(_account_email_flow_changed)
 	account.error.connect(_account_error); add_child(account)
 	online_api.completed.connect(_online_response); add_child(online_api)
 	lobby_timer = Timer.new(); lobby_timer.wait_time = 2.5; add_child(lobby_timer); lobby_timer.timeout.connect(_refresh_lobby)
@@ -722,10 +724,18 @@ func _account_error(value: String):
 func open_account_email():
 	if _require_screen_name(): return
 	_email_draft = account.store.data.email; message = ""; overlay = "account"; thinking = false; _rebuild()
+func _account_email_flow_changed():
+	if page != "email" and overlay != "account": return
+	message = account.email_message
+	_rebuild()
 func _email_action(kind: String, value: String):
 	if _require_screen_name(): return
 	if kind == "save_email":
 		if not account.save_email(value): return
+		if account.email_online_enabled(): return
+	elif kind == "confirm_email": account.confirm_email(value); return
+	elif kind == "resend_email": _email_code_draft = ""; account.request_email_verification(); return
+	elif kind == "change_email": _email_code_draft = ""; account.edit_email(); return
 	elif kind == "continue_email":
 		if page == "email": account.continue_without_email()
 	else: return
@@ -739,9 +749,12 @@ func _build_email_screen(s: Vector2):
 	# Block keyboard focus as well as pointer input on the screen underneath.
 	for item in controls.values(): item.release_focus(); item.focus_mode = Control.FOCUS_NONE
 	email_view = EmailScreen.new(); email_view.size = s; email_view.email = _email_draft
-	email_view.verification_status = account.store.data.email_status
+	email_view.set_verification_status(account.store.data.email_status)
+	email_view.code = _email_code_draft; email_view.challenge = account.email_challenge
+	email_view.busy = account.email_busy; email_view.pending = account.email_pending; email_view.retry_until = account.email_retry_until
 	email_view.onboarding = page == "email"; email_view.status = message; email_view.z_index = 70
 	email_view.action.connect(_email_action); email_view.draft_changed.connect(func(value): _email_draft = value)
+	email_view.code_changed.connect(func(value): _email_code_draft = value)
 	add_child(email_view); ui_nodes.append(email_view); controls.merge(email_view.controls,true)
 func _maybe_tutorial() -> bool:
 	if test_online_bypass or _debug_capture or settings.values.tutorial_completed: return false
@@ -924,7 +937,14 @@ func _rebuild():
 		else:
 			lobby_timer.stop(); online_api.cancel_all(); _lobby_pending = false
 	if overlay == "tutorial":
-		for item in controls.values(): item.release_focus(); item.focus_mode = Control.FOCUS_NONE
+		for item in controls.values():
+			item.release_focus(); item.focus_mode = Control.FOCUS_NONE
+			item.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			item.visible = false
+		# Game chrome is added after the tutorial node; later siblings can steal
+		# clicks on web even when the tutorial has a higher z_index. Keep it on top
+		# and exclusive for input. Home/Settings/Undo/Hint also overlapped Skip/Next.
+		move_child(tutorial,get_child_count()-1)
 		tutorial.relayout(layout)
 	elif overlay == "account": _build_email_screen(s)
 	elif overlay == "result": _winner_controls(s)
@@ -1557,7 +1577,7 @@ func _debug_stage(moves: Array) -> Vector2i:
 	_refresh_labels(); _rebuild()
 	return Vector2i(last[0],last[1])
 
-## Web QA hook: ?nw_scenario=versus|winner|winner_cpu&nw_hero=shard_jack&nw_rival=max_granite
+## Web QA hook: ?nw_scenario=versus|winner|winner_cpu|tutorial_auto&nw_hero=shard_jack&nw_rival=max_granite
 ## Starts a live clip (no analytic seek) so a browser can verify playback. No-ops without params.
 ## On web the clips are downloaded first; this hook may wait for them (QA only, never used in play).
 func _clip_preview():
@@ -1582,13 +1602,19 @@ func _clip_preview():
 	if not Roster.valid(rival) or Roster.canonical_id(rival) == hero:
 		rival = "max_granite" if hero != "max_granite" else "shard_jack"
 	rival = Roster.canonical_id(rival)
-	test_online_bypass = true
 	profile.data.onboarded = true
 	profile.data.character_id = hero
 	profile.data.display_name = "Patrick"
 	settings.values.player_name = "Patrick"
 	settings.values.reduced_motion = false
 	rival_character = rival
+	if scenario == "tutorial_auto":
+		# Needs an already-complete local account (URL cannot skip first-run name).
+		# Do not set test_online_bypass: that would suppress the first-play tutorial.
+		settings.values.tutorial_completed = false
+		start_game("computer",1,true,false)
+		return
+	test_online_bypass = true
 	hero_video.prefetch_pair(hero, rival)
 	var needed: Array = []
 	if scenario == "versus":
@@ -1628,10 +1654,24 @@ func debug_scenario(scenario: String, progress: float = .45):
 		var target = 3 if scenario == "tutorial_claim" else (4 if scenario == "tutorial_win" else 1)
 		for i in range(target): tutorial.next_step()
 		tutorial.age = 1; tutorial.set_process(false); tutorial.queue_redraw(); return
-	if scenario in ["email","account_email"]:
-		if scenario == "email": page = "email"; overlay = ""
-		else: page = "title"; overlay = "account"
-		_email_draft = "" if scenario == "email" else "weaver@example.com"; message = ""; _rebuild(); return
+	if scenario in ["email","account_email","email_code"]:
+		if scenario == "account_email": page = "title"; overlay = "account"
+		else: page = "email"; overlay = ""
+		_email_draft = "" if scenario == "email" else "weaver@example.com"
+		message = ""
+		if scenario == "email_code":
+			var now = int(Time.get_unix_time_from_system())
+			account.store.data.email = "weaver@example.com"
+			account.store.data.email_status = "not_verified"
+			account.email_pending = true
+			account.email_challenge = {
+				"challenge_id":"ec_capture",
+				"resend_available_at":Time.get_datetime_string_from_unix_time(now+83)+".000Z",
+				"expires_at":Time.get_datetime_string_from_unix_time(now+601)+".000Z",
+				"email":"weaver@example.com"
+			}
+			_email_code_draft = ""
+		_rebuild(); return
 	if scenario == "title": page = "title"; overlay = ""; board.clear_effects(); _rebuild(); return
 	if scenario in ["onboarding","online_lobby","online_private","online_leaderboard","online_unranked"]:
 		_leave_online(); cinematic.clear(); overlay = ""; message = ""

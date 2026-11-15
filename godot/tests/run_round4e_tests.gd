@@ -79,7 +79,7 @@ func tutorial_first_play():
 			3: ok(ui.tutorial.demo.owners[0] == 1 and ui.tutorial.demo.small_lines[0] == [[0,1,2]],"real kernel claims three cells")
 			4: ok(ui.tutorial.demo.status == 1 and ui.tutorial.demo.big_lines == [[0,1,2]],"real kernel wins three big boards")
 			5: ok(ui.tutorial.demo.active_board == -1 and ui.tutorial.demo.owners[0] == 1 and ui.tutorial.demo.legal_moves().size() > 9,"sent to won board grants open-board choice")
-		ui.tutorial.controls.next.pressed.emit()
+		ui.tutorial.next_step()
 	ok(not ui.tutorial.active and ui.board.game == ui.game and not ui.board.frozen,"completion restores real board")
 	ok(ui.game.serialize() == original and ui.thinking,"untouched opponent-first match resumes AI")
 	ok(Settings.new(ui.settings.path).values.tutorial_completed,"completion persists to user config")
@@ -270,7 +270,8 @@ func responsive_forms():
 	for view_size in [Vector2(360,640),Vector2(390,620),Vector2(390,844),Vector2(568,320),Vector2(844,390),Vector2(867,553),Vector2(1366,1024)]:
 		ui.set_view_size(view_size); ui.go_home(); ui.start_tutorial(true); await frames()
 		var viewport = Rect2(Vector2.ZERO,ui.layout.size)
-		for control in [ui.tutorial.controls.skip,ui.tutorial.controls.next,ui.tutorial.caption,ui.tutorial.counter]:
+		ok(not ui.tutorial.controls.has("next") or not ui.tutorial.controls.next.visible,"Next is not used; tutorial auto-advances")
+		for control in [ui.tutorial.controls.skip,ui.tutorial.caption,ui.tutorial.counter]:
 			ok(viewport.encloses(control.get_rect()),"tutorial content fits "+str(view_size))
 			ok(not control.get_rect().intersects(ui.layout.board),"tutorial copy/buttons never cover board "+str(view_size))
 		ok(ui.tutorial.caption.get_line_count()*ui.tutorial.caption.get_line_height() <= ui.tutorial.caption.size.y,"tutorial first sentence fits at readable size")

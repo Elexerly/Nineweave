@@ -1,17 +1,21 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import { databaseUrlLooksMisconfigured, resolveDatabaseUrl } from "../../scripts/database-url.mjs";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
-// An empty/whitespace DATABASE_URL (an easy misconfig in deploy UIs) must mean
-// "unset" — otherwise production would silently run on the PGLite fallback.
-const rawDatabaseUrl =
-  typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
-const databaseUrl =
-  rawDatabaseUrl && rawDatabaseUrl.trim() ? rawDatabaseUrl : undefined;
+// Connection string: a postgres `DATABASE_URL` (the deploy secret), else the
+// first postgres URL inside the local `NINEWEAVE_DATABASE_URL` alias. Empty or
+// whitespace values mean "unset". Never log the value.
+const databaseUrl = typeof process !== "undefined" ? resolveDatabaseUrl(process.env) : undefined;
+if (typeof process !== "undefined" && !databaseUrl && databaseUrlLooksMisconfigured(process.env)) {
+  console.warn(
+    "[db] DATABASE_URL is set but is not a postgres:// URL — using the PGLite fallback.",
+  );
+}
 
 /**
- * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured
+ * Active backend: real **Neon** (HTTP driver) when a database URL is set (deployed / configured
  * sandbox), otherwise a local embedded **PGLite** (Postgres compiled to WASM) so
  * the app has a working database even with nothing configured — the live preview
  * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
@@ -25,16 +29,20 @@ export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
  *   const sql = await getSql();
  *   const rows = await sql`select * from todos where id = ${id}`; // parameterized
  *   const rows2 = await sql.query("select * from todos where id = $1", [id]);
+ *
+ * `transaction()` runs a list of statements atomically (all commit or none).
+ * It is non-interactive — Neon's HTTP transaction — so read-modify-write code
+ * reads first, then commits its writes guarded by an optimistic version check.
  */
+export interface SqlStatement {
+  text: string;
+  params?: unknown[];
+}
+
 export interface Sql {
-  <T = Record<string, unknown>>(
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ): Promise<T[]>;
-  query<T = Record<string, unknown>>(
-    text: string,
-    params?: unknown[],
-  ): Promise<T[]>;
+  <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
+  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
+  transaction(statements: SqlStatement[]): Promise<Record<string, unknown>[][]>;
 }
 
 /**
@@ -52,7 +60,7 @@ const globalRef = globalThis as typeof globalThis & {
 
 /**
  * Result-type parity: Postgres sends every value as text plus a type OID — the
- * JS value is the DRIVER's parsing choice, and pg and PGLite disagree (pg:
+ * JS value is the DRIVER's parsing choice, and Neon (pg-types) and PGLite disagree (pg-types:
  * int8 -> string, date -> local-midnight Date; PGLite: int8 -> BigInt, which
  * JSON.stringify rejects, date -> UTC Date). Normalize both so preview and
  * production return identical, JSON-safe shapes:
@@ -68,9 +76,10 @@ const OID_INTERVAL = 1186;
 const identity = (v: string) => v;
 
 type Run = <T>(text: string, params: unknown[]) => Promise<T[]>;
+type RunTransaction = (statements: SqlStatement[]) => Promise<Record<string, unknown>[][]>;
 
 /** Wrap a query runner in the tagged-template + `.query()` `Sql` surface. */
-function toSql(run: Run): Sql {
+function toSql(run: Run, runTransaction: RunTransaction): Sql {
   const sql = (async <T = Record<string, unknown>>(
     strings: TemplateStringsArray,
     ...values: unknown[]
@@ -82,22 +91,33 @@ function toSql(run: Run): Sql {
   }) as unknown as Sql;
   sql.query = <T = Record<string, unknown>>(text: string, params: unknown[] = []) =>
     run<T>(text, params);
+  sql.transaction = runTransaction;
   return sql;
 }
 
 function createNeonSql(): Promise<Sql> {
   globalRef.__pgSqlPromise__ ??= (async () => {
-    // Regular Postgres driver: node-postgres (`pg`) — works directly with Neon's
-    // pooled endpoint. One pool per process; warm serverless instances reuse it.
-    const { Pool, types } = await import("pg");
-    types.setTypeParser(OID_INT8, Number);
-    types.setTypeParser(OID_DATE, identity);
-    types.setTypeParser(OID_INTERVAL, identity);
-    const pool = new Pool({ connectionString: databaseUrl });
-    return toSql(async <T>(text: string, params: unknown[]) => {
-      const res = await pool.query(text, params);
-      return res.rows as T[];
+    // Neon serverless driver over HTTPS (port 443): stateless, so it suits
+    // serverless instances and build boxes where TCP 5432 is blocked.
+    const { neon, types } = await import("@neondatabase/serverless");
+    const overrides: Record<number, (v: string) => unknown> = {
+      [OID_INT8]: Number,
+      [OID_DATE]: identity,
+      [OID_INTERVAL]: identity,
+    };
+    const neonSql = neon(databaseUrl!, {
+      types: {
+        getTypeParser: ((id: number, format?: "text" | "binary") =>
+          overrides[id] ?? types.getTypeParser(id, format)) as never,
+      },
     });
+    return toSql(
+      async <T>(text: string, params: unknown[]) => (await neonSql.query(text, params)) as T[],
+      async (statements) =>
+        (await neonSql.transaction(
+          statements.map((s) => neonSql.query(s.text, s.params ?? [])),
+        )) as Record<string, unknown>[][],
+    );
   })().catch((err) => {
     globalRef.__pgSqlPromise__ = undefined;
     throw err;
@@ -142,9 +162,7 @@ async function createPgliteSql(): Promise<Sql> {
       import: "default",
       eager: true,
     }) as Record<string, string>;
-    const doneRows = await pg.query<{ name: string }>(
-      "select name from _migrations",
-    );
+    const doneRows = await pg.query<{ name: string }>("select name from _migrations");
     const done = doneRows.rows.map((r) => r.name);
     for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) {
       // Apply + record atomically (parity with scripts/migrate.mjs) so a failed
@@ -161,10 +179,20 @@ async function createPgliteSql(): Promise<Sql> {
   globalRef.__pgliteMigrateChain__ = pass;
   await pass;
 
-  return toSql(async <T>(text: string, params: unknown[]) => {
-    const result = await pg.query<T>(text, params);
-    return result.rows;
-  });
+  return toSql(
+    async <T>(text: string, params: unknown[]) => {
+      const result = await pg.query<T>(text, params);
+      return result.rows;
+    },
+    (statements) =>
+      pg.transaction(async (tx) => {
+        const out: Record<string, unknown>[][] = [];
+        for (const s of statements) {
+          out.push((await tx.query<Record<string, unknown>>(s.text, s.params ?? [])).rows);
+        }
+        return out;
+      }),
+  );
 }
 
 let sqlPromise: Promise<Sql> | null = null;
@@ -180,7 +208,7 @@ async function createSql(): Promise<Sql> {
 }
 
 /**
- * Get the shared, **server-only** SQL client. Neon when `DATABASE_URL` is set,
+ * Get the shared, **server-only** SQL client. Neon when a database URL is set,
  * otherwise the local PGLite fallback. Memoized — safe to call per request.
  *
  * Schema comes from `migrations/*.sql`, auto-applied before the first query on
@@ -214,7 +242,7 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
  *
  * - **PGLite** (preview / no `DATABASE_URL`): open the in-memory DB and apply
  *   `migrations/*.sql`. Idempotent — concurrent callers share one promise.
- * - **Neon**: no-op (pool is created lazily on first query).
+ * - **Neon**: no-op (the HTTP client is created lazily on first query).
  *
  * Vite `configureServer` awaits this at dev startup; production imports of this
  * module kick it off immediately (see bottom of file).

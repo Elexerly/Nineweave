@@ -40,7 +40,7 @@ BRANCH=$(cd "$ROOT/.." && git branch --show-current 2>/dev/null || printf unknow
 TREE='clean committed tree'
 [ -z "$(cd "$ROOT/.." && git status --porcelain 2>/dev/null)" ] || TREE='UNCOMMITTED CHANGES PRESENT (not a pure commit build)'
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 3c
+Nineweave Round 3e
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE

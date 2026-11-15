@@ -32,7 +32,11 @@ func run():
 	ok(ui.game.cells[4] == 1 and ui.turn_label == "Turn: O" and ui.active_label == "Active Board: Center","pointer move updates labels")
 	ok(not ui.play_cell(0,0) and ui.board.invalid_board == 0,"invalid board feedback")
 	ok(ui.play_cell(4,0),"reply legal")
-	ok(ui.undo_move() and ui.game.history.size() == 1 and ui.active_label == "Active Board: Center","undo updates labels")
+	# Round 3e: Undo/Hint are vs-computer only; pass-and-play refuses them.
+	ok(not ui.undo_move() and ui.game.history.size() == 2,"pass-and-play undo refused")
+	ui.request_hint(); ok(not ui.hint_busy,"pass-and-play hint refused")
+	ui.start_game("computer",1); ui.play_cell(4,4); ui.thinking = false
+	ok(ui.undo_move() and ui.game.history.is_empty() and ui.active_label == "Active Board: Any","undo updates labels")
 	ui.request_hint()
 	for i in range(200):
 		ui.hint_ai.step(5000)

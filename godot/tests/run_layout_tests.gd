@@ -25,6 +25,7 @@ func run():
 	ok(normal.hero_player.size.y >= 150 and normal.hero_player_host == "character","867x553 player figure uses the Duo panel")
 	var phone = L.compute(Vector2(390,844))
 	ok(phone.hero_opponent.position.y > phone.controls.end.y and phone.hero_opponent.size.y >= 90,"390x844 rival bust mirrored at bottom-right, uncropped size")
+	ok(phone.board.size.x == 370 and phone.board.position.x == 10,"390x844 edge-to-edge board (Round 3e) "+str(phone.board))
 	print("NINEWEAVE_LAYOUT ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures," sizes=",cases.size())
 	quit(0 if failures == 0 else 1)
 func inspect(s: Vector2, hinge: Rect2, expected: String):
@@ -52,6 +53,12 @@ func inspect(s: Vector2, hinge: Rect2, expected: String):
 	ok(not layout.message.intersects(layout.controls) and viewport.encloses(layout.message),id+" message lane clear of controls")
 	if layout.mode == "duo_landscape": ok(layout.hero_player.size.y >= 120,id+" Duo player figure readable "+str(layout.hero_player))
 	var rects = L.major_rects(layout)
+	if layout.mode == "phone_portrait":
+		# Round 3e: the header row holds back · TURN · gear, so the header is its two buttons.
+		rects.erase("header")
+		rects["home"] = Rect2(layout.header.position,Vector2(44,44))
+		rects["settings"] = Rect2(layout.header.end.x-44,layout.header.position.y,44,44)
+		ok(layout.info.size.y == 0,id+" no info panel on phone portrait")
 	for key in rects:
 		ok(viewport.encloses(rects[key]),id+" inside "+key+" "+str(rects[key]))
 		for other in rects:

@@ -409,7 +409,9 @@ func info_lines() -> Array:
 	var tail = "in any open board." if game.active_board == -1 else "in this 3×3 board."
 	return ["Active Board: "+board_name,"Play your "+("X" if game.turn == 1 else "O")+" "+tail]
 func undo_move() -> bool:
+	# Round 3e: Undo exists only against the computer (spec item 1).
 	if mode == "online": message = "Online moves are final. Start another room to play again."; return false
+	if mode != "computer": return false
 	thinking = false; hint_busy = false; sound.clear_announcer(); callout.callout = ""
 	var did = game.undo()
 	if mode == "computer" and did and game.turn != human_mark and not game.history.is_empty(): game.undo()
@@ -419,6 +421,7 @@ func undo_move() -> bool:
 func request_hint():
 	if game.status != 0 or thinking or not settings.values.show_hints: return
 	if mode == "online": message = "Hints are disabled in online games."; return
+	if mode != "computer": return
 	hint_ai.begin(game,"Hard",444+game.history.size()); hint_busy = true; _hint_ply = game.history.size()
 func _save_match():
 	if mode == "computer" and page == "game" and not _debug_capture:
@@ -559,15 +562,16 @@ func _rebuild():
 		_button("home","" if not big else "",Rect2(hdr.position,Vector2(hb,hb)),go_home,false,"home" if big else "back")
 		_button("settings","⚙",Rect2(Vector2(hdr.end.x-hb,hdr.position.y),Vector2(hb,hb)),show_settings)
 		var cr: Rect2 = layout.controls
-		if layout.mode in ["phone_portrait","tablet_portrait"]:
+		# Round 3e: Undo/Hint only vs the computer; the X/O tiles stay centred without them.
+		if mode != "computer": pass
+		elif layout.mode in ["phone_portrait","tablet_portrait"]:
 			var unit = minf(cr.size.x/4-9,84 if layout.mode == "tablet_portrait" else 72)
 			_button("undo","Undo",Rect2(cr.position,Vector2(unit,cr.size.y)),undo_move,false,"undo")
 			_button("hint","Hint",Rect2(cr.end-Vector2(unit,cr.size.y),Vector2(unit,cr.size.y)),request_hint,false,"hint")
 		else:
 			_button("undo","Undo",Rect2(cr.position,Vector2(cr.size.x*.48,cr.size.y)),undo_move,false,"undo")
 			_button("hint","Hint",Rect2(cr.position+Vector2(cr.size.x*.52,0),Vector2(cr.size.x*.48,cr.size.y)),request_hint,false,"hint")
-		controls.undo.disabled = mode == "online"
-		controls.hint.disabled = mode == "online" or not settings.values.show_hints
+		if controls.has("hint"): controls.hint.disabled = not settings.values.show_hints
 		if layout.has("history"): _create_history(layout.history)
 		_create_field_heroes()
 	elif page == "online": _online_controls(s)
@@ -803,7 +807,7 @@ func _draw_game():
 	if not board.win_fx.is_empty(): _draw_victory_rays(board.win_progress(),int(board.win_fx.player))
 	_draw_players(layout.players,layout.mode == "landscape")
 	_draw_turn(layout.turn,u)
-	_draw_info(layout.info,layout.mode == "landscape",u)
+	if layout.info.size.y > 0: _draw_info(layout.info,layout.mode == "landscape",u)
 	if layout.has("minimap"): _draw_minimap(layout.minimap)
 	if layout.has("stats"): _draw_stats(layout.stats)
 	if layout.has("character"):
@@ -823,9 +827,22 @@ func _draw_game():
 			P.panel(self,rr,on and p == 1,1,true)
 			if on and p == 2: P.outline(self,rr.grow(-5),Color(1,.8,.35,.9),2)
 			P.mark(self,rr.get_center(),tile*.3,p,1 if on or game.status != 0 else .55,1.3 if on else .8)
+	if layout.mode == "phone_portrait":
+		_draw_phone_lane(layout.message)
+		return
 	if not message.is_empty():
 		P.text(self,message,layout.message,12,P.GOLD)
 	if hint_busy: P.text(self,"Reading the threads…",Rect2(layout.board.position.x,layout.board.end.y-22,layout.board.size.x,20),14,P.PALE)
+## Round 3e phone portrait has no info panel: one slim lane under the board carries
+## messages, "Reading the threads…", the result, else a quiet "Play X in Center" hint.
+func _draw_phone_lane(r: Rect2):
+	var fs = int(minf(13,r.size.y-2))
+	if not message.is_empty(): P.text(self,fit_label(message,r.size.x,fs),r,fs,P.GOLD)
+	elif hint_busy: P.text(self,"Reading the threads…",r,fs,P.PALE)
+	elif game.status != 0: P.text(self,result_line(),r,fs,P.mark_color(game.status) if game.status != 3 else P.MUTED)
+	else:
+		var where = "any open board" if game.active_board == -1 else Rules.BOARD_NAMES[game.active_board]
+		P.text(self,"Play "+("X" if game.turn == 1 else "O")+" in "+where,r,fs,Color(P.MUTED,.9))
 func _draw_turn(r: Rect2, u: float):
 	P.panel(self,r,false,1,r.size.y >= 34)
 	var fs = int(clampf(r.size.y*.56,15,28)*minf(u,1.2))

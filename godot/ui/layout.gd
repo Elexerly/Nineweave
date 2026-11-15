@@ -24,7 +24,9 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 	if seam.size.x > 0: mode = "duo_landscape"
 	var r = {"mode":mode,"size":s,"scale":scale,"touch":44.0,"hinge":seam}
 	var w = s.x; var h = s.y; var margin = 12.0
-	if mode == "phone_portrait" or mode == "tablet_portrait":
+	if mode == "phone_portrait":
+		_phone_portrait(r,w,h)
+	elif mode == "tablet_portrait":
 		var board_size = minf(w-24,h-318)
 		if mode == "tablet_portrait": board_size = minf(w-56,h-332)
 		var by = 174+clampf((h-w-304)*.16,0,30)
@@ -107,18 +109,21 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 	# Corner overlays never enter the board, the fold, or any HUD rect (Round 3b).
 	# A side whose corner has no readable space gets an empty rect: main then makes
 	# that side's scorecard figure the live reacting character instead.
-	r.message = Rect2(16,h-20,w-32,18)
-	# Short phones put controls at h-74; keep the message lane below them, never over the buttons.
-	if r.message.position.y < r.controls.end.y+1:
-		r.message = Rect2(16,r.controls.end.y+1,w-32,maxf(10,h-r.controls.end.y-2))
+	if mode != "phone_portrait":
+		r.message = Rect2(16,h-20,w-32,18)
+		# Short phones put controls at h-74; keep the message lane below them, never over the buttons.
+		if r.message.position.y < r.controls.end.y+1:
+			r.message = Rect2(16,r.controls.end.y+1,w-32,maxf(10,h-r.controls.end.y-2))
 	var own = Rect2(); var rival = Rect2()
 	r.hero_player_host = ""
-	if mode == "duo_portrait":
+	if mode == "phone_portrait":
+		own = r.hero_player; rival = r.hero_opponent
+	elif mode == "duo_portrait":
 		r.minimap.position.x = 116
 		r.character = Rect2(216,r.character.position.y,maxf(40,w-440),88)
 		var oh = minf(104,r.message.position.y-6-r.minimap.position.y)
 		if oh >= MIN_CORNER: own = Rect2(12,r.minimap.position.y,92,oh)
-	elif mode in ["phone_portrait","tablet_portrait"]:
+	elif mode == "tablet_portrait":
 		# Mirrored busts in the strip under the control row, above the message lane.
 		var top = r.controls.end.y+10
 		var oh = minf(124,r.message.position.y-6-top)
@@ -146,6 +151,45 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 	# Tablet/desktop landscape: the tall scorecards already hold full figures; they react live.
 	r.hero_player = own; r.hero_opponent = rival
 	return r
+## Round 3e phone portrait (Safari's visible viewport is short): one header row with
+## back · TURN · gear, a full-width scorecard row, an edge-to-edge square board, a slim
+## message/hint lane, then Undo · X/O · Hint pinned near the bottom. No info panel
+## (r.info is empty; the cyan glow marks the active board). Spare height goes first to
+## corner busts (only when they read), then centres the board between top and controls.
+const PHONE_SIDE = 10.0
+const PHONE_CORNER_MIN = 80.0
+## The X/O tiles overhang the control row by 4 px (main._draw_game), so the row ends
+## 12 px above the bottom: tiles keep an 8 px margin.
+const PHONE_BOTTOM = 12.0
+static func _phone_portrait(r: Dictionary, w: float, h: float):
+	var hy = 6.0; var ph = 52.0; var gap_top = 8.0; var ch = 48.0; var lane = 16.0
+	var bs = w-PHONE_SIDE*2
+	var fixed = hy+44+4+ph+gap_top+2+lane+6+ch+PHONE_BOTTOM
+	if h-fixed < bs:
+		# Height-limited: tighten the chrome first, then shrink the board.
+		hy = 4.0; ph = 46.0; gap_top = 4.0; ch = 44.0; lane = 14.0
+		fixed = hy+44+4+ph+gap_top+2+lane+6+ch+PHONE_BOTTOM
+		bs = maxf(120,minf(bs,h-fixed))
+	r.header = Rect2(8,hy,w-16,44)
+	r.turn = Rect2(8+44+8,hy+7,w-16-88-16,30)
+	r.players = Rect2(12,hy+48,w-24,ph)
+	var spare = h-fixed-bs
+	var bottom = h-PHONE_BOTTOM
+	var oh = minf(124,spare-34)
+	if oh >= PHONE_CORNER_MIN:
+		var ow = minf(120,w*.29)
+		r.hero_player = Rect2(8,h-6-oh,ow,oh)
+		r.hero_opponent = Rect2(w-8-ow,h-6-oh,ow,oh)
+		bottom = r.hero_player.position.y-8
+	else:
+		r.hero_player = Rect2(); r.hero_opponent = Rect2()
+	r.controls = Rect2(20,bottom-ch,w-40,ch)
+	var top = r.players.end.y+gap_top
+	var block = bs+2+lane+6
+	var by = top+maxf(0,(r.controls.position.y-top-block)*.5)
+	r.board = Rect2((w-bs)/2,by,bs,bs)
+	r.message = Rect2(16,r.board.end.y+2,w-32,lane)
+	r.info = Rect2()
 ## Below this height a bust no longer reads as a character.
 const MIN_CORNER = 56.0
 ## HUD rects a corner character must never cover (board excluded; checked separately).

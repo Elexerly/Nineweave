@@ -124,14 +124,47 @@ func last_move_rect() -> Rect2:
 	if last_move_whole: return r
 	var cell_size = r.size/3.0
 	return Rect2(r.position+Vector2(last_move.y%3,last_move.y/3)*cell_size,cell_size).grow(-1.4)
+## Round 3e: the opponent's last move is a warm gold glow (distinct from the cool cyan
+## active-board glow). Low-alpha fill so the X/O stays fully readable.
+const LAST_MOVE_GOLD = Color("ffd54a")
+const LAST_MOVE_FILL_ALPHA = .18
+const LAST_MOVE_POP = .35
+## Settled core-line alpha; tests require it to stay clearly visible.
+const LAST_MOVE_SETTLED_ALPHA = .95
+## Fade-in 0..1 over the first quarter of the pop.
+func last_move_fade() -> float:
+	if reduced_motion: return 1.0
+	return smoothstep(0,LAST_MOVE_POP*.25,last_move_age)
+## Scale bump: grows out then settles back to 1.0 by LAST_MOVE_POP s.
+func last_move_pop() -> float:
+	if reduced_motion: return 1.0
+	return 1.0+sin(clampf(last_move_age/LAST_MOVE_POP,0,1)*PI)*.3
+## Core alpha now (settled captures have last_move_age == 1); very subtle slow breathe after.
+func last_move_alpha() -> float:
+	var breathe = 0.0 if reduced_motion or last_move_age < 1 else .05*sin(clock*TAU/2.6)
+	return clampf(last_move_fade()*LAST_MOVE_SETTLED_ALPHA+breathe,0,1)
 func _draw_last_move(n: Control):
 	if last_move.x < 0: return
-	var a = smoothstep(0,.24,last_move_age)
-	var r = last_move_rect(); var points = P.polygon(r,3)
-	n.draw_colored_polygon(points,Color(1,1,1,.045*a))
-	for inset in [0.0,1.2,2.4]:
-		var edge = P.polygon(r.grow(-inset),maxf(1,3-inset))
-		n.draw_polyline(edge+PackedVector2Array([edge[0]]),Color(1,1,1,(.43 if inset == 0 else .08)*a),1 if inset == 0 else 1.4,true)
+	var pop = last_move_pop(); var a = last_move_alpha(); var fade = last_move_fade()
+	var r = last_move_rect().grow((pop-1.0)*last_move_rect().size.x*.08)
+	var cut = 6.0 if last_move_whole else 3.0
+	var core = clampf(size.x*.009,2.5,4.5)
+	n.draw_colored_polygon(P.polygon(r,cut),Color(LAST_MOVE_GOLD,LAST_MOVE_FILL_ALPHA*fade))
+	# Soft outer glow (gold fading out) and a faint inner rim, then the bright core line.
+	P.edge_glow(n,r,Color(1,.78,.2,.8*a),maxf(6,r.size.x*(.22 if not last_move_whole else .09)),cut)
+	P.edge_glow(n,r,Color(1,.84,.3,.3*a),-maxf(3,r.size.x*.07),cut)
+	P.outline(n,r.grow(core*.9),Color(.55,.32,.02,.7*a),core*.8,cut)
+	P.outline(n,r,Color(LAST_MOVE_GOLD,a),core,cut)
+	P.outline(n,r,Color(1,.96,.75,.7*a),maxf(1,core*.35),cut)
+## Additive warm bloom behind the gold outline (Over layer), so it glows like the cyan
+## active frame but in gold.
+func _last_move_bloom(n: Control):
+	if last_move.x < 0: return
+	var a = last_move_alpha()
+	var r = last_move_rect().grow((last_move_pop()-1.0)*last_move_rect().size.x*.08)
+	var cut = 6.0 if last_move_whole else 3.0
+	P.edge_glow(n,r,Color(1,.7,.15,.5*a),maxf(8,r.size.x*(.3 if not last_move_whole else .12)),cut)
+	P.edge_glow(n,r,Color(1,.8,.3,.22*a),-maxf(4,r.size.x*.12),cut)
 func preview_claim(board: int, player: int, progress: float):
 	win_fx = {}
 	claims = [{"board":board,"player":player,"age":clampf(progress,0,1)*claim_duration()}]; frozen = true; _dirty = true; refresh()
@@ -334,6 +367,7 @@ func _draw_over(n: Control):
 			P.halo(n,pt,r.size.x*.12,Color(.4,.95,1,.75))
 		elif game.owners[b] in [1,2]:
 			P.edge_glow(n,tile_rect(b),Color(player_color(game.owners[b]),.22),tile_rect(b).size.x*.06,9)
+	_last_move_bloom(n)
 	# Gold shimmer sweeps along frames.
 	P.glint(n,Rect2(Vector2.ZERO,size),.9,6.5)
 	P.glint(n,Rect2(Vector2(0,size.y-1.5),Vector2(size.x,2)),.6,7.5)

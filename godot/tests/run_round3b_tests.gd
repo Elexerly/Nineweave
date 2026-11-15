@@ -235,7 +235,8 @@ func spotlight_input(ui):
 
 # ------------------------------------------------------------------ 1/2. hint + highlight
 func hint_and_highlight(ui):
-	ui.start_game("local"); ui._debug_capture = true
+	# Round 3e: hints exist only vs the computer.
+	ui.start_game("computer"); ui._debug_capture = true
 	# Stale hint: computed for an old position, must not appear after a move.
 	ui.request_hint(); ok(ui.hint_busy,"hint started")
 	ui._apply_move(4,4)
@@ -245,7 +246,7 @@ func hint_and_highlight(ui):
 	ui._process(.01); ok(ui.board.hint_move == Vector2i(-1,-1),"hint for an old position is discarded")
 	# Hint on a free move through the real controller.
 	var p = blank(); p[0] = "XXXOO...."
-	ui.debug_load_position(F.position(p,2,-1).serialize(),"local")
+	ui.debug_load_position(F.position(p,2,-1).serialize(),"computer")
 	ui.request_hint()
 	for i in range(300):
 		ui.hint_ai.step(5000)

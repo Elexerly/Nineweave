@@ -30,6 +30,10 @@ done
 for size in 430x932 375x667 360x640 932x430 667x375 568x320 1920x1080; do
   shot "$size" midgame 0.45 midgame
 done
+# Round 3e: Safari-short portrait viewports (toolbars visible).
+for size in 390x664 390x620; do
+  shot "$size" midgame 0.45 midgame
+done
 for scenario in settings online; do
   shot 390x844 "$scenario" 0.45 "$scenario"
 done

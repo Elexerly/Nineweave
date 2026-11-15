@@ -1,0 +1,14 @@
+Nineweave Round 1 — final headless verification
+Godot 4.7.2 / Compatibility / threads disabled
+
+NINEWEAVE_RULES PASS checks=3121037 failures=0 fuzz_games=2400 fuzz_moves=141611
+NINEWEAVE_AI PASS checks=2566 failures=0
+NINEWEAVE_LAYOUT PASS checks=1470 failures=0 sizes=25
+NINEWEAVE_UI PASS checks=643 failures=0
+AI incremental slices=82 max_slice_ms=2.83
+AI_STRENGTH Medium vs Easy N=30 wins=29 draws=1 losses=0 rate=96.6666666666667% moves=1194 node_limit=700
+AI_STRENGTH Hard vs Easy N=30 wins=30 draws=0 losses=0 rate=100.0% moves=1091 node_limit=700
+AI_TIMING Hard samples=45 mean_ms=180.59 max_ms=344.5 hard_ceiling_ms=450
+WEB EXPORT: PASS (/tmp/nineweave-r1-web-check/index.html)
+
+NINEWEAVE ROUND1 TEST SUMMARY: PASS (4/4 suites; rules, AI, layout, UI)

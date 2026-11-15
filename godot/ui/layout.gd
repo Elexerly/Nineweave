@@ -43,7 +43,7 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 		r.turn = Rect2(16,y,176,36)
 		r.info = Rect2(204,y,w-220,36)
 		r.minimap = Rect2(16,y+44,88,88)
-		r.history = Rect2(116,y+44,w-340,88)
+		r.character = Rect2(116,y+44,w-340,88)
 		r.stats = Rect2(w-212,y+44,196,30)
 		r.controls = Rect2(w-212,y+82,196,50)
 	elif mode == "duo_landscape" or mode == "phone_landscape":
@@ -68,9 +68,10 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 			r.turn = Rect2(x,156,pw,42)
 			r.stats = Rect2(x,208,pw,36)
 			var mh = clampf(h-388,72,132)
-			r.minimap = Rect2(x,256,mh,mh)
-			r.info = Rect2(x+mh+12,256,pw-mh-12,44)
-			r.history = Rect2(x+mh+12,310,pw-mh-12,maxf(44,mh-54))
+			mh = minf(mh,104)
+			r.character = Rect2(x,256,pw*.46,h-338)
+			r.minimap = Rect2(x+pw*.5,256,mh,mh)
+			r.info = Rect2(x+pw*.5,264+mh,pw*.5,44)
 			r.controls = Rect2(x,h-70,pw,56)
 	else:
 		# Tablet composition from the art: tall player cards fill the left column, the board
@@ -106,6 +107,6 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 	return r
 static func major_rects(layout: Dictionary) -> Dictionary:
 	var result = {}
-	for key in ["header","players","turn","board","info","controls","stats","minimap","history"]:
+	for key in ["header","players","turn","board","info","controls","stats","minimap","history","character"]:
 		if layout.has(key): result[key] = layout[key]
 	return result

@@ -27,13 +27,13 @@ func _send(path: String, method: int, body: Dictionary, operation: String) -> vo
 	var err = _request.request(base_url+"/api/nineweave"+path,headers,method,JSON.stringify(body) if method != HTTPClient.METHOD_GET else "")
 	if err != OK: _busy = false; _unavailable()
 func create_room() -> void:
-	leave(); _send("/rooms",HTTPClient.METHOD_POST,{"name":player_name},"create")
+	leave(); _send("/rooms",HTTPClient.METHOD_POST,lobby_payload(),"create")
 func join_room(room_code: String) -> void:
 	leave(); code = room_code.strip_edges().to_upper()
 	if code.length() != 5: error.emit("Enter a five-character room code"); return
 	for ch in code:
 		if not ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789": error.emit("Use letters and numbers in the room code"); return
-	_send("/rooms/"+code+"/join",HTTPClient.METHOD_POST,{"name":player_name},"join")
+	_send("/rooms/"+code+"/join",HTTPClient.METHOD_POST,lobby_payload(),"join")
 func send_move(board: int, cell: int, seq: int) -> void:
 	if _busy: error.emit("Syncing room. Try again in a moment."); return
 	_send("/rooms/"+code+"/moves",HTTPClient.METHOD_POST,{"board":board,"cell":cell,"seq":seq,"token":token},"move")
@@ -55,6 +55,8 @@ func _complete(result: int, response: int, _headers: PackedStringArray, body: Pa
 		connected.emit()
 		if _operation == "create": room_created.emit(code)
 		joined.emit(code,seat); _timer.start()
+	if data.has("characters"):
+		if not data.characters is Dictionary or not receive_characters(data.characters): return
 	if data.has("opponent") and not str(data.opponent).is_empty():
 		var first = remote_name == "Remote player"
 		remote_name = str(data.opponent)
@@ -74,4 +76,4 @@ func leave() -> void:
 	_generation += 1
 	if is_instance_valid(_request): _request.cancel_request()
 	if is_instance_valid(_timer): _timer.stop()
-	_busy = false; token = ""; code = ""; seat = 0; sequence = 0
+	_busy = false; token = ""; code = ""; seat = 0; sequence = 0; remote_character_id = "auric_rex"

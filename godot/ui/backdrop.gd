@@ -18,6 +18,7 @@ class Layer extends Control:
 	func _draw():
 		if painter.is_valid(): painter.call(self)
 
+var background_theme: String = "crystal"
 var clock: float = 0
 var reduced_motion: bool = false
 var title_mode: bool = true
@@ -56,6 +57,8 @@ func _process(delta):
 		motes.amount = 8 if reduced_motion else 24
 	refresh()
 func refresh():
+	var sky_node = get_node_or_null("Sky")
+	if sky_node: sky_node.visible = background_theme == "crystal"
 	if _sky_mat:
 		var anchor = _anchor()
 		_sky_mat.set_shader_parameter("ray_center",Vector2(anchor.x/maxf(1,size.x),anchor.y/maxf(1,size.y)))
@@ -72,6 +75,11 @@ func _anchor() -> Vector2:
 func _draw():
 	var w = size.x; var h = size.y
 	if w < 1 or h < 1: return
+	if background_theme != "crystal":
+		var top_theme = Color("0c2236") if background_theme == "tidal" else Color("372c4c")
+		var low_theme = Color("235869") if background_theme == "tidal" else Color("94654f")
+		draw_polygon(PackedVector2Array([Vector2.ZERO,Vector2(w,0),Vector2(w,h),Vector2(0,h)]),PackedColorArray([top_theme,top_theme,low_theme,low_theme]))
+		return
 	var top = Color("030a1d"); var mid = Color("0a2048"); var low = Color("061330")
 	draw_polygon(PackedVector2Array([Vector2(0,0),Vector2(w,0),Vector2(w,h*.55),Vector2(0,h*.55)]),PackedColorArray([top,top,mid,mid]))
 	draw_polygon(PackedVector2Array([Vector2(0,h*.55),Vector2(w,h*.55),Vector2(w,h),Vector2(0,h)]),PackedColorArray([mid,mid,low,low]))
@@ -81,6 +89,7 @@ func _art_scale(target_height: float, tex: Texture2D) -> float:
 func _draw_art(n: Control):
 	var w = size.x; var h = size.y
 	if w < 1 or h < 1: return
+	if background_theme != "crystal": _draw_local_theme(n); return
 	var region = title_region if title_region.size.x > 0 else Rect2(Vector2.ZERO,size)
 	var anchor = _anchor()
 	var landscape = region.size.x > region.size.y
@@ -153,3 +162,34 @@ func _draw_art(n: Control):
 		if i%6 == 0:
 			n.draw_line(Vector2(x-4,y),Vector2(x+4,y),Color(col,a*.6),.8,true)
 			n.draw_line(Vector2(x,y-4),Vector2(x,y+4),Color(col,a*.6),.8,true)
+
+## Cheap alternate skies, deliberately separate from the original art path.
+func _draw_local_theme(n: Control):
+	var w = size.x; var h = size.y
+	var sun = Vector2(w*.78,h*.26)
+	if background_theme == "tidal":
+		P.halo(n,sun,minf(w,h)*.2,Color(.7,.9,1,.18))
+		n.draw_circle(sun,minf(w,h)*.054,Color("d3e5df"))
+		for layer in range(4):
+			var points = PackedVector2Array(); var foam = PackedVector2Array()
+			for i in range(41):
+				var x = w*i/40.0
+				var y = h*(.52+layer*.12)+sin(i*.27+clock*.18+layer)*h*.017+sin(i*.51-clock*.12)*h*.008
+				points.append(Vector2(x,y)); foam.append(Vector2(x,y))
+			points.append(Vector2(w,h)); points.append(Vector2(0,h))
+			n.draw_colored_polygon(points,Color("123646").lerp(Color("071626"),layer/4.0))
+			n.draw_polyline(foam,Color(.54,.83,.85,.2),1.4,true)
+	else:
+		P.halo(n,sun,minf(w,h)*.3,Color(1,.62,.32,.25))
+		n.draw_circle(sun,minf(w,h)*.085,Color("e1ab76"))
+		for layer in range(3):
+			var points = PackedVector2Array([Vector2(0,h)])
+			var y = h*(.55+layer*.12)
+			for i in range(8):
+				var x = w*i/7.0; var step = sin(i*7.13+layer*2)*h*.055
+				points.append(Vector2(x,y+step)); points.append(Vector2(x+w*.07,y+step))
+			points.append(Vector2(w,h))
+			n.draw_colored_polygon(points,Color("514154").lerp(Color("172333"),layer/3.0))
+	for i in range(18):
+		var pos = Vector2(fmod(i*97.37+23,w),fmod(i*157.73+13,h*.4))
+		n.draw_circle(pos,.9,Color(.8,.9,1,.35))

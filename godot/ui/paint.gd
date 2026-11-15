@@ -16,9 +16,13 @@ const GOLD_DARK = Color("2a1806")
 const LIGHT = Vector2(-0.6,-0.8)
 ## Shared animation clock for shimmer/glints; the controller advances it, captures pin it.
 static var clock: float = 0.0
+static var board_theme: String = "crystal"
+static var _theme_meshes: Dictionary = {}
 static var _glow: Texture2D
 static var _x_mesh: ArrayMesh
 static var _o_mesh: ArrayMesh
+static var _x_emblem: ArrayMesh
+static var _o_emblem: ArrayMesh
 static var _glow_box: StyleBoxFlat
 
 static func glow_texture() -> Texture2D:
@@ -197,18 +201,20 @@ static func _mesh(v: PackedVector2Array, c: PackedColorArray) -> ArrayMesh:
 	return m
 ## Unit X (arms reach ±0.7, stroke 0.42): faceted crystal bars with chamfered tips,
 ## dark bevel rim, lit upper-left facets, darker lower-right facets and a white core.
-static func x_mesh() -> ArrayMesh:
-	if _x_mesh: return _x_mesh
+static func x_mesh(thin: bool = false) -> ArrayMesh:
+	if thin and _x_emblem: return _x_emblem
+	if not thin and _x_mesh: return _x_mesh
 	var v = PackedVector2Array(); var c = PackedColorArray()
 	var rim = Color(.01,.1,.26); var dark = Color(.04,.36,.74); var lit = Color(.5,.9,1); var ridge = Color(.78,.98,1)
 	var arms = [[Vector2(-.7,-.7),Vector2(.7,.7)],[Vector2(-.7,.7),Vector2(.7,-.7)]]
-	var hw = .21; var tip = .2
+	var weight = .6 if thin else 1.0
+	var hw = .21*weight; var tip = .2
 	for pass_index in range(3):
 		for arm in arms:
 			var a: Vector2 = arm[0]; var b: Vector2 = arm[1]
 			var u = (b-a).normalized(); var n = u.orthogonal()
 			if pass_index == 0:
-				var e = .055
+				var e = .055*weight
 				var ea = a-u*e; var eb = b+u*e
 				var poly = [ea,ea+u*tip+n*(hw+e),eb-u*tip+n*(hw+e),eb,eb-u*tip-n*(hw+e),ea+u*tip-n*(hw+e)]
 				for i in range(1,5): _tri(v,c,poly[0],poly[i],poly[i+1],rim,rim,rim)
@@ -221,24 +227,27 @@ static func x_mesh() -> ArrayMesh:
 					_tri(v,c,a,p1,p2,ridge.lerp(face,.35),edge,edge)
 					_tri(v,c,a,p2,b,ridge.lerp(face,.35),edge,ridge.lerp(face,.35))
 			else:
-				var off = n*(.035 if n.dot(LIGHT) > 0 else -.035)
+				var off = n*(.035 if n.dot(LIGHT) > 0 else -.035)*weight
 				var q0 = a+u*tip*1.2+off; var q1 = b-u*tip*1.2+off
-				var w = n*.03
+				var w = n*.03*weight
 				var core = Color(.96,1,1,1); var fade = Color(.85,1,1,.15)
 				_quad(v,c,q0+w,q1+w,q1-w,q0-w,fade,core,core,fade)
+	if thin: _x_emblem = _mesh(v,c); return _x_emblem
 	_x_mesh = _mesh(v,c)
 	return _x_mesh
 ## Unit O ring (outer .82, inner .44): outer bevel lit top-left, inner wall lit bottom-right.
-static func o_mesh() -> ArrayMesh:
-	if _o_mesh: return _o_mesh
+static func o_mesh(thin: bool = false) -> ArrayMesh:
+	if thin and _o_emblem: return _o_emblem
+	if not thin and _o_mesh: return _o_mesh
 	var v = PackedVector2Array(); var c = PackedColorArray()
-	var r_out = .82; var r_mid = .63; var r_in = .44; var seg = 64
+	var weight = .6 if thin else 1.0
+	var r_out = .82; var r_mid = r_out-.19*weight; var r_in = r_out-.38*weight; var seg = 64
 	var rim = Color(.17,.08,.01)
 	var l = LIGHT.normalized()
 	for i in range(seg):
 		var a0 = TAU*i/seg; var a1 = TAU*(i+1)/seg
 		var d0 = Vector2.from_angle(a0); var d1 = Vector2.from_angle(a1)
-		_quad(v,c,d0*(r_out+.05),d1*(r_out+.05),d1*(r_in-.05),d0*(r_in-.05),rim,rim,rim,rim)
+		_quad(v,c,d0*(r_out+.05*weight),d1*(r_out+.05*weight),d1*(r_in-.05*weight),d0*(r_in-.05*weight),rim,rim,rim,rim)
 	for i in range(seg):
 		var a0 = TAU*i/seg; var a1 = TAU*(i+1)/seg
 		var d0 = Vector2.from_angle(a0); var d1 = Vector2.from_angle(a1)
@@ -251,24 +260,43 @@ static func o_mesh() -> ArrayMesh:
 		var d0 = Vector2.from_angle(a0); var d1 = Vector2.from_angle(a1)
 		var k0 = clampf(.15+d0.dot(l)*.85,0,1); var k1 = clampf(.15+d1.dot(l)*.85,0,1)
 		var w0 = Color(1,.98,.86,k0); var w1 = Color(1,.98,.86,k1)
-		_quad(v,c,d0*(r_mid-.025),d1*(r_mid-.025),d1*(r_mid+.035),d0*(r_mid+.035),w0,w1,w1,w0)
+		_quad(v,c,d0*(r_mid-.025*weight),d1*(r_mid-.025*weight),d1*(r_mid+.035*weight),d0*(r_mid+.035*weight),w0,w1,w1,w0)
+	if thin: _o_emblem = _mesh(v,c); return _o_emblem
 	_o_mesh = _mesh(v,c)
 	return _o_mesh
 static func mark_color(player: int) -> Color:
+	if board_theme == "sandstone": return Color("8dded7") if player == 1 else (Color("e8ac73") if player == 2 else MUTED)
 	return BLUE if player == 1 else (Color("ffc95a") if player == 2 else MUTED)
 ## Bevelled neon mark. radius ~ 0.35 of a cell gives a stroke ~15% of the cell.
-static func mark(node: CanvasItem, center: Vector2, radius: float, player: int, alpha: float = 1, power: float = 1):
+static func mark(node: CanvasItem, center: Vector2, radius: float, player: int, alpha: float = 1, power: float = 1, thin: bool = false):
 	if player != 1 and player != 2: return
 	var col = mark_color(player)
 	if radius > 5:
 		halo(node,center,radius*2.3,Color(col,.26*alpha*power))
 		halo(node,center,radius*1.25,Color(col.lightened(.25),.3*alpha*minf(power,1.6)))
-	var mesh = x_mesh() if player == 1 else o_mesh()
+	var mesh = themed_mesh(player,thin)
 	var sc = Vector2.ONE*radius
 	node.draw_mesh(mesh,null,Transform2D(0,sc,0,center+Vector2(.5,1.4)*maxf(1,radius*.07)),Color(0,0,0,.55*alpha))
 	node.draw_mesh(mesh,null,Transform2D(0,sc,0,center),Color(1,1,1,alpha))
 	if power > 1.2 and radius > 8:
 		diamond(node,center+Vector2(-.45,-.52)*radius,radius*.08,Color(1,1,1,.8*alpha))
+## Default returns the exact original cached mesh. The optional stone palette is
+## another cache; changing a local theme never mutates the crystal source arrays.
+static func themed_mesh(player: int, thin: bool = false) -> ArrayMesh:
+	var source = x_mesh(thin) if player == 1 else o_mesh(thin)
+	if board_theme != "sandstone": return source
+	var key = str(player)+str(thin)
+	if _theme_meshes.has(key): return _theme_meshes[key]
+	var arrays = source.surface_get_arrays(0)
+	var cols: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+	for i in range(cols.size()):
+		var light = maxf(cols[i].r,maxf(cols[i].g,cols[i].b))
+		var base = Color("2c4245") if player == 1 else Color("55341f")
+		var pale = Color("bcece3") if player == 1 else Color("ffe0ad")
+		cols[i] = Color(base.lerp(pale,light),cols[i].a)
+	arrays[Mesh.ARRAY_COLOR] = cols
+	var mesh = ArrayMesh.new(); mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
+	_theme_meshes[key] = mesh; return mesh
 static func crown(node: CanvasItem, pos: Vector2, scale_value: float = 1):
 	var points = PackedVector2Array([Vector2(-14,5),Vector2(-17,-8),Vector2(-7,-1),Vector2(0,-15),Vector2(7,-1),Vector2(17,-8),Vector2(14,5)])
 	for i in points.size(): points[i] = pos+points[i]*scale_value

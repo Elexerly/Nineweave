@@ -66,3 +66,26 @@ Return moves newer than `since`, sorted by seq, never including hidden credentia
 The backend owns one rules kernel state per room. Under a room lock/transaction, verify token→seat, `seq == current_seq+1`, correct turn, and `is_legal(board,cell)`, then call `play()`, append the event, persist the snapshot and commit. Never accept a client-supplied board state, owner, winning line, result, turn, name as identity, or user ID as authorization. Derive winners and active board with exactly the same rules as `kernel/rules.gd`. There is no board-count tiebreak. Store tokens hashed, expire abandoned rooms, rate-limit create/join/moves, cap names to 24 characters and request sizes, use HTTPS, same-origin cookies/headers as appropriate, and set response caching to `no-store`.
 
 `LoopbackTransport` implements these move/seat/sequence checks with a shared in-process room service and broadcasts to both weak-referenced clients. It is for tests and local demonstration, not cross-browser networking. Online hints and undo are disabled in the UI. Reconnect/reclaim-seat, moderation, presence persistence and a deployed backend remain Round 2 work.
+
+## Round 3 — character identity (v2 cosmetic extension)
+
+Only character IDs are shared cosmetics. Background and board/piece theme selections
+are **local-only**: neither request bodies, snapshots nor room metadata carry them.
+The local profile's identity envelope is not an authorization credential.
+
+Create/join bodies now use `{"name":"Patrick","character_id":"vesper_vale"}`.
+`character_id` must be a known starter ID in `characters/roster.gd`; a backend must
+validate it and freeze the choice for the room. Responses and polls may include
+`"characters":{"1":"vesper_vale","2":"auric_rex"}` (seat keys as strings).
+Deliver that map before the first `opponent_joined` presentation. `NetTransport`
+adds `character_received(seat, character_id)`, `character_id` and
+`remote_character_id`; it validates received IDs transactionally. Unknown maps
+produce an error rather than accepting arbitrary assets. Missing maps keep the
+legacy default for compatibility with a v1 endpoint.
+
+`LoopbackTransport` stores only the two starter IDs beside its authoritative rules
+state and exchanges them on joining. `HttpPollingTransport` sends the same lobby
+payload and consumes the same seat map. Moves/acknowledgements and rules snapshots
+are unchanged. No new endpoint or network request is introduced. Local selection
+changes take effect in the next room. Theme changes never change a move, a rules
+snapshot, or either player's selected character.

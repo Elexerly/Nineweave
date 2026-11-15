@@ -1,15 +1,19 @@
-Nineweave Round 2 — final headless verification
-Godot 4.7.2 / Compatibility / threads disabled
+Nineweave Round 3 — final headless verification
+Godot 4.7.2 / Compatibility / single-threaded Web
 
 NINEWEAVE_RULES PASS checks=3121037 failures=0 fuzz_games=2400 fuzz_moves=141611
-NINEWEAVE_AI PASS checks=2566 failures=0
-NINEWEAVE_LAYOUT PASS checks=1470 failures=0 sizes=25
-NINEWEAVE_UI PASS checks=662 failures=0
-AI incremental slices=81 max_slice_ms=3.0
+AI incremental slices=76 max_slice_ms=2.9
 AI_STRENGTH Medium vs Easy N=30 wins=29 draws=1 losses=0 rate=96.6666666666667% moves=1194 node_limit=700
 AI_STRENGTH Hard vs Easy N=30 wins=30 draws=0 losses=0 rate=100.0% moves=1091 node_limit=700
-AI_TIMING Hard samples=45 mean_ms=161.9 max_ms=267.39 hard_ceiling_ms=450
-Headless --import: clean (no ERROR/WARNING lines)
-WEB EXPORT: PASS (/tmp/nineweave-r2-web-check/index.html)
+AI_TIMING Hard samples=45 mean_ms=145.74 max_ms=220.84 hard_ceiling_ms=450
+NINEWEAVE_AI PASS checks=2566 failures=0
+NINEWEAVE_LAYOUT PASS checks=1470 failures=0 sizes=25
+NINEWEAVE_UI PASS checks=857 failures=0
+AUDIO synthesis_all_ms=2353.021 (lazy; startup only unlock)
+NINEWEAVE_ROUND3 PASS checks=299 failures=0
+NINEWEAVE ROUND3 TEST SUMMARY: PASS (5/5 suites; rules, AI, layout, UI, Round 3)
 
-NINEWEAVE ROUND2 TEST SUMMARY: PASS (4/4 suites; rules, AI, layout, UI)
+Runtime/test diagnostic lines: 0
+Headless --import: exit 0, resource/script import completed; built-in editor socket listeners emit sandbox-denied ERROR diagnostics (see ROUND3.md).
+WEB EXPORT: PASS (/tmp/nineweave-r3-web-check/index.html); same editor-listener limitation.
+Visual/audio/Safari/device-FPS verification: not performed (no display/speakers).

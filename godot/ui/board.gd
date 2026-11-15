@@ -197,7 +197,13 @@ func _draw_tile(b: int):
 	var t = clampf(r.size.x*.035,2.6,6)
 	draw_colored_polygon(P.polygon(r.grow(2),9),Color(0,0,0,.55))
 	var inner_body = r.grow(-t*.6)
-	if active: _tile_body(inner_body,Color("175a78"),Color("08263a"))
+	if P.board_theme == "sandstone":
+		_tile_body(inner_body,Color("84765e") if active else Color("514b40"),Color("252c32"))
+		for vein in range(3):
+			var a = inner_body.position+Vector2(inner_body.size.x*(.12+vein*.27),4)
+			var z = a+Vector2(inner_body.size.x*.22,inner_body.size.y-8)
+			draw_polyline(PackedVector2Array([a,a.lerp(z,.4)+Vector2(6,-4),a.lerp(z,.65)-Vector2(4,2),z]),Color(.9,.82,.65,.09),1,true)
+	elif active: _tile_body(inner_body,Color("175a78"),Color("08263a"))
 	else: _tile_body(inner_body,Color("142b4f"),Color("050d1d"))
 	# Inset shadow under the top frame edge and a faint diagonal sheen.
 	var ih = r.size.y*.13
@@ -245,7 +251,7 @@ func _draw_tile(b: int):
 			if k > .01:
 				# The giant emblem: ~90% of the board, same bevelled style, big halo.
 				P.halo(self,r.get_center(),r.size.x*.75*k,Color(col,.28*minf(k,1)))
-				P.mark(self,r.get_center(),r.size.x*.62*k,owner,1.0,1.8)
+				P.mark(self,r.get_center(),r.size.x*.62*k,owner,1.0,1.8,true)
 	if hint_move.x == b and hint_move.y >= 0:
 		var center = cell_center(b,hint_move.y)
 		var pulse = .75+.25*sin(clock*5)

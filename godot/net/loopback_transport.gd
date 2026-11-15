@@ -10,7 +10,7 @@ func create_room() -> void:
 	next_room += 1
 	code = "N%04d" % (next_room%10000)
 	seat = 1
-	rooms[code] = {"host":weakref(self),"guest":null,"game":Rules.new(),"seq":0}
+	rooms[code] = {"host":weakref(self),"guest":null,"game":Rules.new(),"seq":0,"characters":{"1":character_payload().character_id}}
 	connected.emit(); room_created.emit(code); joined.emit(code,seat)
 func join_room(room_code: String) -> void:
 	room_code = room_code.strip_edges().to_upper()
@@ -21,6 +21,8 @@ func join_room(room_code: String) -> void:
 	code = room_code; seat = 2; room.guest = weakref(self); _peer = room.host
 	host._peer = weakref(self)
 	host.remote_name = player_name; remote_name = host.player_name
+	room.characters["2"] = character_payload().character_id
+	host.receive_characters(room.characters); receive_characters(room.characters)
 	connected.emit(); joined.emit(code,seat)
 	host.opponent_joined.emit(); opponent_joined.emit()
 	state_received.emit(room.game.serialize(),room.seq)
@@ -44,6 +46,6 @@ func leave() -> void:
 		var other_ref = room.guest if seat == 1 else room.host
 		if other_ref != null and other_ref.get_ref() != null: other_ref.get_ref().opponent_left.emit()
 		rooms.erase(code)
-	code = ""; seat = 0; _peer = null
+	code = ""; seat = 0; _peer = null; remote_character_id = "auric_rex"
 func _exit_tree(): leave()
 static func reset_service(): rooms.clear(); next_room = 0

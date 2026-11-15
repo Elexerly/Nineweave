@@ -17,6 +17,7 @@ func frames(count: int = 3):
 	for i in range(count): await process_frame
 func run():
 	var ui = Main.instantiate(); ui.settings = Store.new("user://ui-test.cfg"); ui.settings.values.sound = false; ui.settings.values.reduced_motion = false
+	ui.profile.data.onboarded = true
 	root.add_child(ui); await frames()
 	ui.set_view_size(Vector2(390,844)); await frames()
 	ok(ui.page == "title" and ui.controls.has_all(["computer","online","local","settings","how"]),"title choices")
@@ -46,7 +47,7 @@ func run():
 	ui.debug_load_position(F.big_tactic(1).serialize()); ui._debug_capture = false
 	ok(ui.play_cell(2,2) and not ui.board.win_fx.is_empty(),"win animation starts")
 	ok(ui.display_player() == 1,"winning player keeps the crown through victory")
-	ui.board.advance(4); ui._process(.01); await frames()
+	ui.board.advance(4); ui._process(.01); ui.cinematic.age = .25; ui.cinematic.skip(); await frames()
 	ok(ui.game.winner() == 1 and ui.overlay == "result" and ui.controls.has("again"),"win finishes in victory panel")
 	ok(ui._result_t >= .99 and ui.controls.again.visible and ui.controls.again.modulate.a > .95,"win panel fully visible at end of win animation")
 	ok(ui.info_lines()[0] == "Victory! X wins the game" and ui.active_label == "Victory! X wins the game","info pill shows the result after game over")
@@ -122,7 +123,7 @@ func run():
 	for s in [Vector2(360,640),Vector2(568,320),Vector2(844,390),Vector2(867,553),Vector2(669,787)]:
 		ui.set_view_size(s); ui.go_home(); await frames(2)
 		check_controls(ui,"title "+str(s))
-		for panel in ["settings","how","setup"]:
+		for panel in ["settings","how","setup","cosmetics"]:
 			ui.overlay = panel; ui._rebuild(); await frames(2)
 			check_controls(ui,panel+" "+str(s))
 			ok(Rect2(Vector2.ZERO,ui.layout.size).encloses(ui._modal_rect),"modal fits "+panel+" "+str(s))

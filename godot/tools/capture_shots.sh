@@ -4,7 +4,7 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 GODOT=${GODOT:-/workspace/tools/godot/Godot_v4.7.2-stable_linux.x86_64}
-OUT=${1:-/workspace/nineweave-r2-shots}
+OUT=${1:-/workspace/nineweave-r3-shots}
 export XDG_DATA_HOME=${XDG_DATA_HOME:-/tmp/nineweave-capture/data}
 export XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/nineweave-capture/config}
 export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/nineweave-capture/cache}
@@ -33,4 +33,12 @@ done
 for scenario in settings online; do
   shot 390x844 "$scenario" 0.45 "$scenario"
 done
+
+# Round 3: deterministic character presentations at the five review sizes.
+for size in 390x844 844x390 867x553 669x787 1366x1024; do
+  for scenario in character_select lock_in claim_pop win_spotlight duo_panel; do
+    shot "$size" "$scenario" 0.5 "$scenario"
+  done
+done
+
 printf 'NINEWEAVE CAPTURES PASS -> %s\n' "$OUT"

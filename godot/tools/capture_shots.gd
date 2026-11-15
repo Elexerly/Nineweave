@@ -19,11 +19,15 @@ func capture():
 		elif arg.begins_with("--out="): out = arg.trim_prefix("--out=")
 		elif arg.begins_with("--progress="): progress = float(arg.trim_prefix("--progress="))
 		i += 1
-	if not scenario in ["title","midgame","thinking","claim","claim_end","win","win_end","duo","duo_hinge","hinge","settings","online"]:
+	if not scenario in ["title","midgame","thinking","claim","claim_end","win","win_end","duo","duo_hinge","hinge","settings","online","character_select","lock_in","claim_pop","win_spotlight","duo_panel"]:
 		print("CAPTURE FAIL: unknown scenario ",scenario); quit(2); return
 	var main = Main.instantiate(); root.add_child(main)
 	main.set_view_size(Vector2(root.size)); main.settings.values.sound = false; main.sound.enabled = false
-	main.settings.saved_game = {}; main.debug_scenario(scenario,progress)
+	main.settings.saved_game = {}
+	main.profile.data.character_id = "vesper_vale"; main.profile.data.display_name = "Weaver"; main.profile.data.onboarded = true
+	main.rival_character = "auric_rex"; main.settings.values.player_name = "You"
+	main.settings.values.background_theme = "crystal"; main.settings.values.board_theme = "crystal"; main._apply_preferences()
+	main.debug_scenario(scenario,progress)
 	# Fixed decorative pose; animations are posed by the debug hooks.
 	main.set_process(false); main.backdrop.set_process(false); main.board.set_process(false)
 	main.clock = 4; main.backdrop.clock = 4; main.board.clock = 4

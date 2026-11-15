@@ -8,15 +8,15 @@ export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/nineweave-tests/cache}
 LOGS=${LOGS:-/tmp/nineweave-test-logs}
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$LOGS"
 failed=0
-for suite in rules ai layout ui; do
+for suite in rules ai layout ui round3; do
   status=0
   "$GODOT" --headless --path "$ROOT" --script "res://tests/run_${suite}_tests.gd" >"$LOGS/$suite.log" 2>&1 || status=$?
   cat "$LOGS/$suite.log"
   if [ "$status" -ne 0 ] || rg -q 'SCRIPT ERROR|Parse Error|^ERROR:|^WARNING:|NINEWEAVE_.* FAIL' "$LOGS/$suite.log"; then failed=$((failed+1)); fi
 done
 if [ "$failed" -eq 0 ]; then
-  printf 'NINEWEAVE ROUND2 TEST SUMMARY: PASS (4/4 suites; rules, AI, layout, UI)\n'
+  printf 'NINEWEAVE ROUND3 TEST SUMMARY: PASS (5/5 suites; rules, AI, layout, UI, Round 3)\n'
 else
-  printf 'NINEWEAVE ROUND2 TEST SUMMARY: FAIL (%s suites failed)\n' "$failed"
+  printf 'NINEWEAVE ROUND3 TEST SUMMARY: FAIL (%s suites failed)\n' "$failed"
 fi
 exit "$failed"

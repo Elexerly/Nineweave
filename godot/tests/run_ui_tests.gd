@@ -5,6 +5,8 @@ const Rules = preload("res://kernel/rules.gd")
 const Loopback = preload("res://net/loopback_transport.gd")
 const Http = preload("res://net/http_polling_transport.gd")
 const Store = preload("res://settings/store.gd")
+class OfflineHTTP extends "res://net/http_polling_transport.gd":
+	func _send(_path: String, _method: int, _body: Dictionary, _operation: String) -> void: _unavailable()
 var checks = 0
 var failures = 0
 var received_a: Array = []
@@ -16,7 +18,7 @@ func _initialize(): run.call_deferred()
 func frames(count: int = 3):
 	for i in range(count): await process_frame
 func run():
-	var ui = Main.instantiate(); ui.settings = Store.new("user://ui-test.cfg"); ui.settings.values.sound = false; ui.settings.values.reduced_motion = false
+	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.settings = Store.new("user://ui-test.cfg"); ui.settings.values.sound = false; ui.settings.values.reduced_motion = false
 	ui.profile.data.onboarded = true
 	root.add_child(ui); await frames()
 	ui.set_view_size(Vector2(390,844)); await frames()
@@ -191,9 +193,9 @@ func run():
 	ok(ui.game.history.size() == 2 and ui.online_sequence == 2,"demo simulated remote reply")
 	ok(not ui.undo_move(),"online undo disabled")
 	ui.go_home(); await frames()
-	var http = Http.new(); root.add_child(http); var errors: Array = []
+	var http = OfflineHTTP.new(); root.add_child(http); var errors: Array = []
 	http.error.connect(func(msg): errors.append(msg)); http.create_room()
-	ok(errors.size() == 1 and "Online server not available yet" in errors[0],"offline HTTP graceful failure without network")
+	ok(errors.size() == 1 and "Online server not available" in errors[0],"offline HTTP graceful failure without network")
 	http.queue_free(); ui.queue_free(); await frames(4)
 	Loopback.reset_service()
 	print("NINEWEAVE_UI ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)

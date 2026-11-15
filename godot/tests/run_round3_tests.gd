@@ -134,7 +134,7 @@ func run():
 	var profile_copy = Profile.new(profile_path)
 	ok(profile_copy.data.onboarded and profile_copy.data.character_id == "siren_coil" and profile_copy.data.display_name == "Ada","profile save/load")
 	ok(not profile.choose("unknown","Bad"),"unknown hero rejected")
-	var ui = Main.instantiate(); ui.settings = Store.new("user://r3-ui.cfg"); ui.profile = Profile.new(profile_path)
+	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.settings = Store.new("user://r3-ui.cfg"); ui.profile = Profile.new(profile_path)
 	ui.settings.values.sound = false; ui.settings.values.reduced_motion = false
 	ui.settings.values.background_theme = "crystal"; ui.settings.values.board_theme = "crystal"; ui.profile.data.onboarded = false
 	root.add_child(ui); ui.set_view_size(Vector2(390,844))

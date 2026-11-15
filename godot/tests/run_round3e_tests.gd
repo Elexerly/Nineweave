@@ -23,7 +23,7 @@ func frames(count: int = 2):
 func run():
 	phone_portrait()
 	snapshot()
-	var ui = Main.instantiate(); ui.settings = Store.new("user://r3e-ui.cfg"); ui.profile = Profile.new("user://r3e-profile.cfg")
+	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.settings = Store.new("user://r3e-ui.cfg"); ui.profile = Profile.new("user://r3e-profile.cfg")
 	ui.settings.values.sound = false; ui.settings.values.reduced_motion = false; ui.profile.data.onboarded = true
 	root.add_child(ui); await frames()
 	await undo_hint(ui)

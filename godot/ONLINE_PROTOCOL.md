@@ -1,6 +1,43 @@
 # Nineweave online protocol — v1
 
-Round 1 ships a complete in-process **LoopbackTransport** and an **HttpPollingTransport** client for a future backend. No backend is included or advertised as live. The menu's “Try Local Online Demo” creates a local room; “Invite demo rival” pairs a second local transport, driven by the AI. This is labelled LOCAL DEMO. Real create/join fails with “Online server not available yet” when the API is absent. The native client intentionally has no default remote host; the Web client uses `window.location.origin`.
+Round 4c connects **HttpPollingTransport** to the live API at
+`https://nineweave.grok.me/api/nineweave`. On the live web origin it uses the
+relative `/api/nineweave` path; native, localhost and other web origins use the
+live origin. `net/json_api.gd` owns the single configurable `LIVE_ORIGIN`.
+The menu's “Try Local Online Demo” still uses **LoopbackTransport**, with an
+explicitly simulated rival. The earlier rounds below document protocol history.
+The full current endpoint contract is `nineweave-server/ONLINE_API.md`.
+
+## Round 4c — device accounts, consent and live discovery
+
+`net/device_store.gd` persists only device identity and legal acceptance in
+`user://nineweave-device.cfg`, separately from the character profile's
+`onboarded` flag. The persistent `nwd_` credential authenticates registration
+follow-up, `/me`, `/leaderboard`, create and join; registration itself has no
+Authorization header. The ephemeral `nws_` credential authenticates room polling
+and goes in move/rematch/leave bodies. Neither secret is displayed, logged, or
+put in a URL. Leave POSTs `/rooms/<CODE>/leave` from a short-lived independent
+request, then clears seat state without erasing device identity.
+
+Registration and consent use `POST /auth/device`, followed by `PATCH /me` with
+`screen_name`, `tos_version`, `privacy_version`, `accepted_at` (UTC ISO 8601),
+and `age_confirmed:true`. Legal versions are `2026-11-15`. Consent becomes local
+only after PATCH succeeds; a token from successful registration survives PATCH
+failure for retry. First launch and unregistered live entry show readable linked
+agreement copy without checkboxes, with an offline route to the title.
+
+`GET /me` restores a known canonical `last_hero_id`; confirmed hero choices PATCH
+that field. Name edits PATCH `/me`, preserving the accepted name on rejection.
+Public rooms refresh with `GET /rooms` every 2.5 seconds while the lobby is
+visible. Private creation sends `private:true` plus `password`; joining sends
+`password` when provided. The leaderboard uses `/leaderboard`, displaying full
+`matches_won` and the caller's record even outside the top list. No public
+small-board scores are presented.
+
+Room polling remains single-flight, once per second. Conflicts can resynchronize
+from their room snapshot; full-match `result` also handles forfeits/timeouts.
+Sticky `opponent_left` emits once. Canonical character maps precede rematch
+presentation, and `match.seat` controls each new round's X/O swap.
 
 ## Shared interface
 
@@ -13,7 +50,7 @@ Round 1 ships a complete in-process **LoopbackTransport** and an **HttpPollingTr
 
 Methods: `create_room()`, `join_room(code)`, `send_move(board, cell, seq)`, `leave()`.
 
-Create/join set `code`, `seat`, `player_name`, `remote_name`. A room code is five uppercase letters/digits. Seat X always moves first. Token is opaque, secret, never rendered/logged or put in query strings. The HTTP client sends `Authorization: Bearer <token>` after joining. The moves body also contains `token` for the requested contract; accept one consistently on the server. Poll approximately once per second; only one HTTPRequest is active at a time. Timeout is eight seconds. Leaving cancels polling and clears credentials. A future server should expire rooms/seats by heartbeat/TTL; no unrequested leave endpoint is assumed.
+Create/join set `code`, `seat`, `player_name`, `remote_name`. A room code is five uppercase letters/digits. Seat X always moves first. Token is opaque, secret, never rendered/logged or put in query strings. The HTTP client sends `Authorization: Bearer <token>` after joining. The moves body also contains `token` for the requested contract; accept one consistently on the server. Poll approximately once per second; only one HTTPRequest is active at a time. Timeout is eight seconds. Leaving cancels polling and clears credentials. The live service expires rooms/seats by timeout; leaving POSTs the authenticated leave endpoint before clearing the seat.
 
 ## Endpoints (same origin)
 
@@ -122,7 +159,7 @@ controller then runs the 2.8-second versus screen. Leaving a room cancels it.
 The explicitly labelled local demo peer agrees after a one-second simulated delay;
 real HTTP peers never auto-agree.
 
-Future HTTP backend extension (client implemented; no backend is shipped):
+HTTP backend extension (live in Round 4c):
 
 `POST /api/nineweave/rooms/<CODE>/rematch`
 

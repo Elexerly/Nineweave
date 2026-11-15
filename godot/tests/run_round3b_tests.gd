@@ -30,7 +30,7 @@ func run():
 	ai_legal_everywhere()
 	persistence()
 	audio()
-	var ui = Main.instantiate(); ui.settings = Store.new("user://r3b-ui.cfg"); ui.profile = Profile.new("user://r3b-profile.cfg")
+	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.settings = Store.new("user://r3b-ui.cfg"); ui.profile = Profile.new("user://r3b-profile.cfg")
 	ui.settings.values.sound = false; ui.settings.values.reduced_motion = false; ui.profile.data.onboarded = true
 	root.add_child(ui); await frames()
 	ui.set_view_size(Vector2(390,844)); await frames()

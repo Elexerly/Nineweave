@@ -10,6 +10,9 @@ const OrnateButton = preload("res://ui/ornate_button.gd")
 const Store = preload("res://settings/store.gd")
 const Loopback = preload("res://net/loopback_transport.gd")
 const HTTP = preload("res://net/http_polling_transport.gd")
+const JsonAPI = preload("res://net/json_api.gd")
+const DeviceAccount = preload("res://net/device_account.gd")
+const OnlineScreen = preload("res://ui/online_screen.gd")
 const Announcer = preload("res://fx/announcer.gd")
 const Callout = preload("res://fx/comic_callout.gd")
 const Themes = preload("res://themes/registry.gd")
@@ -38,6 +41,20 @@ class Layer extends Control:
 var game = Rules.new()
 var settings = Store.new()
 var profile = Profile.new()
+var account = DeviceAccount.new()
+var online_api = JsonAPI.new()
+## Explicit harness/capture opt-out; never derived from character-select onboarding.
+var test_online_bypass: bool = false
+var online_view
+var lobby_timer: Timer
+var public_rooms: Array = []
+var leaderboard_players: Array = []
+var leaderboard_me: Dictionary = {}
+var _lobby_pending: bool = false
+var _onboarding_destination: String = "title"
+var _onboarding_name: String = ""
+var _room_password: String = ""
+var _hero_changed: bool = false
 var rival_character: String = "auric_rex"
 var hero_select
 var cinematic
@@ -126,6 +143,16 @@ func _ready():
 	var mat = ShaderMaterial.new(); mat.shader = preload("res://assets/shaders/gold.gdshader"); title_label.material = mat
 	add_child(title_label)
 	if not profile.data.onboarded: profile.data.display_name = str(settings.values.player_name)
+	account.player_received.connect(_account_player)
+	account.name_updated.connect(_account_name)
+	account.onboarding_complete.connect(_account_completed)
+	account.error.connect(_account_error); add_child(account)
+	online_api.completed.connect(_online_response); add_child(online_api)
+	lobby_timer = Timer.new(); lobby_timer.wait_time = 2.5; add_child(lobby_timer); lobby_timer.timeout.connect(_refresh_lobby)
+	if not test_online_bypass:
+		if not account.store.complete(): page = "onboarding"; _onboarding_name = account.store.data.screen_name
+		else: _account_name(account.store.data.screen_name)
+		account.refresh()
 	_apply_preferences(); _relayout(); _rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
 func _on_viewport_resize():
@@ -276,7 +303,12 @@ func _confirm_hero(id: String, display_name: String):
 		rival_character = id; _local_picked = true; _select_player = 0
 		_pending_game = {}; start_game("local",1,false,true); return
 	var saved_name = str(profile.data.display_name) if _select_player == 1 else display_name
+	if not test_online_bypass and account.store.complete():
+		if saved_name.strip_edges() != account.store.data.screen_name: account.rename(saved_name)
+		saved_name = account.store.data.screen_name
 	profile.choose(id,saved_name); settings.set_value("player_name",profile.data.display_name)
+	_hero_changed = true
+	if not test_online_bypass: account.choose_hero(id)
 	sound.prepare_character(Roster.audio_index(id)); sound.cue("ui")
 	if not _pending_game.is_empty():
 		if _pending_game.mode == "local":
@@ -509,9 +541,15 @@ func request_resume():
 		_pending_game = {"mode":"resume","mark":human_mark}; open_character_select(); return
 	resume_game()
 func open_online():
-	_leave_online(); page = "online"; overlay = ""; online_state = "lobby"; message = ""; room_code = ""; _rebuild()
+	_leave_online(); message = ""; room_code = ""; _room_password = ""
+	if not test_online_bypass and not _debug_capture and not account.store.complete():
+		_show_onboarding("online"); return
+	page = "online"; overlay = ""; online_state = "lobby"; _rebuild(); _refresh_lobby()
 func _attach_transport(t):
-	_leave_online(); transport = t; add_child(t)
+	_leave_online(); transport = t
+	if t is HTTP: t.device_token = account.store.data.device_token
+	add_child(t)
+	lobby_timer.stop(); online_api.cancel_all(); _lobby_pending = false
 	t.player_name = str(settings.values.player_name)
 	t.character_id = str(profile.data.character_id)
 	t.character_received.connect(func(mark,id):
@@ -527,11 +565,18 @@ func _attach_transport(t):
 	t.state_received.connect(_receive_state)
 	t.opponent_left.connect(func(): remote_ready = false; thinking = false; message = "Your opponent has left the room."; _rebuild())
 	t.error.connect(func(msg): message = msg; _rebuild())
-func create_online(demo: bool = false):
+	if t is HTTP: t.room_updated.connect(_online_room_update)
+func create_online(demo: bool = false, private_game: bool = false, password: String = ""):
+	if not demo and not test_online_bypass and not account.store.complete(): _show_onboarding("online"); return
+	if private_game and (password.is_empty() or password.length() > 64):
+		message = "Use a private-room password with 1–64 characters."; _online_status(); return
 	_attach_transport(Loopback.new() if demo else HTTP.new())
+	if transport is HTTP: transport.private_room = private_game; transport.password = password
 	transport.create_room()
-func join_online(code: String, demo: bool = false):
+func join_online(code: String, demo: bool = false, password: String = ""):
+	if not demo and not test_online_bypass and not account.store.complete(): _show_onboarding("online"); return
 	_attach_transport(Loopback.new() if demo else HTTP.new())
+	if transport is HTTP: transport.password = password
 	transport.join_room(code)
 func invite_demo_rival():
 	if not transport is Loopback: return
@@ -555,11 +600,120 @@ func _receive_state(state: Dictionary, seq: int):
 	if seq == online_sequence and state.get("cells","") == game.serialize().cells: return
 	if game.deserialize(state):
 		online_sequence = seq; board.clear_effects(); _refresh_labels(); _refresh_history(); _schedule_ai()
+		if game.status != 0:
+			board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
+
+func _online_room_update(data: Dictionary):
+	# Forfeits/timeouts are authoritative full-match results, outside board mechanics.
+	var result = data.get("result")
+	if data.get("status","") in ["finished","closed"] and result is Dictionary and game.status == 0:
+		var winner = int(result.get("winner",-1))
+		if winner in [0,1,2]:
+			game.status = 3 if winner == 0 else winner; thinking = false
+			board.start_win([],game.status); _refresh_labels()
+	if data.get("status","") == "closed" and page == "online":
+		message = "This room is closed. Return to the lobby to play again."; _online_status()
+func _show_onboarding(destination: String):
+	_leave_online(); _onboarding_destination = destination; page = "onboarding"; overlay = ""
+	_onboarding_name = account.store.data.screen_name; message = ""; cinematic.clear(); _rebuild()
+func _account_name(value: String):
+	settings.set_value("player_name",value); profile.data.display_name = value; profile.save()
+	if overlay == "settings": message = "Screen name saved."; _settings_name_status()
+func _account_player(player: Dictionary):
+	var id = str(player.get("last_hero_id",""))
+	if not _hero_changed and Roster.valid(id):
+		profile.data.character_id = Roster.canonical_id(id); profile.save()
+		if page == "character_select": _hero_focus = profile.data.character_id; _rebuild()
+func _account_completed():
+	message = ""
+	if page != "onboarding": return
+	if _onboarding_destination == "online": open_online()
+	else: go_home()
+func _account_error(value: String):
+	message = value
+	if page == "onboarding":
+		if "not available" in value or "configured" in value or "reach" in value:
+			message = "Online server not available. You can still play vs Computer or Pass & Play."
+		if is_instance_valid(online_view):
+			online_view.set_status(message)
+			if online_view.controls.has("create_name"): online_view.controls.create_name.disabled = false
+	elif overlay == "settings": _settings_name_status()
+	elif page == "online": _online_status()
+func _settings_name_status():
+	if controls.has("name_status"): controls.name_status.text = message
+func _online_status():
+	if is_instance_valid(online_view): online_view.set_status(message)
+func _refresh_lobby():
+	if test_online_bypass or _debug_capture or page != "online" or online_state != "lobby" or _lobby_pending: return
+	_lobby_pending = true
+	online_api.submit("/rooms",HTTPClient.METHOD_GET,{},"lobby",account.store.data.device_token)
+func open_leaderboard():
+	_leave_online(); page = "leaderboard"; overlay = ""; message = "Loading match records…"; _rebuild()
+	if not test_online_bypass: online_api.submit("/leaderboard",HTTPClient.METHOD_GET,{},"leaderboard",account.store.data.device_token)
+func _online_response(operation: String, _response: int, data: Dictionary, problem: String):
+	if operation == "lobby":
+		_lobby_pending = false
+		if page != "online" or online_state != "lobby": return
+		message = problem if not problem.is_empty() else "Public games refresh automatically."
+		if problem.is_empty(): public_rooms = data.get("rooms",[]) if data.get("rooms") is Array else []
+		if is_instance_valid(online_view): online_view.set_rooms(public_rooms); online_view.set_status(message)
+	elif operation == "leaderboard" and page == "leaderboard":
+		message = problem
+		if problem.is_empty():
+			var mapped = leaderboard_payload(data); leaderboard_players = mapped.players; leaderboard_me = mapped.me
+		_rebuild()
+static func leaderboard_payload(data: Dictionary) -> Dictionary:
+	# Public UI deliberately selects only full-match wins; internal boards_won is omitted.
+	var players: Array = []
+	if data.get("players") is Array:
+		for player in data.players:
+			if player is Dictionary:
+				var rank = player.get("rank")
+				players.append({"rank":int(rank) if rank != null else null,"screen_name":str(player.get("screen_name","Player")),"matches_won":int(player.get("matches_won",0))})
+	var me: Dictionary = {}
+	if data.get("me") is Dictionary:
+		for key in ["rank","screen_name","matches_won","matches_played"]: me[key] = data.me.get(key,0 if key in ["matches_won","matches_played"] else null)
+		for key in ["matches_won","matches_played"]: me[key] = int(me[key])
+		if me.rank != null: me.rank = int(me.rank)
+	return {"players":players,"me":me}
+func _online_action(kind: String, value: String):
+	sound.cue("ui")
+	match kind:
+		"home": go_home()
+		"lobby": open_online()
+		"leaderboard": open_leaderboard()
+		"register":
+			account.create_screen_name(_onboarding_name if value.is_empty() else value)
+			if is_instance_valid(online_view) and online_view.controls.has("create_name"): online_view.controls.create_name.disabled = account.busy
+		"create_public": create_online()
+		"private": online_state = "private"; message = ""; _rebuild()
+		"create_private": create_online(false,true,_room_password)
+		"join", "join_private": join_online(_room_entry if value.is_empty() else value,false,_room_password if kind == "join_private" else "")
+		"demo": create_online(true)
+		"invite": invite_demo_rival()
+		"copy": DisplayServer.clipboard_set(room_code); message = "Room code copied."; _online_status()
+func _online_draft(kind: String, value: String):
+	match kind:
+		"screen_name": _onboarding_name = value
+		"room_code": _room_entry = value
+		"password": _room_password = value
+func _build_online_screen(s: Vector2):
+	online_view = OnlineScreen.new(); online_view.size = s
+	online_view.screen = page if page in ["onboarding","leaderboard"] else online_state
+	online_view.screen_name = _onboarding_name if page == "onboarding" else str(account.store.data.screen_name)
+	online_view.room_code = room_code if online_state == "waiting" else _room_entry
+	online_view.password = _room_password; online_view.status = message; online_view.rooms = public_rooms
+	online_view.players = leaderboard_players; online_view.me = leaderboard_me
+	online_view.local_demo = transport is Loopback
+	online_view.private_room = transport.private_room if transport is HTTP else false
+	online_view.busy = account.busy
+	online_view.action.connect(_online_action); online_view.draft_changed.connect(_online_draft)
+	add_child(online_view); ui_nodes.append(online_view); controls.merge(online_view.controls)
 
 func _clear_nodes():
 	for n in ui_nodes:
 		if is_instance_valid(n): remove_child(n); n.queue_free()
-	ui_nodes.clear(); controls.clear(); history_label = null; _result_bases.clear(); field_heroes.clear(); hero_select = null
+	ui_nodes.clear(); controls.clear(); online_view = null; history_label = null; _result_bases.clear(); field_heroes.clear(); hero_select = null
 func _button(id: String, caption: String, rect: Rect2, callback: Callable, accent: bool = false, icon: String = ""):
 	var b = OrnateButton.new(); b.name = id; b.caption = caption; b.tooltip_text = caption if not caption.is_empty() else id.capitalize()
 	b.icon_kind = icon
@@ -607,7 +761,7 @@ func _rebuild():
 		hero_select.heading = "PLAYER %d · CHOOSE HERO" % _select_player if _select_player > 0 else "CHOOSE YOUR HERO"
 		hero_select.blocked_id = str(profile.data.character_id) if _select_player == 2 else ""
 		if _select_player > 0: hero_select.display_name = "PLAYER %d" % _select_player
-		hero_select.focused.connect(func(id): _hero_focus = id; sound.prepare_character(Roster.audio_index(id)); sound.cue("ui",-.35))
+		hero_select.focused.connect(func(id): _hero_changed = true; _hero_focus = id; sound.prepare_character(Roster.audio_index(id)); sound.cue("ui",-.35))
 		hero_select.name_changed.connect(func(value): _name_draft = value)
 		hero_select.confirmed.connect(_confirm_hero)
 		hero_select.back.connect(func(): _pending_game = {}; go_home())
@@ -632,7 +786,12 @@ func _rebuild():
 		if controls.has("hint"): controls.hint.disabled = not settings.values.show_hints
 		if layout.has("history"): _create_history(layout.history)
 		_create_field_heroes()
-	elif page == "online": _online_controls(s)
+	elif page in ["online","onboarding","leaderboard"]: _build_online_screen(s)
+	if is_instance_valid(lobby_timer):
+		if page == "online" and online_state == "lobby" and not test_online_bypass and not _debug_capture:
+			if lobby_timer.is_stopped(): lobby_timer.start()
+		else:
+			lobby_timer.stop(); online_api.cancel_all(); _lobby_pending = false
 	if overlay == "result": _winner_controls(s)
 	elif not overlay.is_empty(): _overlay_controls(s)
 	queue_redraw()
@@ -728,23 +887,6 @@ func _refresh_history():
 		# Named sides avoid the ambiguous "O 0" glyph pairing in Rajdhani.
 		lines.append("%d. %s > %s · %s" % [i+1,"Crystal X" if m.player == 1 else "Gold O",Rules.BOARD_NAMES[m.board],Rules.BOARD_NAMES[m.cell]])
 	history_label.text = "\n".join(lines) if not lines.is_empty() else "Your story begins here."
-func _online_controls(s: Vector2):
-	var short = (s.x > s.y and s.y < 500) or hinge_rect.size.x > 0
-	var pw = s.x*.44 if short else minf(460,s.x-32); var x = s.x*.53 if short else (s.x-pw)/2
-	_button("back","Menu",Rect2(16,16,110,44),go_home,false,"back")
-	var y = 64.0 if short else maxf(140,s.y*.3)
-	if online_state == "waiting":
-		_button("copy","Copy code",Rect2(x+24,y+(124 if short else 150),pw-48,44 if short else 48),func(): DisplayServer.clipboard_set(room_code); message = "Room code copied")
-		if transport is Loopback: _button("demo_join","Invite demo rival",Rect2(x+24,y+(180 if short else 210),pw-48,44 if short else 48),invite_demo_rival,true)
-		_button("cancel","Leave room",Rect2(20,s.y-60,minf(200,s.x*.42),44) if short else Rect2(x+24,y+270,pw-48,44),open_online)
-	else:
-		_button("create","Create Room",Rect2(x+24,y,pw-48,50),func(): create_online(false),true)
-		var field = _field("room_code","Enter 5-character code",Rect2(x+24,y+(62 if short else 70),pw-48,48),_room_entry)
-		field.max_length = 5
-		field.text_changed.connect(func(value): _room_entry = value)
-		field.text_submitted.connect(func(value): join_online(value))
-		_button("join","Join Room",Rect2(x+24,y+(120 if short else 130),pw-48,48),func(): join_online(str(controls.room_code.text)))
-		_button("demo","Try Local Online Demo",Rect2(x+24,y+(180 if short else 200),pw-48,48),func(): create_online(true))
 func _overlay_controls(s: Vector2):
 	for item in controls.values():
 		item.release_focus(); item.focus_mode = Control.FOCUS_NONE
@@ -788,9 +930,18 @@ func _overlay_controls(s: Vector2):
 		y += 52
 		var name_field = _field("player_name","Screen name",Rect2(rx,y,sw,44),str(settings.values.player_name))
 		name_field.max_length = 24
-		name_field.text_changed.connect(func(value):
-			var clean = value.strip_edges().left(24)
-			settings.set_value("player_name",clean); profile.data.display_name = clean; profile.save())
+		if not test_online_bypass and not str(account.store.data.device_token).is_empty():
+			name_field.size.x = sw-90
+			_button("save_name","Save",Rect2(rx+sw-82,y,82,44),func(): account.rename(str(controls.player_name.text)))
+			name_field.text_submitted.connect(account.rename)
+			var notice = Label.new(); notice.position = Vector2(rx,y+46); notice.size = Vector2(sw,34)
+			notice.text = message; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			notice.add_theme_font_override("font",P.SANS); notice.add_theme_font_size_override("font_size",16); notice.add_theme_color_override("font_color",P.PALE)
+			add_child(notice); ui_nodes.append(notice); controls["name_status"] = notice
+		else:
+			name_field.text_changed.connect(func(value):
+				var clean = value.strip_edges().left(24)
+				settings.set_value("player_name",clean); profile.data.display_name = clean; profile.save())
 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
 		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
 	elif overlay == "cosmetics":
@@ -1177,24 +1328,7 @@ func _draw_fx_overlay(n: Control):
 			n.draw_line(tail,pos,Color(bc,a*.75),2,true)
 			if i%4 == 0: P.halo(n,pos,5,Color(bc,a*.8))
 func _draw_online():
-	var s: Vector2 = layout.size
-	var short = (s.x > s.y and s.y < 500) or hinge_rect.size.x > 0
-	var title_w = s.x*.46 if short else s.x-40
-	P.text(self,"THE CELESTIAL ARENA",Rect2(20,70,title_w,48),27,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
-	P.text(self,"A friend. Nine boards. One shared sky.",Rect2(20,118,title_w,30),17,P.WHITE)
-	var pw = s.x*.44 if short else minf(460,s.x-32); var y = 64.0 if short else maxf(140,s.y*.3); var x = s.x*.53 if short else (s.x-pw)/2
-	if online_state == "waiting":
-		P.panel(self,Rect2(x+16,y-10,pw-32,142),true,1,true)
-		P.text(self,room_code,Rect2(x+24,y+14,pw-48,56),44,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.8)
-		P.text(self,"Waiting for opponent…",Rect2(x+24,y+78,pw-48,34),18,P.WHITE)
-		P.crystal(self,Vector2(s.x*.5,y-48),18,P.BLUE,clock*.6)
-	else:
-		P.text(self,"ONLINE  ·  PRIVATE ROOMS",Rect2(x,y-34,pw,24),15,P.GOLD,P.SERIF)
-	if transport is Loopback:
-		P.text(self,"LOCAL DEMO · simulated remote opponent",Rect2(20,170 if short else y+330,title_w if short else s.x-40,28),14,P.BLUE)
-	if not message.is_empty():
-		var lines = message.replace(". Try ",".\nTry ")
-		for i in lines.split("\n").size(): P.text(self,lines.split("\n")[i],Rect2(20,(202 if short else minf(s.y-76,y+370))+i*22,title_w if short else s.x-40,24),15,P.GOLD)
+	pass # OnlineScreen owns its chrome.
 func _draw_modal(node: Control):
 	var s: Vector2 = layout.size; var r = _modal_rect
 	var short = s.x > s.y and s.y < 500
@@ -1280,6 +1414,19 @@ func debug_scenario(scenario: String, progress: float = .45):
 	if not OS.is_debug_build(): return
 	_debug_capture = true; clock = 4; backdrop.clock = 4; P.clock = 4
 	if scenario == "title": page = "title"; overlay = ""; board.clear_effects(); _rebuild(); return
+	if scenario in ["onboarding","online_lobby","online_private","online_leaderboard","online_unranked"]:
+		_leave_online(); cinematic.clear(); overlay = ""; message = ""
+		_onboarding_name = ""; _room_entry = ""; _room_password = ""
+		public_rooms = [{"code":"N9ABC","host_name":"Dana","host_hero":"aiden_vortex"},{"code":"SKY42","host_name":"Patrick","host_hero":"erick_comet"}]
+		leaderboard_players = [{"rank":1,"screen_name":"Dana","matches_won":12},{"rank":2,"screen_name":"Patrick","matches_won":8}]
+		leaderboard_me = {"screen_name":"Weaver","rank":80,"matches_won":2,"matches_played":9}
+		if scenario == "onboarding": page = "onboarding"
+		elif scenario in ["online_leaderboard","online_unranked"]:
+			page = "leaderboard"
+			if scenario == "online_unranked": leaderboard_me = {"screen_name":"Weaver","rank":1,"matches_won":0,"matches_played":0}
+		else:
+			page = "online"; online_state = "private" if scenario == "online_private" else "lobby"
+		_rebuild(); return
 	if scenario in ["select_p1","select_p2","select_p3","select_p4"]:
 		request_game("local"); _hero_focus = "vesper_vale"
 		if scenario == "select_p2":
@@ -1382,7 +1529,7 @@ func _winner_controls(s: Vector2):
 		add_child(button); ui_nodes.append(button); controls[item[0]] = button
 	_apply_result_anim()
 	if mode == "online" and is_instance_valid(transport):
-		controls.again.disabled = transport.local_rematch
+		controls.again.disabled = transport.local_rematch or not remote_ready
 		controls.again.caption = "ACCEPT" if transport.remote_rematch and not transport.local_rematch else "REMATCH"
 		var label = Label.new(); label.z_index = 31; label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		label.text = message if not message.is_empty() else transport.rematch_status(); label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

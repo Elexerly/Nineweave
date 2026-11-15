@@ -41,7 +41,7 @@ SHA=unqueried
 BRANCH=unqueried
 TREE="Owner requested no git commands"
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 4b
+Nineweave Round 4c (online)
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE

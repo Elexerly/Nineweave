@@ -36,7 +36,7 @@ func run():
 	spotlight_inset()
 	select_plaque()
 	await callout_fine_steps()
-	var ui = Main.instantiate(); ui.settings = Store.new("user://r3c-ui.cfg"); ui.profile = Profile.new("user://r3c-profile.cfg")
+	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.settings = Store.new("user://r3c-ui.cfg"); ui.profile = Profile.new("user://r3c-profile.cfg")
 	ui.settings.values.sound = false; ui.settings.values.reduced_motion = false; ui.profile.data.onboarded = true
 	root.add_child(ui); await frames()
 	await live_pops(ui)

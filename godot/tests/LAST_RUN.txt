@@ -3,24 +3,24 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 NINEWEAVE_RULES PASS checks=3121037 failures=0 fuzz_games=2400 fuzz_moves=141611
 Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 
-AI incremental slices=75 max_slice_ms=2.81
+AI incremental slices=76 max_slice_ms=2.86
 AI_STRENGTH Medium vs Easy N=30 wins=29 draws=1 losses=0 rate=96.6666666666667% moves=1194 node_limit=700
 AI_STRENGTH Hard vs Easy N=30 wins=30 draws=0 losses=0 rate=100.0% moves=1091 node_limit=700
-AI_TIMING Hard samples=45 mean_ms=154.74 max_ms=250.3 hard_ceiling_ms=450
+AI_TIMING Hard samples=45 mean_ms=149.81 max_ms=250.22 hard_ceiling_ms=450
 NINEWEAVE_AI PASS checks=2566 failures=0
 Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 
 NINEWEAVE_LAYOUT PASS checks=1948 failures=0 sizes=25
 Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 
-NINEWEAVE_UI PASS checks=867 failures=0
+NINEWEAVE_UI PASS checks=887 failures=0
 Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 
-AUDIO synthesis_all_ms=1939.931 (lazy; startup only unlock)
+AUDIO synthesis_all_ms=1894.013 (lazy; startup only unlock)
 NINEWEAVE_ROUND3 PASS checks=912 failures=0
 Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 
-LEAK games=56 nodes_after_6=37.0 nodes_after_56=37.0 orphans=0.0→0.0
+LEAK games=56 nodes_after_6=45.0 nodes_after_56=45.0 orphans=0.0→0.0
 NINEWEAVE_ROUND3B PASS checks=597 failures=0
 Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 
@@ -39,4 +39,7 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 
 FLIP_VISIBILITY transform/clip=PASS; real-pixel probe requires a display
 NINEWEAVE_ROUND4B PASS checks=57940 failures=0
-NINEWEAVE ROUND4B TEST SUMMARY: PASS (11/11 suites; rules, AI, layout, UI, Round 3, Round 3b, Round 3c, audio, Round 3e, Round 4, Round 4b)
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+NINEWEAVE_ROUND4C PASS checks=340 failures=0
+NINEWEAVE ROUND4C TEST SUMMARY: PASS (12/12 suites; rules, AI, layout, UI, Round 3, Round 3b, Round 3c, audio, Round 3e, Round 4, Round 4b, Round 4c)

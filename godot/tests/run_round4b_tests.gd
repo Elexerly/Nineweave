@@ -26,7 +26,7 @@ func run():
 	await lazy_selection()
 	assets()
 	aliases()
-	var ui = Main.instantiate(); ui.profile = Profile.new("user://r4b-profile.cfg"); ui.settings = Store.new("user://r4b-settings.cfg")
+	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.profile = Profile.new("user://r4b-profile.cfg"); ui.settings = Store.new("user://r4b-settings.cfg")
 	ui.profile.data.character_id = "cryon"; ui.profile.data.display_name = "Patrick"; ui.profile.data.onboarded = true
 	ui.settings.values.sound = false; ui.settings.values.player_name = "Patrick"; ui.settings.values.reduced_motion = false
 	root.add_child(ui); ui.set_process(false); await frames()

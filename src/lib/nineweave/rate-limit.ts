@@ -9,6 +9,8 @@ export interface RateLimits {
   join: number;
   move: number;
   write: number;
+  email: number;
+  verify: number;
 }
 
 export const DEFAULT_LIMITS: RateLimits = {
@@ -17,6 +19,8 @@ export const DEFAULT_LIMITS: RateLimits = {
   join: 40,
   move: 180, // moves + rematch + leave
   write: 30, // PATCH /me
+  email: 10, // code requests: verification + recovery
+  verify: 30, // code confirmations: verification + recovery
 };
 
 export class RateLimiter {

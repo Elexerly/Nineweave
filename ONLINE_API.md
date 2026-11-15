@@ -271,7 +271,7 @@ The body is optional: `{"screen_name":"Patrick","last_hero_id":"cryon","tos_vers
 `201`:
 
 ```json
-{"token":"nwd_…","player_id":"p_AbC…","player":{"player_id":"p_AbC…","screen_name":null,"last_hero_id":null,"purchases":[],"unlocks":[],"matches_won":0,"matches_played":0,"matches_lost":0,"boards_won":0,"tos_version":null,"privacy_version":null,"accepted_at":null,"age_confirmed":null,"rank":1}}
+{"token":"nwd_…","player_id":"p_AbC…","player":{"player_id":"p_AbC…","screen_name":null,"last_hero_id":null,"purchases":[],"unlocks":[],"matches_won":0,"matches_played":0,"matches_lost":0,"boards_won":0,"tos_version":null,"privacy_version":null,"accepted_at":null,"age_confirmed":null,"email":null,"email_status":"none","email_verified_at":null,"capabilities":{"email":true},"rank":1}}
 ```
 
 The token is shown **only here**, so store it securely on the device.
@@ -286,12 +286,21 @@ Requires a device token. `200`: the `player` object above. `rank` is
 1 + the number of ranked players with more matches won (ties share a rank).
 `401` if the token is missing or unknown.
 
+- `capabilities`: feature flags. `capabilities.email: true` means this server
+  supports the [Email](#email) fields and endpoints. Clients must not send
+  `email` anywhere until they see it.
+- `email`: the stored address, lowercased, or `null`. Private to the player:
+  it never appears on the leaderboard or in room envelopes.
+- `email_status`: server-owned, `"none"` | `"unverified"` | `"verified"`.
+- `email_verified_at`: ISO-8601 time of the last successful confirmation, or
+  `null`.
+
 #### `PATCH /me`
 
 Requires a device token. Send any subset of these fields:
 
 ```json
-{"screen_name":"Patrick","last_hero_id":"vesper_vale","purchases":["sku"],"unlocks":["cryon"],"tos_version":"2026-11-15","privacy_version":"2026-11-15","accepted_at":"2026-11-15T12:00:00.000Z","age_confirmed":true}
+{"screen_name":"Patrick","last_hero_id":"vesper_vale","purchases":["sku"],"unlocks":["cryon"],"tos_version":"2026-11-15","privacy_version":"2026-11-15","accepted_at":"2026-11-15T12:00:00.000Z","age_confirmed":true,"email":"pat@example.com"}
 ```
 
 - `screen_name`: see [Names](#names). Must be unique case-insensitively
@@ -303,6 +312,8 @@ Requires a device token. Send any subset of these fields:
   ⚠️ These are client-asserted and unverified until Apple IAP receipt
   validation exists. Never treat them as proof of payment.
 - Consent fields: see [Consent](#consent).
+- `email`: see [Email](#email). Stores the address only (no code is sent).
+  `null` or `""` clears it.
 - Unknown fields return `400`.
 
 `200`: the updated `player` object. Errors: `400`, `401`, `409`, `429`.
@@ -328,6 +339,123 @@ appears only in `me`, never in the public rows.
 
 - `GET /health` returns `{"ok":true}`.
 - `GET /heroes` returns `{"heroes":[…32 canonical IDs…],"aliases":{…}}`.
+
+## Email
+
+Players may attach one email address and prove they own it with a 6-digit
+code. Only a **verified** address can be used to [recover the
+account](#account-recovery-by-email) on a new device. The server owns
+`email_status`; the client never sets it.
+
+**Address rules.** Trimmed and lowercased, at most 254 characters (local
+part at most 64), one `@`, a dotted domain, no spaces or consecutive dots.
+Invalid addresses return `400 {"error":"Enter a valid email address (at most 254 characters)"}`.
+
+**Changing the address resets verification.** `PATCH /me` with a different
+address (or `null`/`""`) sets `email_verified_at` to `null` and kills every
+unused code of that player. Re-sending the same address (any case) changes
+nothing.
+
+**Uniqueness.** A verified address belongs to exactly one player (unique
+index on `lower(email)` where `email_verified_at is not null`). Unverified
+copies of the same address may sit on several players. The first successful
+confirm wins; every other open code for that address is then dead, and
+requesting or confirming a code for it from another player returns
+`409 {"error":"That email is already used by another account."}`. Storing
+it unverified with `PATCH /me` is still allowed.
+
+### `POST /me/email/verification`: send a code
+
+Requires a device token. Body `{"email":"pat@example.com"}`, or `{}` to use
+the stored address. If the address differs from the stored one it is saved
+as the player's (unverified) address first.
+
+`200`:
+
+```json
+{"challenge_id":"ec_AbC…","expires_at":"2026-11-15T12:10:00.000Z","resend_available_at":"2026-11-15T12:01:00.000Z","email":"pat@example.com"}
+```
+
+The code is emailed from `Nineweave <no-reply@nineweave.sitebloc.com>`. It is
+never returned and never stored (only `sha256` over challenge id + code).
+A new request supersedes the player's previous unused code.
+
+| Status | When |
+|---|---|
+| `400` | Invalid address, no address given or stored, unknown field |
+| `401` | Missing or unknown device token |
+| `409` | Address already verified on another account, or already verified on yours |
+| `429` | Cooldown or hourly cap (body adds `retry_after_seconds`), or IP limit |
+| `502` | The email provider didn't accept the message: `"Could not send email. Try again shortly."` (the challenge is discarded) |
+| `503` | Email isn't configured on this server: `"Email verification is not available on this server yet"` |
+
+### `POST /me/email/verification/confirm`
+
+Requires a device token. Body `{"challenge_id":"ec_…","code":"123456"}`
+(spaces in the code are ignored; a JSON number is accepted).
+
+`200`: the updated `player` object with `email_status:"verified"`.
+
+| Status | When |
+|---|---|
+| `400` | `code` isn't 6 digits, `challenge_id` missing, or unknown field |
+| `400` | `"Invalid or expired code"`: wrong code, expired, already used, superseded, address changed since, or out of attempts. One message for all of them. |
+| `401` | Missing or unknown device token |
+| `404` | No such challenge for this player (unknown id, or another player's) |
+| `409` | Another account verified this address first |
+| `429` | IP limit |
+
+### Code limits
+
+| Limit | Value | Where enforced |
+|---|---|---|
+| Code lifetime | 10 minutes | database |
+| Guesses per code | 5 (the 6th is refused even if right) | database, atomic counter |
+| Resend cooldown | 60 s per player | database |
+| Codes per player | 5 per rolling hour | database |
+| Codes per address | 5 per rolling hour (all players combined) | database |
+| Requests per IP | 10/min (send), 30/min (confirm) | per instance, best-effort |
+
+Failed sends count toward the hourly caps. The database caps hold across
+serverless instances.
+
+### Account recovery by email
+
+Signs a player in on a new device using their **verified** address. Neither
+endpoint needs a token. Unverified addresses can't recover.
+
+`POST /auth/email/recover` with `{"email":"pat@example.com"}` always answers
+`200 {"challenge_id":"ec_…","expires_at":"…","resend_available_at":"…"}`,
+whether or not the address is verified on an account, throttled, or the send
+failed, so it can't be used to test which addresses are registered. A code
+(subject "Your Nineweave sign-in code") is sent only when the address is
+verified on an account and no limit is hit. Errors: `400` (invalid address),
+`429` (IP limit), `503` (email not configured).
+
+`POST /auth/email/recover/confirm` with `{"challenge_id":"ec_…","code":"123456"}`
+returns `200` in the same shape as `POST /auth/device`:
+
+```json
+{"token":"nwd_…","player_id":"p_AbC…","player":{…}}
+```
+
+The new device token **replaces** the old one: the previous device is
+signed out (`401` on its next call). Multiple devices per player may come in
+a later revision. Every failure (unknown id, wrong, expired, used, out of
+attempts, address changed or unverified since) is
+`400 {"error":"Invalid or expired code"}`. The same code limits apply; a
+verification code can't be used here and vice versa.
+
+Known limitation: a request for a verified address does a little more work
+(it sends an email) than one for an unknown address, so response timing may
+differ slightly.
+
+### Server configuration
+
+The builder must set the secret `NINEWEAVE_RESEND_API_KEY` (a Resend API key
+for the `nineweave.sitebloc.com` domain). Without it, `GET /me` still
+advertises `capabilities.email` and `PATCH /me` still stores addresses, but
+sending a code answers `503`. The key is read at runtime and never logged.
 
 ## Records
 
@@ -442,6 +570,11 @@ window, so treat them as best-effort. Exceeding one returns `429`.
 | `POST /rooms/<CODE>/join` | 40 |
 | moves, rematch, leave and cancel combined | 180 |
 | `PATCH /me` | 30 |
+| `POST /me/email/verification` + `POST /auth/email/recover` | 10 |
+| `POST /me/email/verification/confirm` + `POST /auth/email/recover/confirm` | 30 |
+
+Email codes also have per-player and per-address caps enforced in the
+database; see [Code limits](#code-limits).
 
 ## CORS
 
@@ -477,12 +610,14 @@ available yet".
 | 403 | Token not in this room, not your turn, wrong room password, or not the host (cancel) |
 | 404 | Unknown path or no such room |
 | 405 | Wrong method |
-| 409 | Room full or state conflict (stale/future seq, stale round, closed, waiting); name taken |
+| 404 | Email verification challenge not found for this player |
+| 409 | Room full or state conflict (stale/future seq, stale round, closed, waiting); name taken; email already verified elsewhere |
 | 413 | Body over 8 KB |
 | 422 | Illegal move or game finished |
 | 429 | Rate limited |
 | 500 | Unexpected server error (details are logged, not returned) |
-| 503 | Not configured, or room contention (retry) |
+| 502 | Email provider didn't accept a code email |
+| 503 | Not configured (database, or email for code requests), or room contention (retry) |
 
 ## Godot client notes (additive changes)
 
@@ -494,3 +629,15 @@ available yet".
   credentials. Otherwise an abandoned match is forfeited after 180 s by the
   player due to move.
 - `opponent_left` stays `true` on every later poll, so emit once client-side.
+- Email (Round 4e): wait until `GET /me` returns `capabilities.email: true`.
+  Until then keep the address local and send nothing. Once advertised:
+  `PATCH /me {"email": …}` to store it, `POST /me/email/verification` to
+  send a code, show the code-entry stage with `expires_at` /
+  `resend_available_at`, then `POST /me/email/verification/confirm`. Treat
+  `email_status` / `email_verified_at` from the server as the only truth and
+  feed them to `set_verification_status`. On `409` show the error text; on
+  `429` use `retry_after_seconds`; on `502`/`503` show "Email isn't
+  available right now".
+- Sign in on a new device: `POST /auth/email/recover`, then
+  `POST /auth/email/recover/confirm`; store the returned device token in
+  place of the old one.

@@ -1,8 +1,10 @@
 /**
  * Service context shared by the player and room modules: database, clock,
- * randomness, timeouts and the rate limiter. Tests inject PGlite and a fake
- * clock; production builds one from `getSql()` (see `server.ts`).
+ * randomness, timeouts, the rate limiter and the mailer. Tests inject PGlite,
+ * a fake clock and a recording mailer; production builds one from `getSql()`
+ * and the Resend key (see `server.ts`).
  */
+import type { Mailer } from "./mailer.ts";
 import { RateLimiter, type RateLimits } from "./rate-limit.ts";
 import type { Db } from "./store.ts";
 
@@ -19,6 +21,8 @@ export interface Service {
   /** Minimum gap between opportunistic global cleanup sweeps. */
   cleanupIntervalMs: number;
   lastCleanupMs: number;
+  /** Outgoing email; `null` when not configured (email endpoints answer 503). */
+  mailer: Mailer | null;
 }
 
 export interface ServiceOptions {
@@ -29,6 +33,7 @@ export interface ServiceOptions {
   turnTimeoutMs?: number;
   lobbyTimeoutMs?: number;
   cleanupIntervalMs?: number;
+  mailer?: Mailer | null;
 }
 
 export function createService(opts: ServiceOptions): Service {
@@ -41,6 +46,7 @@ export function createService(opts: ServiceOptions): Service {
     lobbyTimeoutMs: opts.lobbyTimeoutMs ?? LOBBY_TIMEOUT_MS,
     cleanupIntervalMs: opts.cleanupIntervalMs ?? 5_000,
     lastCleanupMs: Number.NEGATIVE_INFINITY,
+    mailer: opts.mailer ?? null,
   };
 }
 

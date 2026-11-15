@@ -32,10 +32,58 @@ export interface PlayerRow {
   privacy_version: string | null;
   accepted_at: Date | null;
   age_confirmed: boolean | null;
+  email: string | null;
+  email_verified_at: Date | null;
 }
 
 const PLAYER_COLUMNS =
-  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, created_at, tos_version, privacy_version, accepted_at, age_confirmed";
+  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, created_at, tos_version, privacy_version, accepted_at, age_confirmed, email, email_verified_at";
+
+/** Feature flags the client checks before using newer endpoints. */
+export const CAPABILITIES = { email: true } as const;
+
+export type EmailStatus = "none" | "unverified" | "verified";
+
+export function emailStatus(p: Pick<PlayerRow, "email" | "email_verified_at">): EmailStatus {
+  if (!p.email) return "none";
+  return p.email_verified_at ? "verified" : "unverified";
+}
+
+export const EMAIL_MAX = 254;
+const EMAIL_LOCAL_MAX = 64;
+const EMAIL_RE =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+
+/**
+ * Trim + lowercase + basic shape check. Returns `null` for an empty value
+ * (meaning "clear"), or throws 400.
+ */
+export function normalizeEmail(value: unknown, field = "email"): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") throw new ApiError(400, `${field} must be a string or null`);
+  const email = value.trim().toLowerCase();
+  if (!email) return null;
+  const at = email.lastIndexOf("@");
+  if (
+    email.length > EMAIL_MAX ||
+    at < 1 ||
+    at > EMAIL_LOCAL_MAX ||
+    email.includes("..") ||
+    email.startsWith(".") ||
+    email.slice(0, at).endsWith(".") ||
+    !EMAIL_RE.test(email)
+  )
+    throw new ApiError(400, "Enter a valid email address (at most 254 characters)");
+  return email;
+}
+
+export async function playerById(svc: Service, id: string): Promise<PlayerRow | null> {
+  const rows = await svc.db.query<PlayerRow>(
+    `select ${PLAYER_COLUMNS} from nw_players where id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
 
 /** Players eligible for the public leaderboard. */
 const LEADERBOARD_WHERE = "screen_name is not null and matches_played > 0";
@@ -83,6 +131,10 @@ export async function profile(svc: Service, p: PlayerRow) {
     privacy_version: p.privacy_version,
     accepted_at: p.accepted_at ? new Date(p.accepted_at).toISOString() : null,
     age_confirmed: p.age_confirmed,
+    email: p.email,
+    email_status: emailStatus(p),
+    email_verified_at: p.email_verified_at ? new Date(p.email_verified_at).toISOString() : null,
+    capabilities: { ...CAPABILITIES },
     rank: await rankOf(svc, p.matches_won),
   };
 }
@@ -125,9 +177,7 @@ export async function registerDevice(svc: Service, body: Record<string, unknown>
     if (screenNameTaken(err)) throw new ApiError(409, "That screen name is taken");
     throw err;
   }
-  const player = (
-    await svc.db.query<PlayerRow>(`select ${PLAYER_COLUMNS} from nw_players where id = $1`, [id])
-  )[0];
+  const player = (await playerById(svc, id))!;
   return { token, player_id: id, player: await profile(svc, player) };
 }
 
@@ -159,6 +209,8 @@ interface ProfileFields {
   privacy_version?: string;
   accepted_at?: Date;
   age_confirmed?: boolean;
+  /** `null` clears the address. */
+  email?: string | null;
 }
 
 function validateProfileFields(
@@ -193,6 +245,7 @@ function validateProfileFields(
       throw new ApiError(400, "age_confirmed must be a boolean");
     out.age_confirmed = body.age_confirmed;
   }
+  if (body.email !== undefined) out.email = normalizeEmail(body.email);
   return out;
 }
 
@@ -200,7 +253,10 @@ function validateVersion(value: unknown, field: string): string {
   if (typeof value !== "string") throw new ApiError(400, `${field} must be a string`);
   const v = value.trim();
   if (!v || v.length > VERSION_MAX || !VERSION_RE.test(v))
-    throw new ApiError(400, `${field} must be 1–${VERSION_MAX} letters, digits, dots, underscores or dashes`);
+    throw new ApiError(
+      400,
+      `${field} must be 1–${VERSION_MAX} letters, digits, dots, underscores or dashes`,
+    );
   return v;
 }
 
@@ -228,6 +284,7 @@ export async function updateMe(svc: Service, player: PlayerRow, body: Record<str
     "privacy_version",
     "accepted_at",
     "age_confirmed",
+    "email",
   ]);
   const sets: string[] = [];
   const params: unknown[] = [player.id];
@@ -243,11 +300,20 @@ export async function updateMe(svc: Service, player: PlayerRow, body: Record<str
   if (fields.privacy_version !== undefined) add("privacy_version", fields.privacy_version);
   const acceptedAt =
     fields.accepted_at ??
-    (fields.tos_version !== undefined || fields.privacy_version !== undefined || fields.age_confirmed !== undefined
+    (fields.tos_version !== undefined ||
+    fields.privacy_version !== undefined ||
+    fields.age_confirmed !== undefined
       ? svc.now()
       : undefined);
   if (acceptedAt !== undefined) add("accepted_at", acceptedAt);
   if (fields.age_confirmed !== undefined) add("age_confirmed", fields.age_confirmed);
+  // A new (or cleared) address drops ownership verification; re-sending the
+  // same address keeps it.
+  const emailChanged = fields.email !== undefined && fields.email !== (player.email ?? null);
+  if (emailChanged) {
+    add("email", fields.email);
+    add("email_verified_at", null);
+  }
   add("updated_at", svc.now());
   try {
     await svc.db.query(`update nw_players set ${sets.join(", ")} where id = $1`, params);
@@ -255,12 +321,18 @@ export async function updateMe(svc: Service, player: PlayerRow, body: Record<str
     if (screenNameTaken(err)) throw new ApiError(409, "That screen name is taken");
     throw err;
   }
-  const fresh = (
-    await svc.db.query<PlayerRow>(`select ${PLAYER_COLUMNS} from nw_players where id = $1`, [
-      player.id,
-    ])
-  )[0];
-  return profile(svc, fresh);
+  if (emailChanged) await invalidateOpenChallenges(svc, player.id);
+  return profile(svc, (await playerById(svc, player.id))!);
+}
+
+/** Kill every unused email code of this player (address changed or cleared). */
+export async function invalidateOpenChallenges(svc: Service, playerId: string, purpose?: string) {
+  await svc.db.query(
+    `update nw_email_challenges set invalidated_at = $2
+      where player_id = $1 and consumed_at is null and invalidated_at is null
+        and ($3::text is null or purpose = $3)`,
+    [playerId, svc.now(), purpose ?? null],
+  );
 }
 
 export const LEADERBOARD_DEFAULT = 50;

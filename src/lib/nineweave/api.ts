@@ -5,6 +5,12 @@
  * listening server. See ONLINE_API.md for the contract.
  */
 import { corsHeaders } from "./cors.ts";
+import {
+  confirmRecovery,
+  confirmVerification,
+  requestRecovery,
+  requestVerification,
+} from "./email.ts";
 import { HERO_ALIASES, HERO_IDS } from "./heroes.ts";
 import {
   leaderboard,
@@ -101,6 +107,40 @@ async function route(
     if (method !== "POST") methodNotAllowed();
     limit(svc, "device", request);
     return [201, await registerDevice(svc, await readJson(request))];
+  }
+  if (
+    head === "auth" &&
+    code === "email" &&
+    action === "recover" &&
+    (rest.length === 0 || (rest.length === 1 && rest[0] === "confirm"))
+  ) {
+    if (method !== "POST") methodNotAllowed();
+    if (rest.length === 0) {
+      limit(svc, "email", request);
+      return [200, await requestRecovery(svc, await readJson(request))];
+    }
+    if (rest[0] === "confirm") {
+      limit(svc, "verify", request);
+      return [200, await confirmRecovery(svc, await readJson(request))];
+    }
+  }
+  if (
+    head === "me" &&
+    code === "email" &&
+    action === "verification" &&
+    (rest.length === 0 || (rest.length === 1 && rest[0] === "confirm"))
+  ) {
+    if (method !== "POST") methodNotAllowed();
+    if (rest.length === 0) {
+      limit(svc, "email", request);
+      const player = await requirePlayer(svc, bearer);
+      return [200, await requestVerification(svc, player, await readJson(request))];
+    }
+    if (rest[0] === "confirm") {
+      limit(svc, "verify", request);
+      const player = await requirePlayer(svc, bearer);
+      return [200, await confirmVerification(svc, player, await readJson(request))];
+    }
   }
   if (head === "me" && segments.length === 1) {
     if (method === "GET") return [200, await profile(svc, await requirePlayer(svc, bearer))];

@@ -25,7 +25,7 @@ Added:
 | `src/lib/nineweave/server.ts` | Production wiring. Imports the DB lazily and returns 503 when no DB is configured. |
 | `src/routes/api/nineweave/$.ts` | TanStack Start catch-all server route (GET/POST/PATCH/OPTIONS) |
 | `migrations/0002_nineweave_online.sql` | Schema |
-| `scripts/database-url.mjs` | Shared connection-string resolver (`DATABASE_URL`, then `NINEWEAVE_DATABASE_URL` extraction) |
+| `scripts/database-url.mjs` | Shared connection-string resolver (`NINEWEAVE_DATABASE_URL` first, then `DATABASE_URL`; strips pasted `.env` wrappers) |
 | `scripts/sql-split.mjs` (+ `.test.mjs`) | Statement splitter for the HTTP migrator; resolver tests |
 | `src/lib/nineweave/fixtures.ts`, `rules.test.ts`, `online.test.ts` | Tests |
 | `ONLINE_API.md`, `ONLINE_DEPLOY.md`, this file | Docs |

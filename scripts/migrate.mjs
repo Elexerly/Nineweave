@@ -15,8 +15,8 @@
  * The read is non-recursive, so the opt-in auth schema under migrations/auth/
  * is not applied to an app that never asked for sign-in.
  *
- * Connection string: see scripts/database-url.mjs (DATABASE_URL, else the
- * local NINEWEAVE_DATABASE_URL alias). Never printed. None configured ->
+ * Connection string: see scripts/database-url.mjs (NINEWEAVE_DATABASE_URL
+ * when set, else DATABASE_URL). Never printed. None configured ->
  * skip; the PGLite fallback applies the same files at startup instead.
  */
 import { readdir, readFile } from "node:fs/promises";
@@ -31,7 +31,7 @@ const databaseUrl = resolveDatabaseUrl();
 if (!databaseUrl) {
   if (databaseUrlLooksMisconfigured()) {
     console.error(
-      "[migrate] DATABASE_URL is set but is not a postgres:// URL — refusing to guess.",
+      "[migrate] a database env var is set but no postgres:// URL could be extracted — refusing to guess.",
     );
     process.exit(1);
   }

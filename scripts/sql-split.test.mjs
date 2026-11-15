@@ -29,18 +29,33 @@ select $tag$ ; $tag$;`;
 
 describe("resolveDatabaseUrl", () => {
   const url = "postgresql://user:pw@ep-example.neon.tech/db?sslmode=require";
-  it("prefers a postgres DATABASE_URL", () => {
+  const other = "postgres://other/x";
+  it("prefers NINEWEAVE_DATABASE_URL when both are set", () => {
     assert.equal(
       resolveDatabaseUrl({
         DATABASE_URL: ` ${url} `,
-        NINEWEAVE_DATABASE_URL: "postgres://other/x",
+        NINEWEAVE_DATABASE_URL: other,
       }),
-      url,
+      other,
     );
+  });
+  it("falls back to DATABASE_URL when NINEWEAVE_DATABASE_URL is unset", () => {
+    assert.equal(resolveDatabaseUrl({ DATABASE_URL: ` ${url} ` }), url);
   });
   it("extracts the first URL from a pasted NINEWEAVE_DATABASE_URL block", () => {
     const block = `# Neon\nPGHOST=x\nDATABASE_URL='${url}'\nDATABASE_URL_UNPOOLED=postgres://second/db\n`;
     assert.equal(resolveDatabaseUrl({ NINEWEAVE_DATABASE_URL: block }), url);
+  });
+  it("prefers a pasted NINEWEAVE_DATABASE_URL block over DATABASE_URL", () => {
+    const block = `# Neon\nDATABASE_URL='${url}'\n`;
+    assert.equal(
+      resolveDatabaseUrl({ DATABASE_URL: other, NINEWEAVE_DATABASE_URL: block }),
+      url,
+    );
+  });
+  it("extracts a postgres URL from a pasted DATABASE_URL block", () => {
+    const block = `# wrapper\nDATABASE_URL="${url}"\n`;
+    assert.equal(resolveDatabaseUrl({ DATABASE_URL: block }), url);
   });
   it("treats empty/whitespace as unset", () => {
     assert.equal(
@@ -49,9 +64,17 @@ describe("resolveDatabaseUrl", () => {
     );
     assert.equal(resolveDatabaseUrl({}), undefined);
   });
-  it("ignores a non-postgres DATABASE_URL and flags it", () => {
+  it("ignores a non-postgres value and flags it when nothing else is usable", () => {
     assert.equal(resolveDatabaseUrl({ DATABASE_URL: "mysql://x" }), undefined);
     assert.equal(databaseUrlLooksMisconfigured({ DATABASE_URL: "mysql://x" }), true);
+    assert.equal(databaseUrlLooksMisconfigured({ NINEWEAVE_DATABASE_URL: "not-a-url" }), true);
     assert.equal(databaseUrlLooksMisconfigured({ DATABASE_URL: url }), false);
+    assert.equal(
+      databaseUrlLooksMisconfigured({
+        NINEWEAVE_DATABASE_URL: "not-a-url",
+        DATABASE_URL: url,
+      }),
+      false,
+    );
   });
 });

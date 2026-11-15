@@ -4,13 +4,13 @@ import { databaseUrlLooksMisconfigured, resolveDatabaseUrl } from "../../scripts
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
-// Connection string: a postgres `DATABASE_URL` (the deploy secret), else the
-// first postgres URL inside the local `NINEWEAVE_DATABASE_URL` alias. Empty or
+// Connection string: `NINEWEAVE_DATABASE_URL` when a postgres URL can be
+// extracted (plain URL or pasted .env block), else `DATABASE_URL`. Empty or
 // whitespace values mean "unset". Never log the value.
 const databaseUrl = typeof process !== "undefined" ? resolveDatabaseUrl(process.env) : undefined;
 if (typeof process !== "undefined" && !databaseUrl && databaseUrlLooksMisconfigured(process.env)) {
   console.warn(
-    "[db] DATABASE_URL is set but is not a postgres:// URL — using the PGLite fallback.",
+    "[db] a database env var is set but no postgres:// URL could be extracted — using the PGLite fallback.",
   );
 }
 
@@ -18,7 +18,8 @@ if (typeof process !== "undefined" && !databaseUrl && databaseUrlLooksMisconfigu
  * Active backend: real **Neon** (HTTP driver) when a database URL is set (deployed / configured
  * sandbox), otherwise a local embedded **PGLite** (Postgres compiled to WASM) so
  * the app has a working database even with nothing configured — the live preview
- * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
+ * included. Prefer `NINEWEAVE_DATABASE_URL` for Nineweave data; `DATABASE_URL`
+ * remains the fallback. No code changes to switch databases.
  */
 export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
 
@@ -229,7 +230,7 @@ export function getSql(): Promise<Sql> {
  */
 export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite> {
   if (dbSource !== "pglite") {
-    throw new Error("getPglite() is only available on the PGLite fallback (no DATABASE_URL)");
+    throw new Error("getPglite() is only available on the PGLite fallback (no database URL)");
   }
   await getSql();
   const pg = await globalRef.__pgliteInstance__;
@@ -240,7 +241,7 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
 /**
  * Finish DB bootstrap before the server handles traffic.
  *
- * - **PGLite** (preview / no `DATABASE_URL`): open the in-memory DB and apply
+ * - **PGLite** (preview / no database URL): open the in-memory DB and apply
  *   `migrations/*.sql`. Idempotent — concurrent callers share one promise.
  * - **Neon**: no-op (the HTTP client is created lazily on first query).
  *

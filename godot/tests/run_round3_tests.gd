@@ -6,10 +6,13 @@ const Loopback = preload("res://net/loopback_transport.gd")
 const Main = preload("res://main/main.tscn")
 const Roster = preload("res://characters/roster.gd")
 const Profile = preload("res://characters/profile.gd")
+const Reactions = preload("res://characters/reactions.gd")
 const Rig = preload("res://characters/rig.gd")
 const Select = preload("res://characters/select.gd")
 const F = preload("res://tests/fixtures.gd")
 const Paint = preload("res://ui/paint.gd")
+const Cinema = preload("res://characters/cinematic.gd")
+const Layout = preload("res://ui/layout.gd")
 const Store = preload("res://settings/store.gd")
 class RecordingHTTP extends "res://net/http_polling_transport.gd":
 	var sent: Dictionary = {}
@@ -31,11 +34,17 @@ func run():
 	var tick = Time.get_ticks_usec()
 	for cue in Sound.CUES:
 		var stream = sound.stream_for(cue)
-		ok(stream is AudioStreamWAV and stream.data.size() > 200 and stream.mix_rate == 22050 and stream.format == AudioStreamWAV.FORMAT_16_BITS,"valid cue "+cue)
+		ok(stream is AudioStream and stream.get_length() > .02,"valid cue "+cue)
 		ok(sound.stream_for(cue) == stream,"cached cue "+cue)
 	for id in A.TEXT:
 		var stream = sound.stream_for("ann_"+id)
-		ok(stream.data.size() > 200 and stream.get_length() > .5,"callout stinger "+id)
+		ok(stream is AudioStreamOggVorbis and stream.resource_path == Sound.real_path("ann_"+id),"real callout "+id)
+	for id in Sound.REAL_SFX:
+		var stream = sound.stream_for(id)
+		ok(stream is AudioStreamOggVorbis and stream.resource_path == Sound.real_path(id),"real sfx "+id)
+	ok(sound.stream_for("claim_x","res://assets/audio/missing.ogg") is AudioStreamWAV,"missing file synth fallback")
+	for id in ["place_x","place_o"]:
+		ok(sound.stream_for(id).get_length() >= .06 and sound.stream_for(id).get_length() <= .12,"short soft place "+id)
 	var motifs = {}
 	for i in range(12):
 		for length in ["tag","stab","full"]:
@@ -47,7 +56,17 @@ func run():
 	for bus in ["Master","SFX","Music","Announcer"]: ok(AudioServer.get_bus_index(bus) >= 0,"bus "+bus)
 	var event = InputEventKey.new(); event.pressed = true; event.keycode = KEY_SPACE; sound._input(event)
 	ok(sound.unlocked,"first key unlock")
-	sound.announce("nineweave"); sound.advance_mix(.1)
+	var spoken: Array = []; sound.voice_started.connect(func(id): spoken.append(id))
+	sound.announce("ready")
+	ok(sound.voice_id == "ready" and sound.voice_queue[0].id == "weave","ready then weave queued")
+	sound.advance_mix(sound._announcer_left+.05)
+	ok(sound.voice_id.is_empty(),"100ms voice gap")
+	sound.advance_mix(.06); ok(sound.voice_id == "weave","weave follows ready")
+	sound.clear_announcer(); sound.announce("nineweave"); sound.announce("victory","victory")
+	ok(sound.voice_id == "nineweave" and sound.voice_queue[0].id == "victory","win queues victory after ladder")
+	sound.advance_mix(sound._announcer_left+.11); ok(sound.voice_id == "victory","victory follows without overlap")
+	sound.clear_announcer(); sound.announce("defeat","defeat"); ok(sound.voice_id == "defeat","loss voice")
+	sound.advance_mix(.1)
 	ok(sound.duck_db < -3,"announcer ducks")
 	sound.advance_mix(3); sound.advance_mix(1)
 	ok(sound.duck_db > -.1,"duck releases")
@@ -143,6 +162,9 @@ func run():
 	ui.cinematic.advance(.21); ok(ui.cinematic.skip() and ui.overlay == "result" and not ui.board.frozen,"spotlight skip returns to R2 result")
 	for size_value in [Vector2(390,844),Vector2(844,390),Vector2(867,553),Vector2(669,787),Vector2(1366,1024)]:
 		ui.set_view_size(size_value); ui.debug_scenario("duo_panel")
+		for mark in [ui.human_mark,3-ui.human_mark]:
+			var rig = ui.field_heroes[mark]; var rect = Rect2(rig.position,rig.size)
+			ok(not rect.intersects(ui.layout.board) and rig.mouse_filter == Control.MOUSE_FILTER_IGNORE and rig.clip_contents,"nonblocking corner "+str(size_value))
 		ok(ui.layout.has("character") == (ui.layout.mode in ["duo_landscape","duo_portrait"]),"Duo-only side panel "+str(size_value))
 		ok(ui.hero_state(1) == "idle_power" and ui.hero_state(2) == "idle_stagger","board count controls stance "+str(ui.game.owners)+" states="+ui.hero_state(1)+"/"+ui.hero_state(2))
 		var geo = Select.geometry(size_value)
@@ -152,6 +174,69 @@ func run():
 			await process_frame
 			await process_frame
 			ok(ui.page in ["game","character_select"],"posed scenario "+scenario)
+	for view in [Vector2(360,640),Vector2(375,667),Vector2(390,844),Vector2(844,390),Vector2(568,320),Vector2(867,553),Vector2(669,787),Vector2(1366,1024)]:
+		var l = Layout.compute(view); var b: Rect2 = l.board
+		for claimed in range(9):
+			var pop = Cinema.pop_region(l,claimed)
+			var pad = b.size.x*.022; var gap = b.size.x*.018; var edge = (b.size.x-pad*2-gap*2)/3
+			var tile = Rect2(b.position+Vector2(pad+claimed%3*(edge+gap),pad+(claimed/3)*(edge+gap)),Vector2.ONE*edge)
+			ok(not pop.grow(5).intersects(tile),"pop leaves claimed board visible "+str(view)+" "+str(claimed))
+			ok(pop.size.x <= b.size.x*.45 and Rect2(Vector2.ZERO,view).encloses(pop),"compact pop inside view")
+	ui.start_game("computer",1); ui._debug_capture = true; ui.thinking = false
+	ui._apply_move(0,4); ok(ui.board.last_move.x < 0,"own move does not highlight")
+	ui._apply_move(4,0)
+	ok(ui.board.last_move == Vector2i(4,0) and not ui.board.last_move_whole,"AI reply cell highlighted")
+	var cell_highlight = ui.board.last_move_rect(); ui.board.advance(8)
+	ok(ui.board.last_move_rect() == cell_highlight,"white highlight persists without a pulse")
+	ui._apply_move(0,3); ok(ui.board.last_move.x < 0,"own next move clears highlight")
+	ui._apply_move(3,1); ok(ui.board.last_move == Vector2i(3,1),"next opponent reply replaces highlight")
+	ui.undo_move(); ui.thinking = false
+	ok(ui.board.last_move == Vector2i(4,0),"undo restores previous AI highlight")
+	ui._debug_capture = false; ui._save_match(); ui.go_home(); ui.resume_game(); ui.thinking = false; ui._debug_capture = true
+	ok(ui.board.last_move == Vector2i(4,0),"save resume restores AI highlight from history")
+	ui.start_game("local"); ui._debug_capture = true
+	ui._apply_move(0,4); ok(ui.board.last_move == Vector2i(0,4),"pass play previous X")
+	ui._apply_move(4,0); ok(ui.board.last_move == Vector2i(4,0),"pass play previous O")
+	var claim_move = ui._debug_stage(ui.MIDGAME+ui.CLAIM_TAIL); ui.human_mark = 2; ui._refresh_labels()
+	ok(ui.board.last_move == claim_move and ui.board.last_move_whole,"opponent claim highlights whole board")
+	ok(ui.board.last_move_rect().size.x > ui.board.tile_rect(claim_move.x).size.x*.8,"whole-board highlight geometry")
+	ui.start_game("computer"); ui._debug_capture = true; ui.thinking = false
+	ok(ui.board.last_move.x < 0,"new game clears last move")
+	ui.debug_scenario("last_move"); ok(ui.board.last_move.x >= 0,"last move capture after opponent reply")
+	for event_id in Reactions.EVENTS:
+		var choices: Array = Reactions.EVENTS[event_id].choices
+		ok(not choices.is_empty(),"event has weighted reaction "+event_id)
+		for choice in choices: ok(Reactions.CLIPS.has(choice[0]) and int(choice[1]) > 0,"valid weighted reaction")
+	for hero_index in range(12):
+		for reaction_id in Reactions.CLIPS:
+			var face = Reactions.expression_for(hero_index,reaction_id)
+			ok(face.id in Reactions.EXPRESSIONS and face.dialect == Reactions.DIALECTS[hero_index],"hero expression resolves %d %s" % [hero_index,reaction_id])
+	var cooldown = Reactions.new()
+	ok(cooldown.request("own_move",0) and not cooldown.request("opponent_move",0),"ordinary reactions respect cooldown")
+	ok(cooldown.request("own_claim",0) and not cooldown.request("own_claim",0),"claim can interrupt move, never repeat spam")
+	ok(cooldown.request("near_loss",0),"near loss can interrupt claim")
+	cooldown.advance(3); ok(cooldown.remaining == 0 and cooldown.request("opponent_move",0),"reaction cooldown releases")
+	var quiet = Reactions.new(); quiet.request("win",2,true)
+	ok(quiet.remaining <= .5,"reduced motion reaction shortened")
+	for event_case in [
+		[F.position(["XX.OO....",".........",".........",".........",".........",".........",".........",".........","........."],1,0),0,2,"own_claim","opponent_claim"],
+		[F.position(["XXXOO....","XX.OO....",".........",".........",".........",".........",".........",".........","........."],1,1),1,2,"own_claim","near_loss"],
+		[F.position(["OOOXX....","XX.OO....",".........",".........",".........",".........",".........",".........","........."],1,1),1,2,"comeback","opponent_claim"],
+		[F.position(["X........",".........",".........",".........",".........",".........",".........",".........","........."],1,0),0,1,"own_move","opponent_good"],
+		[F.big_tactic(1),2,2,"win","loss"]]:
+		ui.debug_load_position(event_case[0].serialize(),"computer")
+		for rig in ui.field_heroes.values(): rig.reaction = Reactions.new()
+		ui._apply_move(event_case[1],event_case[2])
+		ok(ui.field_heroes[1].reaction.event == event_case[3] and ui.field_heroes[2].reaction.event == event_case[4],"game routes reactions "+event_case[3]+"/"+event_case[4])
+	for mark in [1,2]:
+		ui.debug_load_position(F.big_tactic(mark).serialize(),"computer"); ui.sound.enabled = true; ui.sound.unlocked = true; ui.sound.clear_announcer()
+		ui._apply_move(2,2)
+		ok(ui.sound.voice_id in ["nineweave","clean_sweep"] and ui.sound.voice_queue.back().id == ("victory" if mark == 1 else "defeat"),"real match result voice routing "+str(mark))
+	ui.debug_load_position(F.big_tactic(1).serialize(),"local"); ui.sound.clear_announcer(); ui._apply_move(2,2)
+	ok(ui.sound.voice_id == "nineweave" and ui.sound.voice_queue.is_empty(),"local result has no player victory/defeat")
+	ui.sound.enabled = false
+	ui.debug_scenario("reaction"); ui.debug_refresh()
+	ok(ui.field_heroes[1].reaction.remaining > 0 and ui.field_heroes[2].reaction.remaining > 0,"deterministic reaction capture")
 	var small_geo = Select.geometry(Vector2(568,320))
 	for rect in small_geo.tiles: ok(rect.size.x >= 44 and rect.size.y >= 44,"short landscape roster touch targets")
 	for size_value in [Vector2(867,553),Vector2(669,787)]:
@@ -163,6 +248,11 @@ func run():
 		var rig = Rig.new(); rig.hero_id = h.id; rig.size = Vector2(260,455); rig.frozen = true; root.add_child(rig)
 		ok(rig.bones.size() >= 15 and rig.bones.head.mesh != null,"articulated character "+h.name)
 		if h.id == "siren_coil": ok(not rig.bones.left_leg.visible and not rig.bones.right_leg.visible,"merfolk cached silhouette hides legs")
+		for expression_id in Reactions.EXPRESSIONS:
+			rig._set_expression(expression_id)
+			ok(rig.expression == expression_id and rig.bones.eyes.mesh != null and rig.bones.brows.mesh != null and rig.bones.mouth.mesh != null,"all expressions drawn "+h.name+" "+expression_id)
+		var first_mesh = rig.bones.mouth.mesh; rig._set_expression("neutral"); rig._set_expression("sulking")
+		ok(rig.bones.mouth.mesh == first_mesh,"expression geometry reused "+h.name)
 		for animation in Rig.CLIPS: rig.set_clip(animation); rig.clip_age = .5; rig.pose(1.4)
 		rig.set_clip("idle"); rig.clip_age = 2; rig.pose(0); var start_angle = rig.bones.cape.rotation
 		rig.pose(5.2); ok(is_equal_approx(start_angle,rig.bones.cape.rotation),"seamless idle "+h.name)

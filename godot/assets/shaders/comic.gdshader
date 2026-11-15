@@ -7,6 +7,9 @@ uniform float power = 0.0;
 uniform float impact = 0.0;
 void fragment() {
  vec4 c = COLOR;
+ // Untextured UV.x tags narrow rim strips, independent of cinematic fades.
+ float rim = step(0.5,UV.x);
+ c.rgb = mix(c.rgb,rim_color.rgb*0.78+vec3(0.22),rim*0.72);
  float bright = max(c.r,max(c.g,c.b));
  float lit = smoothstep(0.45,0.9,bright);
  c.rgb = mix(c.rgb,c.rgb+rim_color.rgb*0.13*lit,power);

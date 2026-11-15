@@ -23,6 +23,9 @@ class Layer extends Control:
 var game
 var clock: float = 0
 var reduced_motion: bool = false
+var last_move = Vector2i(-1,-1)
+var last_move_whole: bool = false
+var last_move_age: float = 1.0
 var hint_move = Vector2i(-1,-1)
 var claims: Array = []
 var win_fx: Dictionary = {}
@@ -62,7 +65,7 @@ func _process(delta): advance(delta)
 func advance(delta: float):
 	if not frozen:
 		clock += delta
-		invalid_age += delta; active_age += delta
+		invalid_age += delta; active_age += delta; last_move_age = minf(1,last_move_age+delta)
 		for key in mark_ages: mark_ages[key] += delta
 		for fx in claims: fx.age += delta
 		claims = claims.filter(func(fx): return fx.age < claim_duration())
@@ -94,7 +97,32 @@ func notify_move(board: int, cell: int):
 	mark_ages[board*9+cell] = 0.0; hint_move = Vector2i(-1,-1); active_age = 0; _dirty = true
 func clear_effects():
 	claims.clear(); win_fx = {}; mark_ages.clear(); frozen = false; _dirty = true
+	last_move = Vector2i(-1,-1); last_move_whole = false; last_move_age = 1
 	scale = Vector2.ONE; position = rest_position
+func sync_last_move(pass_and_play: bool, human: int):
+	# History is authoritative, so resume/undo/online resync need no new save fields.
+	var move = Vector2i(-1,-1); var whole = false
+	if game != null and not game.history.is_empty():
+		var latest: Dictionary = game.history.back()
+		if pass_and_play or int(latest.player) != human:
+			move = Vector2i(latest.board,latest.cell)
+			whole = game.owners[move.x] in [1,2]
+	if move != last_move or whole != last_move_whole:
+		last_move = move; last_move_whole = whole; last_move_age = 0; _dirty = true
+func last_move_rect() -> Rect2:
+	if last_move.x < 0: return Rect2()
+	var r = tile_rect(last_move.x).grow(-size.x*.018)
+	if last_move_whole: return r
+	var cell_size = r.size/3.0
+	return Rect2(r.position+Vector2(last_move.y%3,last_move.y/3)*cell_size,cell_size).grow(-1.4)
+func _draw_last_move(n: Control):
+	if last_move.x < 0: return
+	var a = smoothstep(0,.24,last_move_age)
+	var r = last_move_rect(); var points = P.polygon(r,3)
+	n.draw_colored_polygon(points,Color(1,1,1,.045*a))
+	for inset in [0.0,1.2,2.4]:
+		var edge = P.polygon(r.grow(-inset),maxf(1,3-inset))
+		n.draw_polyline(edge+PackedVector2Array([edge[0]]),Color(1,1,1,(.43 if inset == 0 else .08)*a),1 if inset == 0 else 1.4,true)
 func preview_claim(board: int, player: int, progress: float):
 	win_fx = {}
 	claims = [{"board":board,"player":player,"age":clampf(progress,0,1)*claim_duration()}]; frozen = true; _dirty = true; refresh()
@@ -382,6 +410,7 @@ func _win_light(n: Control, p: float):
 # ------------------------------------------------------------ shards / sparks (front, normal blend)
 func _draw_top(n: Control):
 	if game == null: return
+	_draw_last_move(n)
 	for fx in claims:
 		if fx.player == 3: continue
 		var r = tile_rect(fx.board); var p = claim_phase(fx); var col = player_color(fx.player)

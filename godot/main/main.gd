@@ -107,6 +107,7 @@ func _ready():
 	callout = Callout.new(); callout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(callout)
 	cinematic = Cinematic.new(); cinematic.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(cinematic)
 	cinematic.finished.connect(_cinematic_finished)
+	sound.voice_started.connect(func(id): callout.show_callout(id))
 	hinge_overlay = Layer.new(); hinge_overlay.name = "FoldGutter"; hinge_overlay.painter = _draw_hinge
 	hinge_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE; hinge_overlay.z_index = 100
 	hinge_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(hinge_overlay)
@@ -286,7 +287,7 @@ func start_game(new_mode: String = "computer", mark: int = 1):
 	game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
 	thinking = false; hint_busy = false; _result_shown = false; match_seconds = 0; message = ""; online_sequence = 0
 	_refresh_labels(); _rebuild(); _schedule_ai()
-	_announce("ready")
+	sound.clear_announcer(); _announce("ready")
 func _schedule_ai():
 	if _debug_capture or game.status != 0 or not overlay.is_empty(): return
 	var should = mode == "computer" and game.turn != human_mark
@@ -311,7 +312,7 @@ func _apply_move(b: int, c: int) -> bool:
 	board.notify_move(b,c); sound.cue("place_x" if player == 1 else "place_o",pan)
 	if game.active_board >= 0: sound.cue("route",(game.active_board%3-1)*.35)
 	if before == 0 and game.owners[b] != 0:
-		board.start_claim(b,game.owners[b]); sound.cue("claim",pan); _input_beat = .16 if not board.reduced_motion else .05
+		board.start_claim(b,game.owners[b]); sound.cue("claim_x" if player == 1 else "claim_o",pan); _input_beat = .16 if not board.reduced_motion else .05
 		if game.owners[b] in [1,2] and game.status == 0:
 			cinematic.show_scene("pop",hero_for(player),hero_for(3-player),player,layout,b)
 			sound.stinger(Roster.index_of(hero_for(player)),"stab",pan)
@@ -319,17 +320,49 @@ func _apply_move(b: int, c: int) -> bool:
 			if player == human_mark and field_heroes.has("panel"): field_heroes.panel.set_clip("score_flash")
 	if game.status != 0:
 		var line = game.big_lines[0] if not game.big_lines.is_empty() else []
-		board.start_win(line,game.status); sound.cue("draw" if game.status == 3 else ("victory" if game.status == human_mark or mode == "local" else "defeat")); thinking = false
-	_announce(Announcer.detect(previous,Announcer.snapshot(game)))
+		board.start_win(line,game.status); thinking = false
+		if game.status == 3: sound.cue("draw")
+		elif mode == "local": sound.cue("victory")
+	var line_id = Announcer.detect(previous,Announcer.snapshot(game))
+	if mode == "local" and game.status in [1,2]: line_id = "nineweave"
+	_announce(line_id)
+	if game.status in [1,2] and mode != "local":
+		var result_id = "victory" if game.status == human_mark else "defeat"
+		sound.announce(result_id,result_id)
+	_react_to_move(previous,player,b)
 	_refresh_labels(); _save_match(); _refresh_history(); _schedule_ai()
 	return true
+func _react_to_move(previous: Dictionary, mover: int, board_index: int):
+	var claimed = previous.owners[board_index] == 0 and game.owners[board_index] == mover
+	var threats = Announcer.threats(Array(game.owners),mover)
+	var mask: int = game.x_masks[board_index] if mover == 1 else game.o_masks[board_index]
+	var other_mask: int = game.o_masks[board_index] if mover == 1 else game.x_masks[board_index]
+	var good = false
+	for line_mask in Rules.MASKS:
+		var occupied = mask & line_mask
+		if occupied != 0 and (occupied & (occupied-1)) != 0 and occupied != line_mask and (other_mask & line_mask) == 0: good = true
+	for key in field_heroes:
+		var mark: int = human_mark if key is String else int(key)
+		var own = mark == mover
+		var event = "own_move" if own else "opponent_move"
+		if game.status in [1,2]: event = "win" if game.status == mark else "loss"
+		elif not own and not threats.is_empty(): event = "near_loss"
+		elif claimed:
+			if own:
+				event = "comeback" if previous.owners.count(mark) < previous.owners.count(3-mark) or not Announcer.threats(previous.owners,3-mark).is_empty() else "own_claim"
+			else: event = "opponent_claim"
+		elif not own and good: event = "opponent_good"
+		field_heroes[key].react(event)
 func _announce(id: String):
 	if id.is_empty(): return
-	callout.show_callout(id); sound.announce(id)
+	if id == "ready": sound.clear_announcer()
+	sound.announce(id)
+	if not sound.enabled: callout.show_callout(id)
 func _invalid(b: int):
 	sound.cue("invalid")
 	board.invalid_board = b; board.invalid_age = 0; message = "Choose an empty cell in the glowing board."
 func _refresh_labels():
+	board.sync_last_move(mode == "local",human_mark)
 	turn_label = "Turn: "+("X" if game.turn == 1 else "O")
 	active_label = "Active Board: "+("Any" if game.active_board == -1 else Rules.BOARD_NAMES[game.active_board])
 	if game.status != 0:
@@ -356,7 +389,7 @@ func info_lines() -> Array:
 	return ["Active Board: "+board_name,"Play your "+("X" if game.turn == 1 else "O")+" "+tail]
 func undo_move() -> bool:
 	if mode == "online": message = "Online moves are final. Start another room to play again."; return false
-	thinking = false; hint_busy = false
+	thinking = false; hint_busy = false; sound.clear_announcer(); callout.callout = ""
 	var did = game.undo()
 	if mode == "computer" and did and game.turn != human_mark and not game.history.is_empty(): game.undo()
 	board.clear_effects(); board.hint_move = Vector2i(-1,-1); _result_shown = false; overlay = ""; _input_beat = 0; cinematic.clear(); _spotlight_done = false
@@ -378,6 +411,7 @@ func resume_game():
 	page = "game"; overlay = ""; board.clear_effects(); _result_shown = false; _spotlight_done = false; cinematic.clear()
 	_refresh_labels(); _rebuild(); _schedule_ai()
 func go_home():
+	sound.clear_announcer()
 	_save_match(); _leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
 func show_settings(): overlay = "settings"; thinking = false; _rebuild()
 func _close_overlay():
@@ -494,7 +528,7 @@ func _rebuild():
 		var big = layout.mode == "landscape"
 		var hb = 52.0 if big else 44.0
 		_button("home","" if not big else "",Rect2(hdr.position,Vector2(hb,hb)),go_home,false,"home" if big else "back")
-		_button("settings","⚙",Rect2(Vector2(hdr.end.x-hb,hdr.position.y),Vector2(hb,hb)),show_settings)
+		_button("settings","⚙",Rect2(Vector2(minf(hdr.end.x-hb,layout.hero_opponent.position.x-hb-8),hdr.position.y),Vector2(hb,hb)),show_settings)
 		var cr: Rect2 = layout.controls
 		if layout.mode in ["phone_portrait","tablet_portrait"]:
 			var unit = minf(cr.size.x/4-9,84 if layout.mode == "tablet_portrait" else 72)
@@ -527,7 +561,14 @@ func _create_field_heroes():
 			hero_r = Rect2(Vector2(cx-radius,rr.get_center().y-radius),Vector2.ONE*radius*2)
 		var rig = HeroRig.new(); rig.hero_id = hero_for(mark); rig.side = mark; rig.facing = 1 if mark == human_mark else -1
 		rig.bust = not is_vertical; rig.position = hero_r.position; rig.size = hero_r.size; rig.reduced_motion = board.reduced_motion
-		add_child(rig); ui_nodes.append(rig); field_heroes[mark] = rig
+		# Scorecard portraits are frozen; reactions live in the two safe corners.
+		rig.frozen = true; add_child(rig); ui_nodes.append(rig)
+		var corner = HeroRig.new(); corner.hero_id = hero_for(mark); corner.side = mark
+		corner.facing = 1 if mark == human_mark else -1; corner.bust = true
+		var corner_r: Rect2 = layout.hero_player if mark == human_mark else layout.hero_opponent
+		corner.position = corner_r.position; corner.size = corner_r.size; corner.reduced_motion = board.reduced_motion
+		corner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(corner); ui_nodes.append(corner); field_heroes[mark] = corner
 	if layout.has("character"):
 		var rig = HeroRig.new(); rig.hero_id = hero_for(human_mark); rig.side = human_mark
 		rig.position = layout.character.position+Vector2(4,24); rig.size = layout.character.size-Vector2(8,28)
@@ -540,6 +581,7 @@ func hero_state(mark: int) -> String:
 func _update_hero_states():
 	for key in field_heroes:
 		var rig = field_heroes[key]; var mark = human_mark if key is String else int(key)
+		if rig.reaction.remaining > 0: continue
 		if rig.clip in ["mark_push","score_flash"] and rig.clip_age < .8: continue
 		rig.set_clip(hero_state(mark))
 func _title_controls(s: Vector2):
@@ -1138,6 +1180,13 @@ func debug_scenario(scenario: String, progress: float = .45):
 	for m in MIDGAME: staged.play(m[0],m[1])
 	debug_load_position(staged.serialize())
 	if scenario in ["duo_hinge","hinge"]: debug_simulate_hinge()
+	if scenario == "reaction":
+		field_heroes[human_mark].react("win"); field_heroes[3-human_mark].react("near_loss")
+		for rig in field_heroes.values(): rig.frozen = true; rig.clip_age = .45; rig.pose(1.4)
+	if scenario == "last_move":
+		game.play(MIDGAME_REPLY[0],MIDGAME_REPLY[1]); _refresh_labels(); _rebuild()
+		var next = game.legal_moves()[0]; game.play(next.x,next.y); _refresh_labels(); _rebuild()
+		board.last_move_age = 1
 	if scenario == "thinking":
 		var m = MIDGAME_REPLY
 		game.play(m[0],m[1]); _refresh_labels(); thinking = true; _rebuild()
@@ -1146,6 +1195,7 @@ const MIDGAME_REPLY = [4,8]
 ## Capture helper: pin shared clocks and repaint every layer once (processing is paused).
 func debug_refresh():
 	P.clock = clock
+	board.last_move_age = 1
 	_sync_fx(); board.refresh(); backdrop.refresh(); queue_redraw()
 	for rig in field_heroes.values(): rig.frozen = true; rig.clip_age = 1.4; rig.pose(1.4)
 	if is_instance_valid(hero_select): hero_select.hero.frozen = true; hero_select.hero.clip_age = .5; hero_select.hero.pose(1.4)

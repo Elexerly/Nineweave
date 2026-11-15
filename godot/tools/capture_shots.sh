@@ -36,7 +36,7 @@ done
 
 # Round 3: deterministic character presentations at the five review sizes.
 for size in 390x844 844x390 867x553 669x787 1366x1024; do
-  for scenario in character_select lock_in claim_pop win_spotlight duo_panel; do
+  for scenario in character_select lock_in claim_pop win_spotlight duo_panel last_move reaction; do
     shot "$size" "$scenario" 0.5 "$scenario"
   done
 done

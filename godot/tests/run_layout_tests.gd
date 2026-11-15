@@ -27,6 +27,10 @@ func inspect(s: Vector2, hinge: Rect2, expected: String):
 	ok(layout.mode == expected,id+" mode "+layout.mode)
 	ok(is_equal_approx(layout.board.size.x,layout.board.size.y),id+" board square")
 	var viewport = Rect2(Vector2.ZERO,layout.size).grow(.1)
+	for key in ["hero_player","hero_opponent"]:
+		ok(viewport.encloses(layout[key]),id+" corner in view "+key)
+		ok(not layout[key].intersects(layout.board),id+" corner never overlaps board "+key)
+		if hinge.size.x: ok(not layout[key].intersects(layout.hinge),id+" corner hinge safe "+key)
 	var rects = L.major_rects(layout)
 	for key in rects:
 		ok(viewport.encloses(rects[key]),id+" inside "+key+" "+str(rects[key]))

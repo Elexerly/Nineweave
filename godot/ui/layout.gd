@@ -104,6 +104,31 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 		r.players = Rect2(r.players.position.x,62,r.players.size.x,48)
 		r.turn = Rect2(r.turn.position.x,118,r.turn.size.x,30)
 		r.info = Rect2(r.info.position.x,156,r.info.size.x,44)
+	# Corner overlays never enter the board or the reserved fold. Keep board geometry.
+	var own: Rect2; var rival: Rect2
+	if mode == "duo_portrait":
+		r.minimap.position.x = 116
+		r.character = Rect2(216,r.character.position.y,maxf(40,w-440),88)
+		own = Rect2(12,r.minimap.position.y,92,minf(104,h-r.minimap.position.y-8))
+	elif mode in ["phone_portrait","tablet_portrait"]:
+		var free = maxf(6,h-r.controls.end.y-20)
+		own = Rect2(8,h-minf(124,free)-8,minf(120,w*.29),minf(124,free))
+	elif mode in ["duo_landscape","phone_landscape"]:
+		var free = h-r.board.end.y-14
+		if free >= 44:
+			own = Rect2(8,h-minf(96,free)-7,minf(114,r.board.size.x*.28),minf(96,free))
+		else:
+			# Height-filling landscape boards leave only the side deck; use its lower-left.
+			var top = r.info.end.y+6
+			own = Rect2(r.controls.position.x,top,minf(102,r.controls.size.x*.34),maxf(24,r.controls.position.y-top-6))
+	else:
+		own = Rect2(8,h-minf(150,h*.2)-8,minf(128,r.players.size.x),minf(150,h*.2))
+	rival = Rect2(w-82,4,74,58)
+	if seam.size.x > 0 and own.intersects(seam):
+		own.position.x = seam.end.x+12
+		own.position.y = h-own.size.y-8
+	if seam.size.x > 0 and rival.intersects(seam): rival.position.x = seam.end.x+8
+	r.hero_player = own; r.hero_opponent = rival
 	return r
 static func major_rects(layout: Dictionary) -> Dictionary:
 	var result = {}

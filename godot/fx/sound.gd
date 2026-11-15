@@ -1,18 +1,22 @@
 extends Node
-## Original PCM synthesis; no samples, plugins, threads, filesystem or web fetches.
+## Owner recordings first, cached PCM synthesis as a missing-resource fallback.
 ## Fixed pool + cached mono streams. Five fixed pan sends avoid regenerating PCM.
 const Announcer = preload("res://fx/announcer.gd")
 const RATE = 22050
 const MOTIFS = [[0,7,12,14,7,12],[0,4,7,12,9,12],[12,7,3,10,5,0],[0,0,7,5,7,12],[0,3,8,7,10,15],[0,5,9,12,7,5],[0,9,7,14,12,19],[12,11,7,4,7,0],[0,2,7,5,9,7],[0,7,14,12,16,24],[0,4,1,7,3,12],[12,7,2,9,5,0]]
 const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11]
-const CUES = {"unlock":.025,"place_x":.20,"place_o":.27,"invalid":.13,"route":.36,"ui":.075,"claim":1.05,"victory":2.65,"defeat":1.15,"draw":.95}
+const REAL_SFX = {"claim_x":"claim_crystal_shatter","claim_o":"claim_gold_clang","claim":"claim_crystal_shatter","victory":"victory_fanfare","defeat":"defeat_sting","route":"board_whoosh_chime","ui":"button_tick","invalid":"invalid_thunk"}
+const VOICES = ["ready","weave","first_claim","double_lock","triple_weave","match_point","turnaround","shutout","nineweave","clean_sweep","standoff","victory","defeat"]
+signal voice_started(id: String)
+const VOICE_GAP = .1
+const CUES = {"unlock":.025,"place_x":.085,"place_o":.1,"invalid":.13,"route":.36,"ui":.075,"claim":1.05,"victory":2.65,"defeat":1.15,"draw":.95}
 var enabled: bool = true:
 	set(value):
 		enabled = value
 		if not value:
 			for p in _players: p.stop()
 			if is_instance_valid(_voice): _voice.stop()
-			_announcer_left = 0; _pending_callout = ""
+			clear_announcer()
 var unlocked: bool = false
 var web_unlock: bool = false
 var volumes: Dictionary = {"sfx_volume":.85,"announcer_volume":.9,"music_volume":.45}
@@ -22,7 +26,9 @@ var _announcer_left: float = 0.0
 var _players: Array = []
 var _voice: AudioStreamPlayer
 var _unlock_player: AudioStreamPlayer
-var _pending_callout: String = ""
+var voice_queue: Array = []
+var voice_id: String = ""
+var _gap_left: float = 0
 var _warm: Array = []
 var _job: Dictionary = {}
 var generation_us: int = 0
@@ -34,7 +40,8 @@ func _ready():
 	_unlock_player = AudioStreamPlayer.new(); _unlock_player.volume_db = -80; add_child(_unlock_player)
 	cache.unlock = generate("unlock")
 	_warm = ["ui","place_x","place_o","invalid","route","claim","victory","defeat","draw"]
-	for id in Announcer.TEXT: _warm.append("ann_"+id)
+	for id in VOICES: _warm.append("ann_"+id)
+	for id in REAL_SFX: _warm.append(id)
 func ensure_buses():
 	for bus in ["SFX","Music","Announcer"]:
 		if AudioServer.get_bus_index(bus) < 0:
@@ -67,8 +74,7 @@ func unlock():
 	# audio driver resumes its AudioContext here; no pre-gesture play is attempted.
 	_unlock_player.stream = cache.unlock
 	if DisplayServer.get_name() != "headless": _unlock_player.play()
-	if not _pending_callout.is_empty():
-		var id = _pending_callout; _pending_callout = ""; announce(id)
+	_drain_voice()
 func _process(delta):
 	advance_mix(delta)
 	# Incremental prewarm keeps synthesis below a 2ms frame budget. Requested cues
@@ -79,14 +85,21 @@ func _process(delta):
 			if _warm.is_empty(): break
 			var kind = str(_warm.pop_front())
 			if cache.has(kind): continue
+			var real = load_real(real_path(kind))
+			if real != null: cache[kind] = real; continue
 			_job = _begin(kind)
 		_step(_job,128)
 		if _job.i >= _job.count:
 			cache[_job.kind] = _finish(_job); _job = {}
 	generation_us += Time.get_ticks_usec()-start
 func advance_mix(delta: float):
-	_announcer_left = maxf(0,_announcer_left-delta)
-	var target = -4.5 if _announcer_left > 0 else 0.0
+	var remaining = delta
+	if _announcer_left > 0:
+		remaining = maxf(0,delta-_announcer_left)
+		_announcer_left = maxf(0,_announcer_left-delta)
+		if _announcer_left == 0: voice_id = ""; _gap_left = VOICE_GAP
+	if _announcer_left == 0: _gap_left = maxf(0,_gap_left-remaining); _drain_voice()
+	var target = -4.5 if _announcer_left > 0 or not voice_queue.is_empty() else 0.0
 	duck_db = lerpf(duck_db,target,1.0-exp(-delta/(.035 if target < duck_db else .16)))
 	if absf(duck_db-target) < .01: duck_db = target
 	_apply_mix()
@@ -101,27 +114,51 @@ func cue(kind: String, pan: float = 0.0):
 	player.stop(); player.stream = stream
 	player.bus = "CrystalPan"+str(clampi(roundi(pan/.35)+2,0,4)); player.volume_db = -3
 	if DisplayServer.get_name() != "headless": player.play()
-func announce(id: String):
-	if not Announcer.TEXT.has(id) or not enabled: return
-	if not unlocked: _pending_callout = id; return
-	var stream = stream_for("ann_"+id)
+func clear_announcer():
+	if is_instance_valid(_voice): _voice.stop()
+	voice_queue.clear(); voice_id = ""; _announcer_left = 0; _gap_left = 0
+func announce(id: String, paired_sfx: String = ""):
+	if not id in VOICES or not enabled: return
+	voice_queue.append({"id":id,"sfx":paired_sfx})
+	if id == "ready": voice_queue.append({"id":"weave","sfx":""})
+	_drain_voice()
+func _drain_voice():
+	if not enabled or not unlocked or _announcer_left > 0 or _gap_left > 0 or voice_queue.is_empty(): return
+	var entry = voice_queue.pop_front(); voice_id = entry.id
+	var stream = stream_for("ann_"+voice_id)
 	_voice.stop(); _voice.stream = stream
-	_voice.volume_db = -3.0+float(Announcer.WEIGHT[id])*.45
+	_voice.volume_db = -3.0+float(Announcer.WEIGHT.get(voice_id,2))*.45
+	_announcer_left = stream.get_length()
 	if DisplayServer.get_name() != "headless": _voice.play()
-	_announcer_left = stream.get_length(); advance_mix(.016)
+	if not entry.sfx.is_empty(): cue(entry.sfx)
+	voice_started.emit(voice_id)
 func prepare_character(character_index: int):
 	for length in ["tag","stab","full"]:
 		var id = "hero_%d_%s" % [character_index,length]
 		if not cache.has(id) and not id in _warm: _warm.append(id)
 func stinger(character_index: int, length: String = "tag", pan: float = 0):
 	cue("hero_%d_%s" % [character_index,length],pan)
-func stream_for(kind: String) -> AudioStreamWAV:
-	if not cache.has(kind): cache[kind] = generate(kind)
+static func real_path(kind: String) -> String:
+	if kind.begins_with("ann_") and kind.trim_prefix("ann_") in VOICES:
+		return "res://assets/audio/announcer/"+kind.trim_prefix("ann_")+".ogg"
+	if REAL_SFX.has(kind): return "res://assets/audio/sfx/"+str(REAL_SFX[kind])+".ogg"
+	return ""
+static func load_real(path: String) -> AudioStream:
+	if path.is_empty() or not ResourceLoader.exists(path,"AudioStream"): return null
+	return ResourceLoader.load(path,"AudioStream") as AudioStream
+func stream_for(kind: String, override_path: String = "") -> AudioStream:
+	# An override is intentionally uncached: diagnostic/fallback checks cannot poison the bank.
+	if not override_path.is_empty():
+		var replacement = load_real(override_path)
+		return replacement if replacement != null else generate(kind)
+	if not cache.has(kind):
+		var real = load_real(real_path(kind))
+		cache[kind] = real if real != null else generate(kind)
 	return cache[kind]
 func duration(kind: String) -> float:
 	if kind.begins_with("ann_"): return .65+float(Announcer.WEIGHT.get(kind.trim_prefix("ann_"),1))*.085
 	if kind.begins_with("hero_"): return 2.3 if kind.ends_with("full") else (.24 if kind.ends_with("stab") else .72)
-	return float(CUES.get(kind,.1))
+	return float(CUES.get("claim" if kind in ["claim_x","claim_o"] else kind,.1))
 func _begin(kind: String) -> Dictionary:
 	var count = int(RATE*duration(kind)); var bytes = PackedByteArray(); bytes.resize(count*2)
 	return {"kind":kind,"count":count,"i":0,"bytes":bytes,"noise":19791,"previous":0.0}
@@ -141,7 +178,12 @@ func _step(job: Dictionary, amount: int):
 		var value = 0.0
 		match kind:
 			"unlock": value = sin(TAU*80*t)*.0001
-			"place_x","place_o","ui":
+			"place_x","place_o":
+				var base = 1560.0 if kind == "place_x" else 1170.0
+				var env = (1-exp(-t*1500))*exp(-t*65)*(1-smoothstep(.55,1.0,u))
+				value = (sin(TAU*base*t)*.25+sin(TAU*base*2.71*t)*.055+sin(TAU*base*4.08*t)*.018)*env
+				value += sin(TAU*320*t)*.1*exp(-t*120)
+			"ui":
 				var base = 1420.0 if kind == "place_x" else (730.0 if kind == "place_o" else 1840.0)
 				value = (sin(TAU*base*t)*.36+sin(TAU*base*2.73*t)*.21+sin(TAU*base*4.16*t)*.1)*exp(-t*(26 if kind == "ui" else 18))
 				value += high*.19*exp(-t*130)+sin(TAU*210*t)*.17*exp(-t*65)
@@ -149,7 +191,7 @@ func _step(job: Dictionary, amount: int):
 			"route":
 				value = noise*.12*sin(PI*u)*exp(-u*3)+sin(TAU*1320*t)*.15*exp(-absf(t-.2)*32)
 				value += sin(TAU*1980*t)*.1*exp(-absf(t-.23)*38)
-			"claim":
+			"claim","claim_x","claim_o":
 				value = high*.32*exp(-t*23)+sin(TAU*(57*t+2.2*(1-exp(-t*24))))*.5*exp(-t*7)
 				value += sin(TAU*(420*t+160*t*t))*.12*sin(PI*u)*exp(-t*4)
 				value += (sin(TAU*2140*t)+sin(TAU*2870*t))*.12*exp(-t*4)*pow(sin(t*27),8)

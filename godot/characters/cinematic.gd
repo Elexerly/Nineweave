@@ -34,12 +34,8 @@ func show_scene(scene_kind: String, winner: String, rival: String, mark: int, la
 	if seam.size.x > 0: safe = Rect2(seam.end.x+12,14,s.x-seam.end.x-26,s.y-28)
 	region = safe
 	if kind == "pop":
-		var b: Rect2 = layout.board
-		var w = minf(b.size.x*.9,350); var h = minf(164,b.size.y*.38)
-		var x = b.position.x+8 if claimed_board%3 == 0 else b.end.x-w-8
-		region = Rect2(x,clampf(b.position.y+(claimed_board/3)*b.size.y/3,b.position.y+16,b.end.y-h-8),w,h)
-		if layout.mode == "duo_landscape": region = Rect2(layout.turn.position.x,layout.stats.end.y+8,layout.turn.size.x,minf(218,layout.controls.position.y-layout.stats.end.y-20))
-		hero_rect = Rect2(region.position+Vector2(2,-10),Vector2(region.size.x*.45,region.size.y+10))
+		region = pop_region(layout,claimed_board)
+		hero_rect = Rect2(region.position+Vector2(2,2),Vector2(region.size.x*.43,region.size.y-4))
 	else:
 		var portrait = safe.size.x < safe.size.y*.9
 		hero_rect = Rect2(safe.position+Vector2(0,44),Vector2(safe.size.x*(.9 if portrait else .6),safe.size.y*(.65 if portrait else .78)))
@@ -51,6 +47,32 @@ func show_scene(scene_kind: String, winner: String, rival: String, mark: int, la
 	loser.visible = kind == "spotlight"
 	clip_word = R.get_hero(winner_id).action
 	pose()
+static func pop_region(layout: Dictionary, claimed_board: int) -> Rect2:
+	var b: Rect2 = layout.board; var s: Vector2 = layout.size
+	var w = minf(b.size.x*.44,230); var h = minf(126,w*.65)
+	var viewport = Rect2(Vector2(8,8),s-Vector2(16,16))
+	var x = s.x-w-12 if claimed_board%3 <= 1 else 12.0
+	var candidates: Array = [Rect2(x,layout.controls.end.y+12,w,h)]
+	if layout.mode in ["duo_landscape","phone_landscape"]:
+		var top = layout.info.end.y+10 if layout.mode == "phone_landscape" else layout.stats.end.y+10
+		candidates.append(Rect2(layout.turn.position.x,top,w,minf(h,layout.controls.position.y-top-10)))
+	elif layout.mode == "landscape":
+		candidates.append(Rect2(layout.info.position+Vector2(8,12),Vector2(minf(w,layout.info.size.x-16),h)))
+	elif layout.mode == "duo_portrait":
+		candidates.append(Rect2(116,layout.turn.end.y+10,minf(w,s.x-344),minf(h,88)))
+	# Reserve the board and hinge. The preferred margin placements cover neither.
+	for r in candidates:
+		if r.size.y >= 58 and viewport.encloses(r) and not r.grow(5).intersects(b) and (layout.hinge.size.x <= 0 or not r.grow(5).intersects(layout.hinge)):
+			return r
+	# Small 640px phones have no free margin. Place at the opposite board row;
+	# the compact panel can briefly cover other boards, never the claimed one.
+	var pad = b.size.x*.022; var gap = b.size.x*.018; var edge = (b.size.x-pad*2-gap*2)/3
+	var claimed = Rect2(b.position+Vector2(pad+(claimed_board%3)*(edge+gap),pad+(claimed_board/3)*(edge+gap)),Vector2.ONE*edge).grow(5)
+	var fy = b.end.y-h-9 if claimed_board/3 < 2 else b.position.y+9
+	var fx = b.end.x-w-9 if claimed_board%3 == 0 else b.position.x+9
+	var fallback = Rect2(fx,fy,w,h)
+	if fallback.grow(5).intersects(claimed): fallback.position.y = b.position.y+9 if claimed_board/3 > 0 else b.end.y-h-9
+	return fallback
 func advance(delta: float):
 	if not active or frozen: return
 	age += delta
@@ -67,23 +89,23 @@ func pose():
 	if not active: return
 	var t = age/duration(); var ease = 1-pow(1-clampf(age/.26,0,1),3)
 	modulate.a = minf(1,age/.08)*(1-smoothstep(.82,1.0,t))
-	var move = Vector2.ZERO if reduced_motion else Vector2((1-ease)*-region.size.x*.22,sin(ease*PI)*-6)
+	var move = Vector2.ZERO if reduced_motion else Vector2((1-ease)*region.size.x*.12,0) if kind == "pop" else Vector2((1-ease)*-region.size.x*.22,sin(ease*PI)*-6)
 	hero.position = hero_rect.position+move
 	hero.pivot_offset = hero.size*.5
-	hero.scale = Vector2.ONE*(1 if reduced_motion else 1+sin(ease*PI)*.07)
+	hero.scale = Vector2.ONE*(1 if reduced_motion or kind == "pop" else 1+sin(ease*PI)*.07)
 	queue_redraw()
 func _draw():
 	if not active: return
 	var s: Vector2 = _layout.size; var col = P.mark_color(player); var r = region
 	if kind != "pop": draw_rect(Rect2(Vector2.ZERO,s),Color(.006,.018,.045,.95))
 	var e = 1-pow(1-clampf(age/.24,0,1),3)
-	var panel = P.polygon(r,18)
-	panel[0].x += 16; panel[3].x -= 9
+	var panel = P.polygon(r,minf(18,r.size.y*.13))
+	panel[0].x += minf(10,r.size.x*.04); panel[3].x -= 5
 	draw_colored_polygon(panel,Color("0b1b34"))
 	draw_polyline(panel+PackedVector2Array([panel[0]]),P.GOLD_DARK,8,true)
 	draw_polyline(panel+PackedVector2Array([panel[0]]),P.GOLD,3,true)
 	var origin = hero_rect.get_center()
-	P.halo(self,origin,hero_rect.size.y*.8,Color(col,.24))
+	if kind != "pop": P.halo(self,origin,hero_rect.size.y*.8,Color(col,.24))
 	var rays = 6 if reduced_motion else 22
 	for i in range(rays):
 		var angle = i*TAU/rays+.15
@@ -97,9 +119,11 @@ func _draw():
 		draw_circle(Vector2(x,y),1.4,Color(P.GOLD,.26))
 	var h = R.get_hero(winner_id)
 	if kind == "pop":
-		var tr = Rect2(r.position+Vector2(r.size.x*.43,12),Vector2(r.size.x*.55,r.size.y-24))
-		P.text(self,clip_word,Rect2(tr.position,Vector2(tr.size.x,tr.size.y*.42)),28,P.PALE,P.DISPLAY,HORIZONTAL_ALIGNMENT_CENTER,.5)
-		P.text(self,h.pop,Rect2(tr.position+Vector2(0,tr.size.y*.43),Vector2(tr.size.x,tr.size.y*.33)),18,P.WHITE)
+		var tr = Rect2(r.position+Vector2(r.size.x*.43,6),Vector2(r.size.x*.53,r.size.y-12))
+		P.text(self,clip_word,Rect2(tr.position,Vector2(tr.size.x,tr.size.y*.42)),20,P.PALE,P.DISPLAY,HORIZONTAL_ALIGNMENT_CENTER,.5)
+		var words = str(h.pop).split(" "); var half = int(ceil(words.size()*.5))
+		P.text(self," ".join(words.slice(0,half)),Rect2(tr.position+Vector2(0,tr.size.y*.44),Vector2(tr.size.x,tr.size.y*.25)),13,P.WHITE)
+		P.text(self," ".join(words.slice(half)),Rect2(tr.position+Vector2(0,tr.size.y*.67),Vector2(tr.size.x,tr.size.y*.25)),13,P.WHITE)
 	else:
 		P.text(self,"LEGEND LOCKED" if kind == "lock_in" else "THE WEAVE IS YOURS",Rect2(r.position+Vector2(14,10),Vector2(r.size.x-28,38)),27,P.PALE,P.SERIF)
 		var portrait = r.size.x < r.size.y*.9

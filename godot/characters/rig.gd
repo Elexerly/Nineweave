@@ -402,6 +402,9 @@ func _process(delta):
 	if frozen: return
 	time += delta; clip_age += delta; reaction.advance(delta)
 	pose(time)
+## Per-hero pose tables hoisted out of the per-bone/per-frame loop (Round 3b).
+const STANCE_LEAN = [-.085,.055,-.06,.035,-.12,.06,-.14,.09,.045,-.09,.11,-.07]
+const DEFEAT_HEAD = [.12,.23,.18,.16,-.15,.25,.2,.35,.14,-.2,.1,.22]
 func pose(at: float):
 	if not _built: return
 	time = at
@@ -427,7 +430,7 @@ func pose(at: float):
 		var rot = 0.0; var pos: Vector2 = rest[key]; var scl = Vector2.ONE
 		# Contrapposto: planted right leg, free left knee, opposing hip/shoulder angles.
 		var gesture: Array = STANCES[index]
-		var stance = [-.085,.055,-.06,.035,-.12,.06,-.14,.09,.045,-.09,.11,-.07][index]
+		var stance: float = STANCE_LEAN[index]
 		if key == "hips": rot = gesture[5]; pos.x += 5
 		if key == "left_leg": rot = gesture[6]; pos.x -= 7; pos.y -= 3
 		if key == "left_boot": rot = -.13
@@ -450,7 +453,7 @@ func pose(at: float):
 		elif key == "bird": pos.y += sin(phase*2)*2*motion
 		if clip == "defeat":
 			if key in ["hips","torso","head","neck"]: pos.y += (26 if index in [1,3,8,9] else 10)*react
-			if key == "head": rot += ([.12,.23,.18,.16,-.15,.25,.2,.35,.14,-.2,.1,.22][index])*react
+			if key == "head": rot += DEFEAT_HEAD[index]*react
 			if key == "right_arm": rot += (.65 if index in [5,10,11] else .25)*react
 			if key == "left_arm": rot -= (.65 if index in [5,10,11] else .2)*react
 			if key == "prop": rot += (.6 if index in [4,6,10,11] else -.2)*react
@@ -494,9 +497,9 @@ func pose(at: float):
 		var edge = (bust or clip == "lock_in") and key in ["head","cape"] and not reduced_motion
 		if bones[key].chromatic != edge: bones[key].chromatic = edge; bones[key].queue_redraw()
 	if clip in ["mark_push","score_flash"] or reaction.remaining > 0: queue_redraw()
-	_mat.set_shader_parameter("rim_color",P.mark_color(side))
-	_mat.set_shader_parameter("power",.9 if power else .1)
-	_mat.set_shader_parameter("impact",punch if attack and not reduced_motion else 0.0)
+	_mat.set_shader_parameter(&"rim_color",P.mark_color(side))
+	_mat.set_shader_parameter(&"power",.9 if power else .1)
+	_mat.set_shader_parameter(&"impact",punch if attack and not reduced_motion else 0.0)
 	actor.modulate = Color(.72,.78,.9) if stagger else Color.WHITE
 
 func react(event_id: String) -> bool:

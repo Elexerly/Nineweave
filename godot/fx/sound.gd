@@ -9,6 +9,10 @@ const REAL_SFX = {"claim_x":"claim_crystal_shatter","claim_o":"claim_gold_clang"
 const VOICES = ["ready","weave","first_claim","double_lock","triple_weave","match_point","turnaround","shutout","nineweave","clean_sweep","standoff","victory","defeat"]
 signal voice_started(id: String)
 const VOICE_GAP = .1
+## Pending lines beyond this are stale (fast claims); the oldest non-result line is dropped.
+const VOICE_QUEUE_MAX = 3
+const RESULT_VOICES = ["victory","defeat","nineweave","clean_sweep","standoff"]
+const MIX = [[&"SFX","sfx_volume"],[&"Announcer","announcer_volume"],[&"Music","music_volume"]]
 const CUES = {"unlock":.025,"place_x":.085,"place_o":.1,"invalid":.13,"route":.36,"ui":.075,"claim":1.05,"victory":2.65,"defeat":1.15,"draw":.95}
 var enabled: bool = true:
 	set(value):
@@ -19,6 +23,10 @@ var enabled: bool = true:
 			clear_announcer()
 var unlocked: bool = false
 var web_unlock: bool = false
+## Silent unlock plays issued inside gestures: first press and first release (iOS
+## Safari only treats touchend/click as an audio-activating gesture).
+var unlock_plays: int = 0
+var _release_unlocked: bool = false
 var volumes: Dictionary = {"sfx_volume":.85,"announcer_volume":.9,"music_volume":.45}
 var cache: Dictionary = {}
 var duck_db: float = 0.0
@@ -60,21 +68,27 @@ func configure(values: Dictionary):
 	for key in volumes: volumes[key] = clampf(float(values.get(key,volumes[key])),0,1)
 	_apply_mix()
 func _apply_mix():
-	for pair in [["SFX","sfx_volume"],["Announcer","announcer_volume"],["Music","music_volume"]]:
+	for pair in MIX:
 		var index = AudioServer.get_bus_index(pair[0])
 		if index >= 0:
 			var gain = float(volumes[pair[1]])
-			AudioServer.set_bus_volume_db(index,linear_to_db(maxf(.00001,gain))+(duck_db if pair[0] != "Announcer" else 0.0))
+			AudioServer.set_bus_volume_db(index,linear_to_db(maxf(.00001,gain))+(duck_db if pair[0] != &"Announcer" else 0.0))
 func _input(event):
-	if (event is InputEventMouseButton and event.pressed) or (event is InputEventScreenTouch and event.pressed) or (event is InputEventKey and event.pressed): unlock()
+	if event is InputEventMouseButton or event is InputEventScreenTouch or event is InputEventKey:
+		if event.pressed: unlock()
+		elif unlocked and not _release_unlocked:
+			_release_unlocked = true; _silent_play()
 func unlock():
 	if unlocked: return
 	unlocked = true; web_unlock = OS.has_feature("web")
 	# This playback deliberately runs INSIDE the first input callback. Godot's web
 	# audio driver resumes its AudioContext here; no pre-gesture play is attempted.
+	_silent_play()
+	_drain_voice()
+func _silent_play():
+	unlock_plays += 1
 	_unlock_player.stream = cache.unlock
 	if DisplayServer.get_name() != "headless": _unlock_player.play()
-	_drain_voice()
 func _process(delta):
 	advance_mix(delta)
 	# Incremental prewarm keeps synthesis below a 2ms frame budget. Requested cues
@@ -99,7 +113,8 @@ func advance_mix(delta: float):
 		_announcer_left = maxf(0,_announcer_left-delta)
 		if _announcer_left == 0: voice_id = ""; _gap_left = VOICE_GAP
 	if _announcer_left == 0: _gap_left = maxf(0,_gap_left-remaining); _drain_voice()
-	var target = -4.5 if _announcer_left > 0 or not voice_queue.is_empty() else 0.0
+	# Lines waiting for the first gesture are silent; they must not hold music/SFX ducked.
+	var target = -4.5 if _announcer_left > 0 or (unlocked and enabled and not voice_queue.is_empty()) else 0.0
 	duck_db = lerpf(duck_db,target,1.0-exp(-delta/(.035 if target < duck_db else .16)))
 	if absf(duck_db-target) < .01: duck_db = target
 	_apply_mix()
@@ -121,6 +136,11 @@ func announce(id: String, paired_sfx: String = ""):
 	if not id in VOICES or not enabled: return
 	voice_queue.append({"id":id,"sfx":paired_sfx})
 	if id == "ready": voice_queue.append({"id":"weave","sfx":""})
+	while voice_queue.size() > VOICE_QUEUE_MAX:
+		var drop = 0
+		for i in range(voice_queue.size()):
+			if not voice_queue[i].id in RESULT_VOICES: drop = i; break
+		voice_queue.remove_at(drop)
 	_drain_voice()
 func _drain_voice():
 	if not enabled or not unlocked or _announcer_left > 0 or _gap_left > 0 or voice_queue.is_empty(): return

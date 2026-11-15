@@ -19,6 +19,7 @@ var hero
 var loser
 var clip_word: String = ""
 var _layout: Dictionary
+var _claimed_board: int = 4
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE; z_index = 30; visible = false
 	hero = Rig.new(); add_child(hero)
@@ -27,8 +28,20 @@ func duration() -> float:
 	if reduced_motion: return {"lock_in":.35,"pop":.55,"spotlight":1.0}.get(kind,.5)
 	return {"lock_in":.95,"pop":1.2,"spotlight":3.0}.get(kind,1.0)
 func show_scene(scene_kind: String, winner: String, rival: String, mark: int, layout: Dictionary, claimed_board: int = 4):
-	kind = scene_kind; winner_id = winner; loser_id = rival; player = mark; _layout = layout
+	kind = scene_kind; winner_id = winner; loser_id = rival; player = mark
 	age = 0; active = true; visible = true; frozen = false
+	_place(layout,claimed_board)
+	hero.configure(winner_id); hero.side = player; hero.reduced_motion = reduced_motion
+	hero.set_clip({"lock_in":"lock_in","pop":"board_pop","spotlight":"victory"}.get(kind,"idle"))
+	loser.configure(loser_id,true); loser.side = 3-player; loser.reduced_motion = reduced_motion; loser.set_clip("defeat")
+	loser.visible = kind == "spotlight"
+	clip_word = R.get_hero(winner_id).action
+	pose()
+## Recompute regions for the current scene after a resize; age/clips are untouched.
+func relayout(layout: Dictionary):
+	if active: _place(layout,_claimed_board); pose()
+func _place(layout: Dictionary, claimed_board: int):
+	_layout = layout; _claimed_board = claimed_board
 	var s: Vector2 = layout.size; var seam: Rect2 = layout.hinge
 	var safe = Rect2(Vector2(14,14),s-Vector2(28,28))
 	if seam.size.x > 0: safe = Rect2(seam.end.x+12,14,s.x-seam.end.x-26,s.y-28)
@@ -41,12 +54,8 @@ func show_scene(scene_kind: String, winner: String, rival: String, mark: int, la
 		hero_rect = Rect2(safe.position+Vector2(0,44),Vector2(safe.size.x*(.9 if portrait else .6),safe.size.y*(.65 if portrait else .78)))
 		if portrait: hero_rect.position.x = safe.get_center().x-hero_rect.size.x*.5
 	loser_rect = Rect2(region.end.x-region.size.x*.29,region.position.y+region.size.y*.38,region.size.x*.26,region.size.y*.29)
-	hero.configure(winner_id); hero.side = player; hero.position = hero_rect.position; hero.size = hero_rect.size; hero.reduced_motion = reduced_motion
-	hero.set_clip({"lock_in":"lock_in","pop":"board_pop","spotlight":"victory"}.get(kind,"idle"))
-	loser.configure(loser_id,true); loser.side = 3-player; loser.position = loser_rect.position; loser.size = loser_rect.size; loser.reduced_motion = reduced_motion; loser.set_clip("defeat")
-	loser.visible = kind == "spotlight"
-	clip_word = R.get_hero(winner_id).action
-	pose()
+	hero.position = hero_rect.position; hero.size = hero_rect.size
+	loser.position = loser_rect.position; loser.size = loser_rect.size
 static func pop_region(layout: Dictionary, claimed_board: int) -> Rect2:
 	var b: Rect2 = layout.board; var s: Vector2 = layout.size
 	var w = minf(b.size.x*.44,230); var h = minf(126,w*.65)

@@ -8,8 +8,13 @@ func _init(file_path: String = "user://nineweave-profile.cfg"):
 	path = file_path
 	data = data.duplicate(true)
 	var cfg = ConfigFile.new()
-	if cfg.load(path) == OK:
+	var corrupt = FileAccess.file_exists(path) and FileAccess.get_file_as_bytes(path).has(0)
+	if not corrupt and cfg.load(path) == OK:
 		for key in data: data[key] = cfg.get_value("profile",key,data[key])
+	# Round 3b: wrong-typed values from a corrupt file fall back to safe defaults.
+	if not data.onboarded is bool: data.onboarded = false
+	if not data.character_id is String: data.character_id = "vesper_vale"
+	if not data.display_name is String: data.display_name = "You"
 	if not data.identity is Dictionary or data.identity.is_empty(): data.identity = {"kind":"local","id":"local-"+str(Time.get_unix_time_from_system()).sha256_text().left(16)}
 	if not Roster.valid(str(data.character_id)): data.character_id = "vesper_vale"
 	data.display_name = str(data.display_name).strip_edges().left(24)

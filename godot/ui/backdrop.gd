@@ -31,6 +31,9 @@ var win_player: int = 0
 var win_glow: float = 0
 var _sky_mat: ShaderMaterial
 var art: Layer
+var _motes: CPUParticles2D
+var _sky: ColorRect
+var _motes_size: Vector2 = -Vector2.ONE
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	show_behind_parent = true
@@ -47,18 +50,20 @@ func _ready():
 	motes.initial_velocity_min = 3; motes.initial_velocity_max = 9
 	motes.gravity = Vector2.ZERO; motes.scale_amount_min = .5; motes.scale_amount_max = 1.6
 	motes.color = Color(.65,.85,1,.42); motes.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	add_child(motes)
+	add_child(motes); _motes = motes; _sky = rays
 func _process(delta):
 	clock += delta*(.1 if reduced_motion else 1.0)
-	var motes = get_node_or_null("AmbientMotes")
-	if motes:
-		motes.position = Vector2(size.x*.5,size.y*.6)
-		motes.emission_rect_extents = size*.48
-		motes.amount = 8 if reduced_motion else 24
+	# Round 3b: CPUParticles2D.set_amount reallocates its multimesh even for the same
+	# value; only touch the emitter when size or motion preference actually changes.
+	if is_instance_valid(_motes):
+		if _motes_size != size:
+			_motes_size = size
+			_motes.position = Vector2(size.x*.5,size.y*.6); _motes.emission_rect_extents = size*.48
+		var amount = 8 if reduced_motion else 24
+		if _motes.amount != amount: _motes.amount = amount
 	refresh()
 func refresh():
-	var sky_node = get_node_or_null("Sky")
-	if sky_node: sky_node.visible = background_theme == "crystal"
+	if is_instance_valid(_sky): _sky.visible = background_theme == "crystal"
 	if _sky_mat:
 		var anchor = _anchor()
 		_sky_mat.set_shader_parameter("ray_center",Vector2(anchor.x/maxf(1,size.x),anchor.y/maxf(1,size.y)))

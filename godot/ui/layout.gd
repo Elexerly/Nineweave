@@ -104,32 +104,55 @@ static func compute(physical: Vector2, hinge: Rect2 = Rect2()) -> Dictionary:
 		r.players = Rect2(r.players.position.x,62,r.players.size.x,48)
 		r.turn = Rect2(r.turn.position.x,118,r.turn.size.x,30)
 		r.info = Rect2(r.info.position.x,156,r.info.size.x,44)
-	# Corner overlays never enter the board or the reserved fold. Keep board geometry.
-	var own: Rect2; var rival: Rect2
+	# Corner overlays never enter the board, the fold, or any HUD rect (Round 3b).
+	# A side whose corner has no readable space gets an empty rect: main then makes
+	# that side's scorecard figure the live reacting character instead.
+	r.message = Rect2(16,h-20,w-32,18)
+	# Short phones put controls at h-74; keep the message lane below them, never over the buttons.
+	if r.message.position.y < r.controls.end.y+1:
+		r.message = Rect2(16,r.controls.end.y+1,w-32,maxf(10,h-r.controls.end.y-2))
+	var own = Rect2(); var rival = Rect2()
+	r.hero_player_host = ""
 	if mode == "duo_portrait":
 		r.minimap.position.x = 116
 		r.character = Rect2(216,r.character.position.y,maxf(40,w-440),88)
-		own = Rect2(12,r.minimap.position.y,92,minf(104,h-r.minimap.position.y-8))
+		var oh = minf(104,r.message.position.y-6-r.minimap.position.y)
+		if oh >= MIN_CORNER: own = Rect2(12,r.minimap.position.y,92,oh)
 	elif mode in ["phone_portrait","tablet_portrait"]:
-		var free = maxf(6,h-r.controls.end.y-20)
-		own = Rect2(8,h-minf(124,free)-8,minf(120,w*.29),minf(124,free))
-	elif mode in ["duo_landscape","phone_landscape"]:
-		var free = h-r.board.end.y-14
-		if free >= 44:
-			own = Rect2(8,h-minf(96,free)-7,minf(114,r.board.size.x*.28),minf(96,free))
-		else:
-			# Height-filling landscape boards leave only the side deck; use its lower-left.
-			var top = r.info.end.y+6
-			own = Rect2(r.controls.position.x,top,minf(102,r.controls.size.x*.34),maxf(24,r.controls.position.y-top-6))
-	else:
-		own = Rect2(8,h-minf(150,h*.2)-8,minf(128,r.players.size.x),minf(150,h*.2))
-	rival = Rect2(w-82,4,74,58)
-	if seam.size.x > 0 and own.intersects(seam):
-		own.position.x = seam.end.x+12
-		own.position.y = h-own.size.y-8
-	if seam.size.x > 0 and rival.intersects(seam): rival.position.x = seam.end.x+8
+		# Mirrored busts in the strip under the control row, above the message lane.
+		var top = r.controls.end.y+10
+		var oh = minf(124,r.message.position.y-6-top)
+		var ow = minf(120,w*.29)
+		if oh >= MIN_CORNER:
+			own = Rect2(8,r.message.position.y-6-oh,ow,oh)
+			rival = Rect2(w-8-ow,own.position.y,ow,oh)
+	elif mode == "duo_landscape":
+		# The Duo character panel is the player's live figure; the strip under the
+		# board is only ~50 px, too small to read. The message uses that strip.
+		r.hero_player_host = "character"
+		own = Rect2(r.character.position+Vector2(4,24),r.character.size-Vector2(8,28))
+		if h-r.board.end.y-14 >= 24: r.message = Rect2(r.board.position.x,r.board.end.y+6,r.board.size.x,18)
+		else: r.message = Rect2(r.controls.position.x,r.controls.position.y-22,r.controls.size.x,18)
+	elif mode == "phone_landscape":
+		# Height-filling board: mirrored busts in the side deck between info and the message lane.
+		r.message = Rect2(r.controls.position.x,r.controls.position.y-22,r.controls.size.x,18)
+		var top = r.info.end.y+6
+		var oh = r.message.position.y-4-top
+		var ow = minf(102,r.controls.size.x*.34)
+		if oh >= MIN_CORNER:
+			oh = minf(oh,124)
+			own = Rect2(r.controls.position.x,top,ow,oh)
+			rival = Rect2(r.controls.end.x-ow,top,ow,oh)
+	# Tablet/desktop landscape: the tall scorecards already hold full figures; they react live.
 	r.hero_player = own; r.hero_opponent = rival
 	return r
+## Below this height a bust no longer reads as a character.
+const MIN_CORNER = 56.0
+## HUD rects a corner character must never cover (board excluded; checked separately).
+static func hud_rects(layout: Dictionary) -> Dictionary:
+	var result = major_rects(layout)
+	if layout.has("message"): result["message"] = layout.message
+	return result
 static func major_rects(layout: Dictionary) -> Dictionary:
 	var result = {}
 	for key in ["header","players","turn","board","info","controls","stats","minimap","history","character"]:

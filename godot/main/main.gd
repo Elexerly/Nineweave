@@ -93,6 +93,10 @@ var _resize_pending: bool = false
 var _modal_rect: Rect2
 var _debug_capture: bool = false
 var _title: Dictionary = {}
+## Round 3b: one skip gesture (touch + emulated mouse + release) never reaches the UI behind.
+const SKIP_GUARD_MS = 350
+var _skip_guard_until: int = 0
+var _hint_ply: int = -1
 
 func _ready():
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -147,6 +151,8 @@ func _relayout():
 	if hinge_overlay: hinge_overlay.queue_redraw()
 	_last_size = logical
 	board.place(layout.board)
+	# Rotation/resize mid-cinematic: recompute its panels against the new board/HUD.
+	if cinematic and cinematic.active: cinematic.relayout(layout)
 	callout.region = Rect2(layout.board.position+Vector2(8,-8),Vector2(layout.board.size.x-16,52))
 	_title = _title_geometry()
 	backdrop.title_anchor = _title.anchor; backdrop.title_region = _title.region
@@ -213,7 +219,10 @@ func _process(delta):
 			elif mode == "computer": _apply_move(m.x,m.y)
 	if hint_busy:
 		hint_ai.step(3500)
-		if hint_ai.done: hint_busy = false; board.hint_move = hint_ai.best_move
+		if hint_ai.done:
+			hint_busy = false
+			# Only show a hint computed for the position still on the board.
+			if _hint_ply == game.history.size() and game.is_legal(hint_ai.best_move.x,hint_ai.best_move.y): board.hint_move = hint_ai.best_move
 	if page == "game" and game.status != 0 and not board.win_fx.is_empty() and board.win_progress() >= RESULT_AT and not _result_shown:
 		if game.status in [1,2] and not _spotlight_done:
 			if not cinematic.active:
@@ -265,11 +274,19 @@ func _cinematic_finished(kind: String):
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
 func _input(event):
-	var tap = (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed) or (event is InputEventKey and event.pressed and not event.echo)
+	var pointer = event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT)
+	# A touch that skipped a modal cinematic is followed by its emulated mouse press and the
+	# release; swallow that one gesture so it cannot land on the newly shown Play Again/Menu.
+	if pointer and Time.get_ticks_msec() < _skip_guard_until:
+		if not event.pressed: _skip_guard_until = 0
+		get_viewport().set_input_as_handled(); return
+	var tap = (pointer and event.pressed) or (event is InputEventKey and event.pressed and not event.echo)
 	if tap and cinematic and cinematic.active:
 		var was = cinematic.kind
-		cinematic.skip()
-		if was != "pop": get_viewport().set_input_as_handled()
+		var skipped = cinematic.skip()
+		if was != "pop":
+			get_viewport().set_input_as_handled()
+			if skipped and not event is InputEventKey: _skip_guard_until = Time.get_ticks_msec()+SKIP_GUARD_MS
 func hero_for(mark: int) -> String:
 	return str(profile.data.character_id) if mark == human_mark else rival_character
 func _show_spotlight():
@@ -308,7 +325,7 @@ func _apply_move(b: int, c: int) -> bool:
 	var pan = -.35 if player == human_mark else .35
 	var before: int = game.owners[b] if b >= 0 and b < 9 else 0
 	if not game.play(b,c): _invalid(b); return false
-	message = ""
+	message = ""; hint_busy = false
 	board.notify_move(b,c); sound.cue("place_x" if player == 1 else "place_o",pan)
 	if game.active_board >= 0: sound.cue("route",(game.active_board%3-1)*.35)
 	if before == 0 and game.owners[b] != 0:
@@ -398,7 +415,7 @@ func undo_move() -> bool:
 func request_hint():
 	if game.status != 0 or thinking or not settings.values.show_hints: return
 	if mode == "online": message = "Hints are disabled in online games."; return
-	hint_ai.begin(game,"Hard",444+game.history.size()); hint_busy = true
+	hint_ai.begin(game,"Hard",444+game.history.size()); hint_busy = true; _hint_ply = game.history.size()
 func _save_match():
 	if mode == "computer" and page == "game" and not _debug_capture:
 		settings.saved_game = {"state":game.serialize(),"human":human_mark,"seconds":match_seconds,"character":profile.data.character_id,"rival_character":rival_character} if game.status == 0 else {}
@@ -406,14 +423,22 @@ func _save_match():
 func resume_game():
 	if settings.saved_game.is_empty(): return
 	if not game.deserialize(settings.saved_game.state): settings.saved_game = {}; return
-	mode = "computer"; _debug_capture = false; human_mark = int(settings.saved_game.human); match_seconds = float(settings.saved_game.get("seconds",0))
+	mode = "computer"; _debug_capture = false; human_mark = int(settings.saved_game.human)
+	var seconds = settings.saved_game.get("seconds",0)
+	match_seconds = maxf(0,float(seconds)) if seconds is int or seconds is float else 0.0
 	rival_character = str(settings.saved_game.get("rival_character","auric_rex"))
+	# A hand-edited/legacy save may name an unknown hero or the player's own; pick a valid rival.
+	if not Roster.valid(rival_character) or rival_character == str(profile.data.character_id):
+		rival_character = "auric_rex" if profile.data.character_id != "auric_rex" else "vesper_vale"
 	page = "game"; overlay = ""; board.clear_effects(); _result_shown = false; _spotlight_done = false; cinematic.clear()
 	_refresh_labels(); _rebuild(); _schedule_ai()
 func go_home():
 	sound.clear_announcer()
 	_save_match(); _leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
-func show_settings(): overlay = "settings"; thinking = false; _rebuild()
+func show_settings():
+	# A non-modal claim pop (z 30) would paint over the modal; it is only flavour, drop it.
+	if cinematic.active and cinematic.kind == "pop": cinematic.clear()
+	overlay = "settings"; thinking = false; _rebuild()
 func _close_overlay():
 	overlay = ""; _rebuild(); _schedule_ai()
 func _leave_online():
@@ -457,7 +482,7 @@ func invite_demo_rival():
 	demo_rival.join_room(room_code)
 func _online_ready():
 	remote_ready = true; opponent_name = transport.remote_name; rival_character = transport.remote_character_id
-	_spotlight_done = false; cinematic.clear()
+	_spotlight_done = false; cinematic.clear(); _debug_capture = false
 	game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
 	board.clear_effects(); thinking = false; _result_shown = false; match_seconds = 0; message = ""
 	_refresh_labels(); _rebuild(); _announce("ready")
@@ -528,7 +553,7 @@ func _rebuild():
 		var big = layout.mode == "landscape"
 		var hb = 52.0 if big else 44.0
 		_button("home","" if not big else "",Rect2(hdr.position,Vector2(hb,hb)),go_home,false,"home" if big else "back")
-		_button("settings","⚙",Rect2(Vector2(minf(hdr.end.x-hb,layout.hero_opponent.position.x-hb-8),hdr.position.y),Vector2(hb,hb)),show_settings)
+		_button("settings","⚙",Rect2(Vector2(hdr.end.x-hb,hdr.position.y),Vector2(hb,hb)),show_settings)
 		var cr: Rect2 = layout.controls
 		if layout.mode in ["phone_portrait","tablet_portrait"]:
 			var unit = minf(cr.size.x/4-9,84 if layout.mode == "tablet_portrait" else 72)
@@ -561,11 +586,17 @@ func _create_field_heroes():
 			hero_r = Rect2(Vector2(cx-radius,rr.get_center().y-radius),Vector2.ONE*radius*2)
 		var rig = HeroRig.new(); rig.hero_id = hero_for(mark); rig.side = mark; rig.facing = 1 if mark == human_mark else -1
 		rig.bust = not is_vertical; rig.position = hero_r.position; rig.size = hero_r.size; rig.reduced_motion = board.reduced_motion
-		# Scorecard portraits are frozen; reactions live in the two safe corners.
-		rig.frozen = true; add_child(rig); ui_nodes.append(rig)
+		add_child(rig); ui_nodes.append(rig)
+		var corner_r: Rect2 = layout.hero_player if mark == human_mark else layout.hero_opponent
+		var hosted = mark == human_mark and not str(layout.get("hero_player_host","")).is_empty()
+		# Scorecard portraits are frozen while a corner (or the Duo panel) reacts. A side
+		# without readable corner space reacts live in its own scorecard instead.
+		rig.frozen = hosted or corner_r.size.y >= Layout.MIN_CORNER
+		if hosted: continue
+		if not rig.frozen:
+			field_heroes[mark] = rig; continue
 		var corner = HeroRig.new(); corner.hero_id = hero_for(mark); corner.side = mark
 		corner.facing = 1 if mark == human_mark else -1; corner.bust = true
-		var corner_r: Rect2 = layout.hero_player if mark == human_mark else layout.hero_opponent
 		corner.position = corner_r.position; corner.size = corner_r.size; corner.reduced_motion = board.reduced_motion
 		corner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(corner); ui_nodes.append(corner); field_heroes[mark] = corner
@@ -573,7 +604,9 @@ func _create_field_heroes():
 		var rig = HeroRig.new(); rig.hero_id = hero_for(human_mark); rig.side = human_mark
 		rig.position = layout.character.position+Vector2(4,24); rig.size = layout.character.size-Vector2(8,28)
 		rig.bust = rig.size.y < 115; rig.reduced_motion = board.reduced_motion
-		add_child(rig); ui_nodes.append(rig); field_heroes["panel"] = rig
+		add_child(rig); ui_nodes.append(rig)
+		if layout.get("hero_player_host","") == "character": field_heroes[human_mark] = rig
+		else: field_heroes["panel"] = rig
 	_update_hero_states()
 func hero_state(mark: int) -> String:
 	var delta_score = game.owners.count(mark)-game.owners.count(3-mark)
@@ -787,7 +820,7 @@ func _draw_game():
 			if on and p == 2: P.outline(self,rr.grow(-5),Color(1,.8,.35,.9),2)
 			P.mark(self,rr.get_center(),tile*.3,p,1 if on or game.status != 0 else .55,1.3 if on else .8)
 	if not message.is_empty():
-		P.text(self,message,Rect2(16,s.y-20,s.x-32,18),12,P.GOLD)
+		P.text(self,message,layout.message,12,P.GOLD)
 	if hint_busy: P.text(self,"Reading the threads…",Rect2(layout.board.position.x,layout.board.end.y-22,layout.board.size.x,20),14,P.PALE)
 func _draw_turn(r: Rect2, u: float):
 	P.panel(self,r,false,1,r.size.y >= 34)

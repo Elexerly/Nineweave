@@ -40,7 +40,7 @@ BRANCH=$(cd "$ROOT/.." && git branch --show-current 2>/dev/null || printf unknow
 TREE='clean committed tree'
 [ -z "$(cd "$ROOT/.." && git status --porcelain 2>/dev/null)" ] || TREE='UNCOMMITTED CHANGES PRESENT (not a pure commit build)'
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 3
+Nineweave Round 3b
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE
@@ -55,6 +55,13 @@ if rg -q 'SCRIPT ERROR|Parse Error|ERROR:.*(export|Export|template|Template|reso
 for file in index.html index.js index.wasm index.pck; do
   [ -s "$OUT/$file" ] || { printf 'missing %s\n' "$OUT/$file"; status=1; }
 done
+# Round 3b: every owner recording must be packed as an imported stream.
+oggs=0
+for ogg in "$ROOT"/assets/audio/*/*.ogg; do
+  name=$(basename "$ogg"); oggs=$((oggs+1))
+  rg -a -q "${name%.ogg}\\.ogg-[0-9a-f]{32}\\.oggvorbisstr" "$OUT/index.pck" || { printf 'audio not packed: %s\n' "$name"; status=1; }
+done
+printf 'packed audio checked: %s ogg\n' "$oggs"
 printf 'staging: %s\n' "$STAGE"
 if [ "$status" -eq 0 ]; then printf 'WEB EXPORT: PASS -> %s/index.html\n' "$OUT"; else cat "$STAGE/export.log"; printf 'WEB EXPORT: FAIL\n'; fi
 exit "$status"

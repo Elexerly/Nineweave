@@ -40,7 +40,12 @@ var under: Layer
 var over: Layer
 var top: Layer
 var _last_touch_ms: int = -1000
-var _signature: String = ""
+## Value-type redraw signature (Round 3b: no per-frame String formatting).
+var _sig_state = Vector4i(-1,-1,-1,-1)
+var _sig_marks = Vector4i(-1,-1,-1,-1)
+var _sig_hover = Vector2i(-2,-2)
+var _sig_hint = Vector2i(-2,-2)
+var _sig_size = Vector2(-1,-1)
 var _dirty: bool = true
 
 func _ready():
@@ -68,15 +73,19 @@ func advance(delta: float):
 		invalid_age += delta; active_age += delta; last_move_age = minf(1,last_move_age+delta)
 		for key in mark_ages: mark_ages[key] += delta
 		for fx in claims: fx.age += delta
-		claims = claims.filter(func(fx): return fx.age < claim_duration())
+		# Oldest claim is first; only rebuild the array when one actually expires.
+		if not claims.is_empty() and claims[0].age >= claim_duration():
+			claims = claims.filter(func(fx): return fx.age < claim_duration())
 		if not win_fx.is_empty(): win_fx.age = minf(win_fx.age+delta,win_duration())
 	refresh()
 ## Redraw what changed. Over/Top are cheap and animate every frame; the base only on change.
 func refresh():
 	_apply_camera()
 	if game != null:
-		var sig = "%d|%d|%d|%d|%d|%s|%s|%s|%d" % [game.history.size(),game.status,game.active_board,game.turn,game.cells.count(1)*100+game.cells.count(2),hover_move,hint_move,size,int(reduced_motion)]
-		if sig != _signature: _signature = sig; _dirty = true
+		var state = Vector4i(game.history.size(),game.status,game.active_board,game.turn)
+		var marks = Vector4i(game.cells.count(1),game.cells.count(2),int(reduced_motion),0)
+		if state != _sig_state or marks != _sig_marks or hover_move != _sig_hover or hint_move != _sig_hint or size != _sig_size:
+			_sig_state = state; _sig_marks = marks; _sig_hover = hover_move; _sig_hint = hint_move; _sig_size = size; _dirty = true
 	if _dirty or animating(): queue_redraw(); _dirty = false
 	if under: under.queue_redraw()
 	if over: over.queue_redraw()

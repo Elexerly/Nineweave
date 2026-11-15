@@ -19,6 +19,12 @@ func run():
 	inspect(Vector2(669,787),Rect2(323.5,0,22,787),"duo_landscape")
 	var normal = L.compute(Vector2(867,553)); var large = L.compute(Vector2(2601,1659))
 	ok(normal.board == large.board,"DPR3 same logical composition")
+	# Producer-reported cases, pinned explicitly.
+	var ipad = L.compute(Vector2(1366,1024))
+	ok(ipad.hero_player.size.y == 0 and ipad.hero_opponent.size.y == 0,"1366x1024 no bust over the scorecards (live scorecard figures)")
+	ok(normal.hero_player.size.y >= 150 and normal.hero_player_host == "character","867x553 player figure uses the Duo panel")
+	var phone = L.compute(Vector2(390,844))
+	ok(phone.hero_opponent.position.y > phone.controls.end.y and phone.hero_opponent.size.y >= 90,"390x844 rival bust mirrored at bottom-right, uncropped size")
 	print("NINEWEAVE_LAYOUT ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures," sizes=",cases.size())
 	quit(0 if failures == 0 else 1)
 func inspect(s: Vector2, hinge: Rect2, expected: String):
@@ -27,10 +33,24 @@ func inspect(s: Vector2, hinge: Rect2, expected: String):
 	ok(layout.mode == expected,id+" mode "+layout.mode)
 	ok(is_equal_approx(layout.board.size.x,layout.board.size.y),id+" board square")
 	var viewport = Rect2(Vector2.ZERO,layout.size).grow(.1)
+	# Round 3b: corner characters never collide with the board or any HUD rect; an empty
+	# rect means that side reacts in its scorecard. Present corners are readable busts.
+	var hud = L.hud_rects(layout)
 	for key in ["hero_player","hero_opponent"]:
-		ok(viewport.encloses(layout[key]),id+" corner in view "+key)
-		ok(not layout[key].intersects(layout.board),id+" corner never overlaps board "+key)
-		if hinge.size.x: ok(not layout[key].intersects(layout.hinge),id+" corner hinge safe "+key)
+		var corner: Rect2 = layout[key]
+		if corner.size.y <= 0: continue
+		ok(corner.size.y >= L.MIN_CORNER and corner.size.x >= 48,id+" readable corner "+key+" "+str(corner))
+		ok(viewport.encloses(corner),id+" corner in view "+key)
+		ok(not corner.intersects(layout.board),id+" corner never overlaps board "+key)
+		if hinge.size.x: ok(not corner.intersects(layout.hinge),id+" corner hinge safe "+key)
+		for other in hud:
+			if key == "hero_player" and other == layout.hero_player_host:
+				ok(hud[other].encloses(corner),id+" hosted corner inside "+other)
+				continue
+			ok(not corner.intersects(hud[other]),id+" corner "+key+" clear of HUD "+other+" "+str(corner)+" vs "+str(hud[other]))
+		if key == "hero_player" and layout.hero_opponent.size.y > 0: ok(not corner.intersects(layout.hero_opponent),id+" corners apart")
+	ok(not layout.message.intersects(layout.controls) and viewport.encloses(layout.message),id+" message lane clear of controls")
+	if layout.mode == "duo_landscape": ok(layout.hero_player.size.y >= 120,id+" Duo player figure readable "+str(layout.hero_player))
 	var rects = L.major_rects(layout)
 	for key in rects:
 		ok(viewport.encloses(rects[key]),id+" inside "+key+" "+str(rects[key]))

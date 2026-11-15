@@ -50,19 +50,27 @@ func _ready():
 	_warm = ["ui","place_x","place_o","invalid","route","claim","victory","defeat","draw"]
 	for id in VOICES: _warm.append("ann_"+id)
 	for id in REAL_SFX: _warm.append(id)
+## Buses normally come from res://default_bus_layout.tres. Runtime creation is only a
+## fallback, and it must NOT use AudioServer.add_bus: on Web (sample playback) Godot
+## 4.7's JS mirror (GodotAudio.Bus.addAt(-1)) reorders its bus array, so later
+## set_bus_send() calls wire Master into a loop that never reaches ctx.destination and
+## every sound is silent. Growing bus_count appends in the same order on both sides.
 func ensure_buses():
 	for bus in ["SFX","Music","Announcer"]:
 		if AudioServer.get_bus_index(bus) < 0:
-			AudioServer.add_bus(); var index = AudioServer.bus_count-1
+			var index = _append_bus()
 			AudioServer.set_bus_name(index,bus); AudioServer.set_bus_send(index,"Master")
 	for i in range(5):
 		var bus = "CrystalPan"+str(i)
 		if AudioServer.get_bus_index(bus) < 0:
-			AudioServer.add_bus(); var index = AudioServer.bus_count-1
+			var index = _append_bus()
 			AudioServer.set_bus_name(index,bus); AudioServer.set_bus_send(index,"SFX")
 			var pan = AudioEffectPanner.new(); pan.pan = (i-2)*.35
 			AudioServer.add_bus_effect(index,pan)
 	_apply_mix()
+static func _append_bus() -> int:
+	AudioServer.bus_count = AudioServer.bus_count+1
+	return AudioServer.bus_count-1
 func configure(values: Dictionary):
 	enabled = bool(values.get("sound",true))
 	for key in volumes: volumes[key] = clampf(float(values.get(key,volumes[key])),0,1)

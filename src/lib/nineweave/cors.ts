@@ -16,7 +16,7 @@ export function corsHeaders(origin: string | null): Record<string, string> {
   if (origin && ALLOWED_ORIGINS.has(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type";
-    headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS";
+    headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS";
     headers["Access-Control-Max-Age"] = "600";
   }
   return headers;

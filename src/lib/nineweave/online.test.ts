@@ -37,7 +37,9 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await pg.exec("truncate nw_matches, nw_rooms, nw_players restart identity cascade");
+  await pg.exec(
+    "truncate nw_reports, nw_blocks, nw_chat, nw_matches, nw_rooms, nw_players restart identity cascade",
+  );
   nowMs = START;
   nextRandom = 0.1;
   svc = createService({
@@ -254,7 +256,8 @@ describe("device auth and profile", () => {
     assert.ok(Date.parse(missingAt.body.accepted_at));
 
     assert.equal(
-      (await call("PATCH", "/me", { token: a.token, body: { tos_version: "not a version!" } })).status,
+      (await call("PATCH", "/me", { token: a.token, body: { tos_version: "not a version!" } }))
+        .status,
       400,
     );
     assert.equal(
@@ -721,18 +724,20 @@ describe("forfeits and timeouts", () => {
     assert.equal((await me(guestDev.token)).matches_won, 1);
   });
 
-  it("forfeits the player due to move after 180 s without a move", async () => {
+  // Round 5 (online2): the 180 s turn timeout became 25 s + 10 s "Still
+  // there?", and it only costs a match once both players have moved.
+  it("forfeits the player due to move 35 s into a turn once both players moved", async () => {
     const hostDev = await device("Slowpoke");
     const guestDev = await device("Speedy");
     const { code, host, guest } = await startMatch(hostDev.token, guestDev.token);
-    // X (host) moves, then O (guest) stalls.
-    await playMoves(code, host.token, guest.token, X_WIN_GAME.slice(0, 1));
-    nowMs += 179_000;
+    // X (host), O (guest), X move, then O (guest) stalls.
+    await playMoves(code, host.token, guest.token, X_WIN_GAME.slice(0, 3));
+    nowMs += 34_000;
     assert.equal(
       (await call("GET", `/rooms/${code}`, { token: host.token })).body.status,
       "active",
     );
-    nowMs += 2_000;
+    nowMs += 1_000;
     const view = await call("GET", `/rooms/${code}`, { token: host.token });
     assert.equal(view.body.status, "closed");
     assert.equal(view.body.opponent_left, true);
@@ -743,7 +748,8 @@ describe("forfeits and timeouts", () => {
 
   it("the global sweep resolves timeouts even when nobody polls the room", async () => {
     const hostDev = await device("Ghost");
-    const { code } = await startMatch(hostDev.token);
+    const { code, host, guest } = await startMatch(hostDev.token);
+    await playMoves(code, host.token, guest.token, X_WIN_GAME.slice(0, 2)); // both moved
     nowMs += 200_000;
     await runCleanup(svc, true);
     const row = (
@@ -765,7 +771,10 @@ describe("CORS and limits", () => {
     assert.equal(ok.status, 204);
     assert.equal(ok.headers.get("access-control-allow-origin"), "https://elexerly.github.io");
     assert.equal(ok.headers.get("access-control-allow-headers"), "Authorization, Content-Type");
-    assert.equal(ok.headers.get("access-control-allow-methods"), "GET, POST, PATCH, OPTIONS");
+    assert.equal(
+      ok.headers.get("access-control-allow-methods"),
+      "GET, POST, PATCH, DELETE, OPTIONS",
+    );
     assert.equal(ok.headers.get("access-control-allow-credentials"), null);
     for (const origin of [
       "https://nineweave.grok.me",

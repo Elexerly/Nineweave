@@ -11,6 +11,8 @@ export interface RateLimits {
   write: number;
   email: number;
   verify: number;
+  chat: number;
+  moderation: number;
 }
 
 export const DEFAULT_LIMITS: RateLimits = {
@@ -21,6 +23,8 @@ export const DEFAULT_LIMITS: RateLimits = {
   write: 30, // PATCH /me
   email: 10, // code requests: verification + recovery
   verify: 30, // code confirmations: verification + recovery
+  chat: 60, // chat posts (the real per-player caps live in the database)
+  moderation: 30, // block / unblock / report
 };
 
 export class RateLimiter {

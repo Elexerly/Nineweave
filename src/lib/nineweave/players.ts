@@ -40,7 +40,12 @@ const PLAYER_COLUMNS =
   "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, created_at, tos_version, privacy_version, accepted_at, age_confirmed, email, email_verified_at";
 
 /** Feature flags the client checks before using newer endpoints. */
-export const CAPABILITIES = { email: true } as const;
+export const CAPABILITIES = {
+  email: true,
+  online2: true,
+  chat: true,
+  tournaments: false,
+} as const;
 
 export type EmailStatus = "none" | "unverified" | "verified";
 

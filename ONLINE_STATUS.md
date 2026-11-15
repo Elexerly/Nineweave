@@ -171,3 +171,12 @@ I also checked these by hand (not part of the suite):
   the protocol requires 404.
 - `npm test` exits non-zero because of the 15 pre-existing template failures
   described above.
+
+## Round 5 (online2), phase 1 server
+
+Turn clock (25 s + 10 s "Still there?", one restart per turn), no-show /
+abandoned rules with a 60 s disconnect grace, in-match chat with profanity
+filter, block and report, screen names in the envelope, `poll_after_ms`
+hints and `GET /capabilities`. Needs migration
+`0005_nineweave_online2.sql` (applied by `npm run build`). See `ONLINE2.md`
+and `ONLINE_API.md`.

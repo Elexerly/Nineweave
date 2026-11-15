@@ -11,6 +11,7 @@ export const Route = createFileRoute("/api/nineweave/$")({
       GET: handle,
       POST: handle,
       PATCH: handle,
+      DELETE: handle,
       OPTIONS: handle,
     },
   },

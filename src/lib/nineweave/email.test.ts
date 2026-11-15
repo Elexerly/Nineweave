@@ -56,7 +56,7 @@ after(async () => {
 
 beforeEach(async () => {
   await pg.exec(
-    "truncate nw_email_challenges, nw_matches, nw_rooms, nw_players restart identity cascade",
+    "truncate nw_reports, nw_blocks, nw_chat, nw_email_challenges, nw_matches, nw_rooms, nw_players restart identity cascade",
   );
   nowMs = START;
   sent = [];
@@ -144,14 +144,29 @@ async function verify(token: string, email: string) {
 describe("profile email fields", () => {
   it("advertises capabilities.email on register, GET /me and PATCH /me", async () => {
     const d = await device();
-    assert.deepEqual(d.player.capabilities, { email: true });
+    assert.deepEqual(d.player.capabilities, {
+      email: true,
+      online2: true,
+      chat: true,
+      tournaments: false,
+    });
     assert.equal(d.player.email, null);
     assert.equal(d.player.email_status, "none");
     assert.equal(d.player.email_verified_at, null);
-    assert.deepEqual((await me(d.token)).capabilities, { email: true });
+    assert.deepEqual((await me(d.token)).capabilities, {
+      email: true,
+      online2: true,
+      chat: true,
+      tournaments: false,
+    });
     const patched = await call("PATCH", "/me", { token: d.token, body: { last_hero_id: "cryon" } });
     assert.equal(patched.status, 200);
-    assert.deepEqual(patched.body.capabilities, { email: true });
+    assert.deepEqual(patched.body.capabilities, {
+      email: true,
+      online2: true,
+      chat: true,
+      tournaments: false,
+    });
   });
 
   it("PATCH stores a trimmed, lowercased email as unverified; null and empty clear it", async () => {

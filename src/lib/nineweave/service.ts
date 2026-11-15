@@ -8,7 +8,12 @@ import type { Mailer } from "./mailer.ts";
 import { RateLimiter, type RateLimits } from "./rate-limit.ts";
 import type { Db } from "./store.ts";
 
-export const TURN_TIMEOUT_MS = 180_000; // active match: player due to move forfeits
+export const TURN_MS = 25_000; // turn clock before the "Still there?" prompt
+export const STILL_THERE_MS = 10_000; // "Still there?" phase; the turn expires after it
+export const GRACE_MS = 60_000; // disconnect grace for the seat that is not due to move
+export const CONNECTED_MS = 20_000; // a seat seen this recently counts as connected
+/** Total turn length (25 s + 10 s). */
+export const TURN_TIMEOUT_MS = TURN_MS + STILL_THERE_MS;
 export const LOBBY_TIMEOUT_MS = 600_000; // waiting / finished room with no activity closes
 
 export interface Service {
@@ -16,11 +21,19 @@ export interface Service {
   now: () => Date;
   random: () => number;
   limiter: RateLimiter;
-  turnTimeoutMs: number;
+  /** Turn clock before the "Still there?" phase. */
+  turnMs: number;
+  /** Length of the "Still there?" phase. */
+  stillThereMs: number;
+  /** Disconnect grace for the seat that is not due to move. */
+  graceMs: number;
   lobbyTimeoutMs: number;
   /** Minimum gap between opportunistic global cleanup sweeps. */
   cleanupIntervalMs: number;
   lastCleanupMs: number;
+  /** Minimum gap between chat / report retention sweeps. */
+  retentionIntervalMs: number;
+  lastRetentionMs: number;
   /** Outgoing email; `null` when not configured (email endpoints answer 503). */
   mailer: Mailer | null;
 }
@@ -30,9 +43,12 @@ export interface ServiceOptions {
   now?: () => Date;
   random?: () => number;
   limits?: Partial<RateLimits>;
-  turnTimeoutMs?: number;
+  turnMs?: number;
+  stillThereMs?: number;
+  graceMs?: number;
   lobbyTimeoutMs?: number;
   cleanupIntervalMs?: number;
+  retentionIntervalMs?: number;
   mailer?: Mailer | null;
 }
 
@@ -42,10 +58,14 @@ export function createService(opts: ServiceOptions): Service {
     now: opts.now ?? (() => new Date()),
     random: opts.random ?? Math.random,
     limiter: new RateLimiter(opts.limits),
-    turnTimeoutMs: opts.turnTimeoutMs ?? TURN_TIMEOUT_MS,
+    turnMs: opts.turnMs ?? TURN_MS,
+    stillThereMs: opts.stillThereMs ?? STILL_THERE_MS,
+    graceMs: opts.graceMs ?? GRACE_MS,
     lobbyTimeoutMs: opts.lobbyTimeoutMs ?? LOBBY_TIMEOUT_MS,
     cleanupIntervalMs: opts.cleanupIntervalMs ?? 5_000,
     lastCleanupMs: Number.NEGATIVE_INFINITY,
+    retentionIntervalMs: opts.retentionIntervalMs ?? 60_000,
+    lastRetentionMs: Number.NEGATIVE_INFINITY,
     mailer: opts.mailer ?? null,
   };
 }

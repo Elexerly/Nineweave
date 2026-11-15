@@ -1,10 +1,15 @@
-# Nineweave Online API (v1)
+# Nineweave Online API (protocol 2, "online2")
 
 Authoritative backend for online Ultimate Tic Tac Toe. It implements
 `godot/ONLINE_PROTOCOL.md` (rounds 1–4) and adds a few things on top: device
 accounts, a leaderboard, a lobby, private rooms and leave/timeout handling.
-The existing `HttpPollingTransport` works against it unchanged. Everything new
-is optional for the client to use.
+Round 5 (protocol 2) adds a server-enforced turn clock with a "Still there?"
+prompt, no-show/abandon rules, a disconnect grace, in-match chat with
+moderation (block, report), screen names in the envelope and poll-rate hints;
+see [Match rules v2](#match-rules-v2) and [Chat](#chat). The existing
+`HttpPollingTransport` works against it unchanged. Everything new is
+additive and optional for the client to use. Summary of the round 5 changes:
+`ONLINE2.md`.
 
 - **Base path:** `/api/nineweave` (same origin on `https://nineweave.grok.me`).
 - **Format:** JSON request and response bodies (`Content-Type: application/json`).
@@ -13,7 +18,8 @@ is optional for the client to use.
   `{"error": "Human-readable explanation"}`. Conflict and illegal-move errors
   on a room also include the full room envelope (see below), so the client can
   resync.
-- **Caching:** every response sends `Cache-Control: no-store`.
+- **Caching:** every response sends `Cache-Control: no-store`, except
+  `GET /capabilities` (`public, max-age=60`).
 - **Source:** `src/lib/nineweave/` (`api.ts` handles routing, `rooms.ts` runs
   play, `rules.ts` is the kernel).
 
@@ -30,14 +36,15 @@ Never log them, render them or put them in a URL.
 
 Send a token as `Authorization: Bearer <token>`.
 
-- **Room endpoints** (poll, moves, rematch, leave, cancel) accept either a
+- **Room endpoints** (poll, moves, still-here, chat, rematch, leave, cancel) accept either a
   seat token or the device token of the player in that seat. The token can
   come from the header or from a body `"token"` field (the protocol's moves
   and rematch bodies have one). If both are sent, either one may match.
 - **Create/join:** the `Authorization` header, when present, must be a
   **device** token. An unknown token returns `401`. Without one, the seat is
   anonymous: it can play but has no record, so it isn't ranked.
-- **`/me`:** requires a device token.
+- **`/me`, `/players/block`, `/players/blocks`, `/reports`:** require a device token.
+- **`/capabilities`:** public, no token.
 - **`/leaderboard`:** works without a token. A valid device token adds `me`.
 
 Seat tokens are bound to a stable player slot, not to X/O. Seats swap on
@@ -80,24 +87,60 @@ add fields to it.
   "match": {"round": 1, "seat": 1, "local": false, "remote": false},
   "result": null,
   "end_reason": null,
-  "turn_expires_at": "2026-11-15T12:03:00.000Z"
+  "turn_expires_at": "2026-11-15T12:00:35.000Z",
+
+  "protocol": 2,
+  "server_now": "2026-11-15T12:00:03.000Z",
+  "turn_started_at": "2026-11-15T12:00:00.000Z",
+  "still_there_at": "2026-11-15T12:00:25.000Z",
+  "still_here_used": false,
+  "turn_seconds": 25,
+  "still_there_seconds": 10,
+  "grace_seconds": 60,
+  "both_moved": true,
+  "opponent_joined_at": "2026-11-15T11:59:40.000Z",
+  "opponent_last_seen_at": "2026-11-15T12:00:01.000Z",
+  "opponent_connected": true,
+  "you": {"name": "Patrick", "hero": "vesper_vale"},
+  "players": {
+    "1": {"name": "Patrick", "hero": "vesper_vale", "connected": true},
+    "2": {"name": "Friend", "hero": "auric_rex", "connected": true}
+  },
+  "poll_after_ms": 3000
 }
 ```
+
+The first block is the round 1–4 envelope; everything from `protocol` on is
+protocol 2 and safe for older clients to ignore. The poll response also
+carries `moves`, `chat` and `chat_seq`.
 
 | Field | Meaning |
 |---|---|
 | `seat` | The caller's current seat (1 = X, 2 = O). |
 | `seq` | Number of moves in the current round (`state.history.length`). |
-| `status` | `waiting` (no guest yet), `active` (match in progress), `finished` (round over, rematch possible), `closed` (cancelled, expired, someone left, or timed out). Terminal. |
+| `status` | `waiting` (no guest yet), `active` (match in progress), `finished` (round over, rematch possible), `closed` (cancelled, expired, no-show, someone left, timed out or abandoned). Terminal. |
 | `opponent` | The opponent's name, or `""` while nobody has joined. It is never `null`. |
-| `opponent_left` | `true` once the opponent left the room or timed out. |
+| `opponent_left` | `true` once the opponent left the room, timed out, didn't show or abandoned. |
 | `characters` | Map from seat (string key) to canonical hero ID. While waiting, only the host's seat is present. The map swaps with seats on rematch. |
 | `match.round` | Starts at 1 and goes up by one on each accepted rematch. |
 | `match.seat` | Same as `seat`. On a round increment, use it as the new seat. |
 | `match.local` / `match.remote` | Whether the caller and the opponent have each asked for a rematch of this round. |
-| `result` | `null`, or `{"winner": 0\|1\|2, "reason": "win"\|"draw"\|"forfeit"\|"timeout"}`. `winner` is a seat, and `0` means a draw. Seats are relative to the round that ended until a rematch clears it. |
-| `end_reason` | `win`, `draw`, `forfeit`, `timeout`, `cancelled`, `expired` or `null`. |
-| `turn_expires_at` | ISO time when the player due to move forfeits (`active` only), otherwise `null`. |
+| `result` | `null`, or `{"winner": 0\|1\|2, "reason": "win"\|"draw"\|"forfeit"\|"timeout"\|"abandoned"}`. `winner` is a seat, and `0` means a draw. Seats are relative to the round that ended until a rematch clears it. A `cancelled` or `no_show` ending has `result: null` (no match was recorded). |
+| `end_reason` | `win`, `draw`, `forfeit`, `timeout`, `abandoned`, `cancelled`, `no_show`, `expired` or `null`. |
+| `turn_expires_at` | ISO hard deadline of the current turn (`active` only, else `null`): 35 s after `turn_started_at`. When it passes, the turn expires (see [Match rules v2](#match-rules-v2)). |
+| `protocol` | `2` on this server. |
+| `server_now` | Server time (ISO) when the envelope was built. Use `deadline − server_now` for countdowns so device clock skew doesn't matter. |
+| `turn_started_at` | ISO start of the current turn clock (the last move, match/rematch start, or a still-here restart). `null` unless `active`. |
+| `still_there_at` | ISO time the "Still there?" prompt should appear for the player due to move (`turn_started_at` + 25 s). `null` unless `active`. |
+| `still_here_used` | Whether the player due to move already used this turn's one still-here restart. |
+| `turn_seconds` / `still_there_seconds` / `grace_seconds` | `25` / `10` / `60`. |
+| `both_moved` | `true` once the current round's history has at least one move by seat 1 **and** one by seat 2. Resets on every rematch. Before it is true, leaving or timing out costs nothing. |
+| `opponent_joined_at` | ISO time the opponent took their seat (for the host: when the guest joined; for the guest: when the host created the room), or `null` while nobody has joined. Show "<name> joined". |
+| `opponent_last_seen_at` | ISO time of the opponent's last poll / move as recorded (presence is written at most every 10 s), or `null`. |
+| `opponent_connected` | `true` if the opponent was seen within the last ~20 s. |
+| `you` | `{name, hero}` for the caller. |
+| `players` | Map from seat (string key) to `{name, hero, connected}` for each seat that is occupied. Names are screen names for device players with one. |
+| `poll_after_ms` | Server hint for when to poll next (see [Polling](#polling)). `0` means stop polling. |
 
 Envelopes never include seat or device token hashes, password hashes, player
 IDs or internal room IDs.
@@ -168,12 +211,14 @@ and seat 1 (X) moves first.
 | 409 | The room is full, already playing, or you're trying to join your own room with the same device token. |
 | 400, 401, 429 | As for create. |
 
-#### `GET /rooms/<CODE>?since=<n>`: poll
+#### `GET /rooms/<CODE>?since=<n>&chat_since=<id>`: poll
 
-Requires authorization (header). Poll about once per second.
+Requires authorization (header). Poll at the envelope's `poll_after_ms`
+(older clients poll about once per second, which still works).
 
 `200`: the envelope plus `moves`, the moves of the current round with
-`seq > since`, sorted:
+`seq > since`, sorted, plus `chat` (messages with `id > chat_since`, see
+[Chat](#chat)) and `chat_seq`:
 
 ```json
 {"seq":13,"opponent":"Friend","opponent_left":false,"moves":[{"board":4,"cell":0,"seq":13}],"state":{"...":"…"},"match":{"round":1,"seat":1,"local":false,"remote":false},"characters":{"1":"vesper_vale","2":"auric_rex"},"status":"active", "...": "…"}
@@ -186,6 +231,42 @@ should resync from `state`/`seq`. Polling also counts as presence (see
 
 Errors: `401` (no token), `403` (token not in this room), `404` (no room with
 that code).
+
+#### Polling
+
+`poll_after_ms` in every room envelope says when to poll next:
+
+| Situation | `poll_after_ms` |
+|---|---|
+| `waiting` (waiting room) | 3000 |
+| `active`, opponent's turn | 1500 |
+| `active`, your turn | 3000 (presence only; count down locally from `still_there_at` / `turn_expires_at` and `server_now`) |
+| `finished` | 4000 |
+| `closed` | 0: stop polling |
+
+Chat rides the same poll: never poll a separate chat endpoint. Polling at
+these rates keeps you well inside the 60 s disconnect grace.
+
+#### `POST /rooms/<CODE>/still-here`: "Still there?" confirm
+
+Body optional (`{"token":"…"}` or the header). Only the player due to move,
+only while the "Still there?" prompt is showing (from `still_there_at` until
+`turn_expires_at`), and **once per turn**.
+
+`200`: the envelope plus `"ok": true`, with `still_here_used: true` and a
+fresh clock: `turn_started_at` = now, `still_there_at` = now + 25 s,
+`turn_expires_at` = now + 35 s.
+
+| Status | When (all include the current envelope) |
+|---|---|
+| 403 | `It's not your turn` |
+| 409 | `You already confirmed this turn` (the second confirm in a turn; the clock is **not** extended) |
+| 409 | `The Still there? prompt isn't showing yet` (before `still_there_at`) |
+| 409 | `No turn is running` (room not `active`, including after the turn already expired) |
+| 401, 404, 429 | As for moves |
+
+Making a move always ends the turn normally and resets the allowance for
+the next turn.
 
 #### `POST /rooms/<CODE>/moves`: play a move
 
@@ -246,13 +327,15 @@ with their players. X still moves first.
 
 #### `POST /rooms/<CODE>/leave`
 
-The body is optional (`{"token":"…"}` or use the header). `200`: the envelope
-plus `"ok": true`.
+The body is optional (`{"token":"…"}` or use the header).
+
+`200`: the envelope plus `"ok": true`.
 
 | Status before | Effect |
 |---|---|
-| `waiting` | The room is cancelled (`closed`, `end_reason:"cancelled"`). It disappears from the lobby and its code stops joining. |
-| `active` | **Forfeit.** The opponent wins (`result.reason:"forfeit"`) and both records update in the same transaction. The room closes and the opponent sees `opponent_left:true`. |
+| `waiting` | The room is cancelled (`closed`, `end_reason:"cancelled"`). It disappears from the lobby and its code stops joining. No penalty. |
+| `active`, `both_moved: false` | **Cancelled, no penalty** (`closed`, `end_reason:"cancelled"`, `result:null`, no records). The opponent sees `opponent_left:true`. |
+| `active`, `both_moved: true` | **Forfeit.** The opponent wins (`result.reason:"forfeit"`) and both records update in the same transaction. The room closes and the opponent sees `opponent_left:true`. Client confirm text: "Leave match? This counts as a loss." |
 | `finished` | The room closes with no record change. The opponent sees `opponent_left:true` and rematch returns `409`. |
 | `closed` | No-op (idempotent). |
 
@@ -271,7 +354,7 @@ The body is optional: `{"screen_name":"Patrick","last_hero_id":"cryon","tos_vers
 `201`:
 
 ```json
-{"token":"nwd_…","player_id":"p_AbC…","player":{"player_id":"p_AbC…","screen_name":null,"last_hero_id":null,"purchases":[],"unlocks":[],"matches_won":0,"matches_played":0,"matches_lost":0,"boards_won":0,"tos_version":null,"privacy_version":null,"accepted_at":null,"age_confirmed":null,"email":null,"email_status":"none","email_verified_at":null,"capabilities":{"email":true},"rank":1}}
+{"token":"nwd_…","player_id":"p_AbC…","player":{"player_id":"p_AbC…","screen_name":null,"last_hero_id":null,"purchases":[],"unlocks":[],"matches_won":0,"matches_played":0,"matches_lost":0,"boards_won":0,"tos_version":null,"privacy_version":null,"accepted_at":null,"age_confirmed":null,"email":null,"email_status":"none","email_verified_at":null,"capabilities":{"email":true,"online2":true,"chat":true,"tournaments":false},"rank":1}}
 ```
 
 The token is shown **only here**, so store it securely on the device.
@@ -286,9 +369,13 @@ Requires a device token. `200`: the `player` object above. `rank` is
 1 + the number of ranked players with more matches won (ties share a rank).
 `401` if the token is missing or unknown.
 
-- `capabilities`: feature flags. `capabilities.email: true` means this server
-  supports the [Email](#email) fields and endpoints. Clients must not send
-  `email` anywhere until they see it.
+- `capabilities`: feature flags,
+  `{"email":true,"online2":true,"chat":true,"tournaments":false}` on this
+  server (also on `POST /auth/device` and `PATCH /me`). `email: true` means
+  this server supports the [Email](#email) fields and endpoints; clients must
+  not send `email` anywhere until they see it. `online2: true` means protocol
+  2 (turn clock, still-here, envelope additions); `chat: true` means
+  [Chat](#chat). `tournaments` is reserved (`false`).
 - `email`: the stored address, lowercased, or `null`. Private to the player:
   it never appears on the leaderboard or in room envelopes.
 - `email_status`: server-owned, `"none"` | `"unverified"` | `"verified"`.
@@ -335,8 +422,16 @@ included even if the caller isn't in the top list or isn't ranked (no name or
 no matches). In that case `rank` is where they would stand. `boards_won`
 appears only in `me`, never in the public rows.
 
+### Chat and moderation
+
+See [Chat](#chat) for `POST /rooms/<CODE>/chat`, `POST|DELETE /players/block`,
+`GET /players/blocks` and `POST /reports`.
+
 ### Utility
 
+- `GET /capabilities` (public, `Cache-Control: public, max-age=60`) returns
+  `{"protocol":2,"online2":true,"chat":true,"tournaments":false,"email":true,"chat_presets":{"gg":"Good game!",…}}`
+  so a client can detect the server version without a token.
 - `GET /health` returns `{"ok":true}`.
 - `GET /heroes` returns `{"heroes":[…32 canonical IDs…],"aliases":{…}}`.
 
@@ -467,7 +562,8 @@ always in the same transaction as the room's status change. Anonymous seats
 |---|---|---|---|
 | Win (three boards in a line) | `matches_won+1` | `matches_lost+1` | `matches_played+1` |
 | Draw (no open boards, no big line) | none | none | `matches_played+1` only |
-| Forfeit (leave) / timeout | opponent `matches_won+1` | leaver `matches_lost+1` | `matches_played+1` |
+| Forfeit (leave) / timeout / abandoned, after both moved | opponent `matches_won+1` | leaver `matches_lost+1` | `matches_played+1` |
+| Cancelled / no-show, before both moved | none | none | none (no match logged) |
 
 - `boards_won`: each player gets one point per small board they claimed
   (won, not drawn) in the match. This counts on forfeits too.
@@ -543,20 +639,180 @@ This applies to screen names and in-room display names:
 
 ## Timeouts
 
-Stale rooms are cleaned up opportunistically. The sweep runs at most once
-every 5 s per server instance, on list, create, join, poll and moves. A
-room's own turn timeout is also checked whenever someone polls it or plays a
-move in it.
+Stale rooms are cleaned up opportunistically (no cron). The sweep runs at
+most once every 5 s per server instance, on list, create, join, poll and
+moves. A room's own deadlines are also checked whenever someone polls it or
+acts in it. **The server enforces every deadline; the client only displays
+them.**
 
 | Situation | Timeout | Result |
 |---|---|---|
 | `waiting` room, host not polling | **600 s** since creation or the host's last poll | `closed`, `end_reason:"expired"` |
-| `active` match, no move | **180 s** since the last move or match start | **The player due to move forfeits** (`end_reason:"timeout"`), which is the same as leaving: the opponent wins, records update, the room closes and the opponent sees `opponent_left:true`. |
+| `active`, player due to move hasn't moved | **25 s** turn clock | The "Still there?" phase starts (`still_there_at`). Nothing changes on the server yet. |
+| `active`, "Still there?" phase | **10 s** more (35 s after `turn_started_at` = `turn_expires_at`) | The turn expires. Before `both_moved`: `closed`, `end_reason:"no_show"`, no records. After: the player due to move loses, `end_reason:"timeout"`. |
+| `active`, the seat **not** due to move hasn't polled or moved | **60 s** disconnect grace | Before `both_moved`: `closed`, `end_reason:"no_show"`, no records. After: that seat loses, `end_reason:"abandoned"`. |
 | `finished` room, neither player polling | 600 s | `closed`, records unchanged |
 
-The 180 s rule applies to the player whose turn it is, even if they are still
-polling. Use `turn_expires_at` to show a countdown. Presence (`*_seen_at`) is
-written at most once every 10 s per player.
+Presence (`*_seen_at`) is written at most once every 10 s per player, so a
+seat that polls at the hinted rates is never more than ~13 s stale; the
+60 s grace allows for that. Polling with the same token inside the grace
+simply continues the match.
+
+## Match rules v2
+
+Decided Nov 15, 2026 (Patrick). Applies from protocol 2 on.
+
+| Rule | Value / behavior |
+|---|---|
+| Waiting room | Unchanged: `waiting` until a guest joins. Leaving or cancelling = cancel, no penalty. `opponent_joined_at` / `players` let the client show "<ScreenName> joined". |
+| "Both players have moved" | The current round's history holds ≥1 move by seat 1 and ≥1 by seat 2 (`both_moved`). Each rematch round starts over. |
+| Turn clock | **25 s** per turn for the player due to move. No time bank. |
+| "Still there?" | After 25 s, a **10 s** prompt. Confirming with `POST /still-here` counts as action and restarts that turn's clock with a fresh 25 s + 10 s, **once per turn**. A second confirm in the same turn is `409` and doesn't extend. A move always ends the turn normally. |
+| Turn expiry (35 s, or 35 s after a still-here restart) | Before `both_moved`: `no_show`, match cancelled, no records. After: `timeout`, the player due to move loses, the opponent wins, records update. |
+| Disconnect grace | **60 s** without a poll or move by the seat that is **not** due to move. Before `both_moved`: `no_show`. After: `abandoned` loss. While it is your turn, the turn clock governs instead. |
+| Explicit leave | Before `both_moved`: `closed`, `end_reason:"cancelled"`, `result:null`, no records, opponent sees `opponent_left:true`. After: `forfeit` loss. |
+| Finished / rematch | Unchanged. Each rematch round gets a fresh clock and a fresh `both_moved`. |
+
+In every "closed" case above the opponent's envelope shows
+`opponent_left:true` and `poll_after_ms: 0`.
+
+## Chat
+
+In-match text chat between the two players of a room, polled with the
+moves. Nineweave is a 13+ game under App Store rules.
+
+**Who can chat.** Only device players with a screen name (device token at
+create/join, `screen_name` set). Anonymous seats and players without a
+screen name get `403 {"error":"Create a screen name to chat"}`. Chat is
+allowed while the room is `active` or `finished`. `waiting` (nobody to talk
+to yet) and `closed` return `409`.
+
+### `POST /rooms/<CODE>/chat`
+
+Body: `{"text":"Nice one"}` **or** `{"preset":"gg"}` (exactly one, plus an
+optional `token` like the other room endpoints). Optional query
+`?chat_since=<id>` picks which messages come back in `chat`.
+
+Presets (also in `GET /capabilities` as `chat_presets`):
+
+| Key | Text |
+|---|---|
+| `gg` | Good game! |
+| `nice` | Nice move |
+| `rematch` | Rematch? |
+| `gl` | Good luck! |
+| `hi` | Hi! |
+| `thanks` | Thanks! |
+| `wow` | Wow! |
+| `oops` | Oops! |
+
+Free-text rules:
+
+- Single line: line breaks and tabs become spaces, control / zero-width /
+  bidi characters are removed, whitespace is collapsed and trimmed.
+- 1–120 characters after that (`400` otherwise).
+- Profanity is masked server-side with asterisks of the same length,
+  including leetspeak and simple obfuscation. The message is still
+  delivered, with `filtered: true` on the sender's ack.
+- Slurs / hate terms and anything that looks like a URL, email address,
+  phone number or messaging-app handle are refused with
+  `400 {"error":"Message not allowed"}`, and nothing is stored. Contact info
+  can't be shared.
+
+`200`: the envelope plus `"ok": true`, `message` (the stored message, with
+`filtered`) and `chat` / `chat_seq` as on the poll.
+
+```json
+{"ok":true,"message":{"id":42,"seat":1,"mine":true,"name":"Patrick","text":"what the ****","preset":null,"at":"2026-11-15T12:00:03.000Z","filtered":true},"chat":[…],"chat_seq":42, "...": "envelope"}
+```
+
+| Status | When |
+|---|---|
+| 400 | Neither or both of `text`/`preset`, unknown preset or field, empty, over 120 characters, or `Message not allowed` |
+| 401 / 403 / 404 | As for moves, plus `403 Create a screen name to chat` |
+| 409 | Room `waiting` or `closed` (includes the envelope) |
+| 429 | Over 5 messages per 10 s or 30 per 5 minutes for this player (counted in the database, so it holds across server instances). The body adds `retry_after_seconds`. |
+
+### Receiving: the poll
+
+`GET /rooms/<CODE>?chat_since=<id>` (default `0`) returns:
+
+- `chat`: up to 50 messages with `id > chat_since`, oldest first:
+  `[{"id":42,"seat":1,"mine":false,"name":"NightNight","text":"Good game!","preset":"gg","at":"…"}]`.
+  `seat` is the sender's **current** seat in the room (it swaps on rematch
+  like everything else). `mine` is `true` for the caller's own messages.
+  `name` is the sender's screen name when they sent it.
+- `chat_seq`: the newest message id the caller can see (`0` if none).
+
+Set `chat_since` to the last `id` you received. If `chat_seq` is higher than
+the last `id` in a full page, poll again. The sender's own messages are
+included, so dedupe by `id`. Messages from players the caller blocked are
+never included.
+
+### Mute
+
+Mute is **client-side only**, per match: the client hides the opponent's
+messages locally. Nothing is sent to the server.
+
+### Block
+
+`POST /players/block` with `{"room_code":"N9ABC","seat":2}` (device token
+required). The server looks up the caller's room with that code (one where
+the caller's device player has a seat, latest first) and blocks the player
+in that seat for the caller **permanently**:
+
+- Their chat is never delivered to the caller, in any room.
+- They can't join the caller's rooms. They get `409 {"error":"Room is full"}`,
+  so the block isn't revealed. Those rooms are also hidden from their lobby
+  list when they send their device token on `GET /rooms`. Both rules apply
+  in both directions.
+
+`200 {"ok":true,"blocked":true}`. Repeating it is a no-op.
+
+| Status | When |
+|---|---|
+| 400 | Bad `room_code` or `seat`, or your own seat |
+| 401 | No device token (seat tokens can't block) |
+| 403 | You weren't in that room |
+| 404 | No room with that code, or nobody in that seat |
+| 409 | The opponent plays anonymously and can't be blocked (anonymous players can't chat either) |
+
+`DELETE /players/block` takes the same body, or `{"name":"NightNight"}`
+(case-insensitive) to unblock by screen name. It returns
+`200 {"ok":true,"blocked":false}`, or `404` when no blocked player has that
+name.
+
+`GET /players/blocks` returns `{"blocks":[{"name":"NightNight","blocked_at":"…"}]}`,
+newest first. Player ids are never exposed.
+
+### Report
+
+`POST /reports` (device token required):
+
+```json
+{"room_code":"N9ABC","seat":2,"reason":"harassment","note":"optional, up to 500 characters"}
+```
+
+`reason` is one of `harassment`, `hate`, `inappropriate_name`, `cheating`,
+`spam` or `other`. The server stores the reporter, the reported player
+(anonymous seats are stored by their room name), the room code, the reason,
+the note, and a snapshot of the reported player's last ≤20 chat messages in
+that room. It returns `201 {"ok":true}`.
+
+Limit: 10 reports per hour per player (`429` with `retry_after_seconds`).
+Errors are the same as for block, plus `400` for an unknown reason, a note
+over 500 characters or an unknown field.
+
+### Retention
+
+| Data | Deleted |
+|---|---|
+| Chat messages | 24 h after creation, or 1 h after their room closed, whichever is first |
+| Reports (incl. chat snapshot) | 30 days after creation |
+| Blocks | Kept until unblocked (or the player is deleted) |
+
+Deletion runs opportunistically with the room sweep, at most once a minute
+per server instance. Message text is never logged.
 
 ## Rate limits
 
@@ -568,13 +824,16 @@ window, so treat them as best-effort. Exceeding one returns `429`.
 | `POST /auth/device` | 10 |
 | `POST /rooms` | 20 |
 | `POST /rooms/<CODE>/join` | 40 |
-| moves, rematch, leave and cancel combined | 180 |
+| moves, still-here, rematch, leave and cancel combined | 180 |
+| `POST /rooms/<CODE>/chat` | 60 (plus the per-player database caps in [Chat](#chat)) |
+| block, unblock and report combined | 30 |
 | `PATCH /me` | 30 |
 | `POST /me/email/verification` + `POST /auth/email/recover` | 10 |
 | `POST /me/email/verification/confirm` + `POST /auth/email/recover/confirm` | 30 |
 
 Email codes also have per-player and per-address caps enforced in the
-database; see [Code limits](#code-limits).
+database; see [Code limits](#code-limits). Chat (5 per 10 s, 30 per 5 min)
+and reports (10 per hour) are capped per player in the database.
 
 ## CORS
 
@@ -587,7 +846,7 @@ These origins are allowed and reflected in `Access-Control-Allow-Origin`
 - `http://127.0.0.1:8060`, `http://127.0.0.1:8080`
 
 Allowed headers are `Authorization, Content-Type`. Allowed methods are
-`GET, POST, PATCH, OPTIONS`. `Access-Control-Max-Age` is `600`. `OPTIONS`
+`GET, POST, PATCH, DELETE, OPTIONS` (`DELETE` is for unblocking). `Access-Control-Max-Age` is `600`. `OPTIONS`
 returns `204`. Credentials and cookies aren't used, so there is no
 `Allow-Credentials` header.
 
@@ -607,14 +866,14 @@ available yet".
 | 204 | CORS preflight |
 | 400 | Malformed JSON or invalid field |
 | 401 | Missing or unknown token where one is required |
-| 403 | Token not in this room, not your turn, wrong room password, or not the host (cancel) |
+| 403 | Token not in this room, not your turn (moves, still-here), wrong room password, not the host (cancel), no screen name (chat), or not in that room (block/report) |
 | 404 | Unknown path or no such room |
 | 405 | Wrong method |
 | 404 | Email verification challenge not found for this player |
-| 409 | Room full or state conflict (stale/future seq, stale round, closed, waiting); name taken; email already verified elsewhere |
+| 409 | Room full or state conflict (stale/future seq, stale round, closed, waiting); still-here already used or not showing; chat in a waiting/closed room; anonymous player can't be blocked; name taken; email already verified elsewhere |
 | 413 | Body over 8 KB |
 | 422 | Illegal move or game finished |
-| 429 | Rate limited |
+| 429 | Rate limited (chat and report caps add `retry_after_seconds`) |
 | 500 | Unexpected server error (details are logged, not returned) |
 | 502 | Email provider didn't accept a code email |
 | 503 | Not configured (database, or email for code requests), or room contention (retry) |
@@ -626,8 +885,8 @@ available yet".
   rank the player. Keep the device token separate from the seat token, which
   goes in the moves/rematch body and the poll header.
 - Optional: call `POST /rooms/<CODE>/leave` from `leave()` before clearing
-  credentials. Otherwise an abandoned match is forfeited after 180 s by the
-  player due to move.
+  credentials. Otherwise an abandoned match ends by the turn clock (35 s) or
+  the 60 s disconnect grace (see [Match rules v2](#match-rules-v2)).
 - `opponent_left` stays `true` on every later poll, so emit once client-side.
 - Email (Round 4e): wait until `GET /me` returns `capabilities.email: true`.
   Until then keep the address local and send nothing. Once advertised:
@@ -641,3 +900,26 @@ available yet".
 - Sign in on a new device: `POST /auth/email/recover`, then
   `POST /auth/email/recover/confirm`; store the returned device token in
   place of the old one.
+- **Online2 (Round 5).** Detect it with `GET /capabilities` (`protocol: 2`)
+  or `capabilities.online2` on `/me`. Then:
+  - Poll at `poll_after_ms` and stop at `0`. Send `chat_since=<last chat id>`.
+  - Countdown: show the turn timer from `turn_started_at` to `still_there_at`
+    (25 s). At `still_there_at`, show "Still there?" to the player due to
+    move with a 10 s countdown to `turn_expires_at`. Compute the remaining
+    time as `deadline − server_now` from the latest envelope, then count
+    down locally. On "I'm here", call `POST /rooms/<CODE>/still-here` (only
+    while `still_here_used` is false, and hide the button after use). The
+    server decides expiry, so just render the next envelope you get.
+  - Leave button: if `both_moved` is false, leave without a warning. If it
+    is true, confirm with "Leave match? This counts as a loss."
+  - Endings: `no_show` or `cancelled` with `result:null` means "Match
+    cancelled, no result". `timeout`, `abandoned` and `forfeit` show a win or
+    loss from `result.winner`. Older clients that don't know `abandoned`
+    can treat it like `timeout`.
+  - Waiting room: show the room code, `you.hero` and a Leave button, then
+    "<players[opponent seat].name> joined" when `opponent_joined_at`
+    appears. Show `opponent_connected` as a presence dot.
+  - Chat: show the chat button only to players with a screen name. Label
+    messages with `name`, align them by `mine` and dedupe by `id`. Mute is
+    local. Block and report send the opponent's `seat` and the room code
+    with the device token.

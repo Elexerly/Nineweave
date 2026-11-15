@@ -4,6 +4,15 @@
  * PGlite-backed service, so the full HTTP contract is exercised without a
  * listening server. See ONLINE_API.md for the contract.
  */
+import {
+  blockPlayer,
+  capabilities,
+  chatFor,
+  listBlocks,
+  postChat,
+  reportPlayer,
+  unblockPlayer,
+} from "./chat.ts";
 import { corsHeaders } from "./cors.ts";
 import {
   confirmRecovery,
@@ -28,6 +37,7 @@ import {
   playMove,
   pollRoom,
   requestRematch,
+  stillHere,
 } from "./rooms.ts";
 import { isRoomCode } from "./security.ts";
 import { ApiError, type Service } from "./service.ts";
@@ -36,12 +46,15 @@ import type { RateLimits } from "./rate-limit.ts";
 export const MAX_BODY_BYTES = 8 * 1024;
 const PREFIX = "/api/nineweave";
 
-function json(status: number, body: unknown, origin: string | null): Response {
+/** Cache-Control for the public, version-only `GET /capabilities`. */
+const CACHEABLE = "public, max-age=60";
+
+function json(status: number, body: unknown, origin: string | null, cache = "no-store"): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
     headers: {
       ...(status === 204 ? {} : { "Content-Type": "application/json; charset=utf-8" }),
-      "Cache-Control": "no-store",
+      "Cache-Control": cache,
       ...corsHeaders(origin),
     },
   });
@@ -81,6 +94,11 @@ function limit(svc: Service, bucket: keyof RateLimits, request: Request) {
     throw new ApiError(429, "Too many requests. Slow down and try again shortly.");
 }
 
+function intParam(url: URL, name: string): number {
+  const raw = Number.parseInt(url.searchParams.get(name) ?? "0", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
 function methodNotAllowed(): never {
   throw new ApiError(405, "Method not allowed");
 }
@@ -98,6 +116,26 @@ async function route(
   if (head === "health" && segments.length === 1) {
     if (method !== "GET") methodNotAllowed();
     return [200, { ok: true }];
+  }
+  if (head === "capabilities" && segments.length === 1) {
+    if (method !== "GET") methodNotAllowed();
+    return [200, capabilities()];
+  }
+  if (head === "players" && segments.length === 2 && code === "block") {
+    limit(svc, "moderation", request);
+    if (method === "POST") return [200, await blockPlayer(svc, bearer, await readJson(request))];
+    if (method === "DELETE")
+      return [200, await unblockPlayer(svc, bearer, await readJson(request))];
+    methodNotAllowed();
+  }
+  if (head === "players" && segments.length === 2 && code === "blocks") {
+    if (method !== "GET") methodNotAllowed();
+    return [200, await listBlocks(svc, bearer)];
+  }
+  if (head === "reports" && segments.length === 1) {
+    if (method !== "POST") methodNotAllowed();
+    limit(svc, "moderation", request);
+    return [201, await reportPlayer(svc, bearer, await readJson(request))];
   }
   if (head === "heroes" && segments.length === 1) {
     if (method !== "GET") methodNotAllowed();
@@ -158,7 +196,7 @@ async function route(
     return [200, await leaderboard(svc, url.searchParams.get("limit"), caller)];
   }
   if ((head === "rooms" || head === "lobby") && segments.length === 1) {
-    if (method === "GET") return [200, await listRooms(svc)];
+    if (method === "GET") return [200, await listRooms(svc, bearer)];
     if (method === "POST" && head === "rooms") {
       limit(svc, "create", request);
       return [201, await createRoom(svc, await readJson(request), bearer)];
@@ -170,9 +208,14 @@ async function route(
     if (!isRoomCode(roomCode)) throw new ApiError(404, "Room not found or expired");
     if (action === undefined) {
       if (method !== "GET") methodNotAllowed();
-      const sinceRaw = Number.parseInt(url.searchParams.get("since") ?? "0", 10);
-      const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0;
-      return [200, await pollRoom(svc, roomCode, since, [bearer])];
+      const since = intParam(url, "since");
+      const chatSince = intParam(url, "chat_since");
+      return [
+        200,
+        await pollRoom(svc, roomCode, since, [bearer], (room, slot) =>
+          chatFor(svc, room, slot, chatSince),
+        ),
+      ];
     }
     if (method !== "POST") methodNotAllowed();
     switch (action) {
@@ -185,6 +228,21 @@ async function route(
       case "rematch":
         limit(svc, "move", request);
         return [200, await requestRematch(svc, roomCode, await readJson(request), bearer)];
+      case "still-here":
+        limit(svc, "move", request);
+        return [200, await stillHere(svc, roomCode, await readJson(request), bearer)];
+      case "chat":
+        limit(svc, "chat", request);
+        return [
+          200,
+          await postChat(
+            svc,
+            roomCode,
+            await readJson(request),
+            bearer,
+            intParam(url, "chat_since"),
+          ),
+        ];
       case "leave":
         limit(svc, "move", request);
         return [200, await leaveRoom(svc, roomCode, await readJson(request), bearer)];
@@ -216,7 +274,8 @@ export async function handleNineweaveRequest(svc: Service, request: Request): Pr
   const segments = tail.split("/").filter(Boolean).map(decodeURIComponent);
   try {
     const [status, body] = await route(svc, request, segments, url);
-    return json(status, body, origin);
+    const cacheable = segments.length === 1 && segments[0] === "capabilities" && status === 200;
+    return json(status, body, origin, cacheable ? CACHEABLE : "no-store");
   } catch (err) {
     if (err instanceof ApiError)
       return json(err.status, { error: err.message, ...err.extra }, origin);

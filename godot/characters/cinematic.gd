@@ -3,6 +3,9 @@ extends Control
 const R = preload("res://characters/roster.gd")
 const Rig = preload("res://characters/art.gd")
 const P = preload("res://ui/paint.gd")
+const Motion = preload("res://characters/cinematic_motion.gd")
+const Sway = preload("res://characters/victory_sway.gdshader")
+const Badge = preload("res://characters/loser_badge.gdshader")
 signal finished(kind: String)
 signal buttons_ready
 var buttons_shown: bool = false
@@ -10,6 +13,11 @@ var winner_name: String = "YOU"
 var loser_name: String = "COMPUTER"
 var result_score: String = ""
 var front: Control
+var _sway: ShaderMaterial
+var _badge: ShaderMaterial
+var _dots_cool: ArrayMesh
+var _dots_warm: ArrayMesh
+var _letters: Array = []
 var arrangement: String = "vertical"
 var kind: String = ""
 var age: float = 0
@@ -35,7 +43,9 @@ func _ready():
 	loser = Rig.new(); loser.bust = true; loser.bust_view = LOSER_VIEW; loser.bust_lift = LOSER_LIFT; add_child(loser)
 	front = Control.new(); front.mouse_filter = Control.MOUSE_FILTER_IGNORE; front.draw.connect(_draw_front); add_child(front)
 func duration() -> float:
-	if kind in ["versus","spotlight","draw"]: return 2.8 if kind == "versus" else 5.0
+	if kind in ["versus","spotlight","draw"]:
+		if reduced_motion: return .65 if kind == "versus" else 1.0
+		return Motion.VERSUS_SECONDS if kind == "versus" else Motion.RESULT_SECONDS
 	if reduced_motion: return {"lock_in":.35,"pop":.55,"spotlight":1.0}.get(kind,.5)
 	return {"lock_in":.95,"pop":1.2,"spotlight":3.0}.get(kind,1.0)
 func show_scene(scene_kind: String, winner: String, rival: String, mark: int, layout: Dictionary, claimed_board: int = 4):
@@ -43,6 +53,7 @@ func show_scene(scene_kind: String, winner: String, rival: String, mark: int, la
 	kind = scene_kind; winner_id = winner; loser_id = rival; player = mark
 	front.visible = kind in ["versus","spotlight","draw"]
 	age = 0; active = true; visible = true; frozen = false; buttons_shown = false; modulate.a = 1
+	position = Vector2.ZERO; scale = Vector2.ONE; pivot_offset = Vector2.ZERO
 	_place(layout,claimed_board)
 	# No free lane at all: the pop is flavour, so skip it rather than cover play.
 	if kind == "pop" and region.size.x <= 0: clear(); return
@@ -52,7 +63,15 @@ func show_scene(scene_kind: String, winner: String, rival: String, mark: int, la
 	loser.art_key = "versus" if kind == "versus" else "head_neutral"
 	hero.fit_height = kind == "versus"; loser.fit_height = kind == "versus"
 	loser.configure(loser_id,kind != "versus"); loser.side = 3-player; loser.reduced_motion = reduced_motion; loser.set_clip("defeat")
-	loser.visible = kind in ["versus","draw"]
+	loser.visible = kind in ["versus","draw","spotlight"]
+	hero.frozen = kind in ["versus","spotlight","draw"]; loser.frozen = hero.frozen
+	hero.material = null
+	loser.material = null
+	if kind == "spotlight":
+		if _sway == null: _sway = ShaderMaterial.new(); _sway.shader = Sway
+		hero.material = _sway
+		if _badge == null: _badge = ShaderMaterial.new(); _badge.shader = Badge
+		loser.material = _badge
 	clip_word = R.get_hero(winner_id).action
 	pose()
 ## Recompute regions for the current scene after a resize; age/clips are untouched.
@@ -70,11 +89,12 @@ func _place(layout: Dictionary, claimed_board: int):
 		region = Rect2(Vector2.ZERO,s)
 		arrangement = "vertical" if s.x < s.y else "horizontal"
 		var g = card_geometry(s,kind)
-		hero_rect = g.hero; loser_rect = g.rival if kind in ["versus","draw"] else loser_frame(region)
+		hero_rect = g.hero; loser_rect = g.rival
 		hero.position = hero_rect.position; hero.size = hero_rect.size
 		loser.position = loser_rect.position; loser.size = loser_rect.size
 		loser.facing = -1 if kind in ["versus","draw"] else 1
 		front.position = Vector2.ZERO; front.size = s
+		_build_halftone(s); _build_letters(g)
 		return
 	var safe = Rect2(Vector2(14,14),s-Vector2(28,28))
 	if seam.size.x > 0: safe = Rect2(seam.end.x+12,14,s.x-seam.end.x-26,s.y-28)
@@ -183,7 +203,7 @@ static func free_rects(view: Rect2, blocks: Array, min_size: Vector2) -> Array:
 func advance(delta: float):
 	if not active or frozen: return
 	age += delta
-	if kind in ["spotlight","draw"] and age >= 1.8 and not buttons_shown:
+	if kind in ["spotlight","draw"] and age >= buttons_at() and not buttons_shown:
 		buttons_shown = true; buttons_ready.emit()
 	if age >= duration(): complete(); return
 	pose()
@@ -196,15 +216,74 @@ func complete():
 	visible = kind in ["spotlight","draw"]
 	if visible: buttons_shown = true; pose()
 	finished.emit(was)
-func clear(): active = false; visible = false; kind = ""; buttons_shown = false; mouse_filter = Control.MOUSE_FILTER_IGNORE
+func clear():
+	active = false; visible = false; kind = ""; buttons_shown = false; mouse_filter = Control.MOUSE_FILTER_IGNORE
+	position = Vector2.ZERO; scale = Vector2.ONE; modulate.a = 1
+func buttons_at() -> float: return .25 if reduced_motion else Motion.BUTTONS_AT
+func buttons_progress() -> float:
+	return clampf((age-buttons_at())/(.15 if reduced_motion else .28),0,1)
+## Tool-only seek. Never emits controller signals or advances the match/AI.
+func seek(seconds: float):
+	age = clampf(seconds,0,duration()); frozen = true; active = age < duration()
+	visible = kind != "versus" or active
+	buttons_shown = kind in ["spotlight","draw"] and age >= buttons_at()
+	pose()
+func winner_accent() -> Color: return P.mark_color(player)
+func score_font_size() -> int: return clampi(int(minf(region.size.x,region.size.y)*.027),16,28)
+func letter_count(wins: bool = false, at: float = -1) -> int:
+	var value = "WINS!" if wins else ("DRAW" if kind == "draw" else winner_name.to_upper())
+	var t = age if at < 0 else at
+	var start = Motion.letter_start(winner_name.length(),wins,reduced_motion)
+	if reduced_motion: return value.length() if t >= start else 0
+	return clampi(int(floor((t-start)/Motion.LETTER_STEP))+1,0,value.length())
+## This is the actual opaque viewport cover used by the draw path, including t=0.
+func versus_cover_rect() -> Rect2:
+	return region if kind == "versus" and visible and age < minf(Motion.EXIT_AT,duration()) else Rect2()
+func versus_cover_alpha() -> float:
+	return 1.0 if versus_cover_rect().has_area() else 0.0
+func loser_badge_rect() -> Rect2:
+	return Rect2(loser.position,loser.size)
 func pose():
 	if kind in ["versus","spotlight","draw"]:
-		var e = 1-pow(1-clampf(age/.32,0,1),3)
-		var travel = 0.0 if reduced_motion else (1-e)
-		hero.position = hero_rect.position+Vector2(-region.size.x*travel,region.size.y*.08*travel)
-		loser.position = loser_rect.position+Vector2(region.size.x*travel,-region.size.y*.08*travel)
-		hero.scale = Vector2.ONE; loser.scale = Vector2.ONE
-		modulate.a = 1; front.queue_redraw(); queue_redraw(); return
+		var s = region.size
+		pivot_offset = s*.5
+		position = Motion.shake(age,reduced_motion) if kind == "versus" else Vector2.ZERO
+		scale = Vector2.ONE*(1.0 if reduced_motion or kind != "versus" else 1.0+.06*Motion.out_cubic(age/2.65))
+		modulate.a = clampf(age/.16,0,1) if reduced_motion and kind != "versus" else 1.0
+		hero.pivot_offset = Vector2(hero.size.x*.5,hero.size.y)
+		loser.pivot_offset = loser.size*.5; loser.rotation = 0
+		hero.modulate.a = 1; loser.modulate.a = 1
+		if kind == "versus":
+			hero.position = hero_rect.position+Motion.actor_offset(s,age,false,reduced_motion)
+			loser.position = loser_rect.position+Motion.actor_offset(s,age,true,reduced_motion)
+			hero.scale = Motion.breath(age,false,reduced_motion); loser.scale = Motion.breath(age,true,reduced_motion)
+			front.modulate.a = Motion.exit_type_alpha(age) if not reduced_motion else 1.0-clampf((age-.5)/.15,0,1)
+		elif kind == "draw":
+			var e = 1.0-Motion.back(age/.4)
+			var bump = sin(clampf((age-.3)/.20,0,1)*PI)*s.x*.025
+			hero.position = hero_rect.position+Vector2(-s.x*e-bump,0) if not reduced_motion else hero_rect.position
+			loser.position = loser_rect.position+Vector2(s.x*e+bump,0) if not reduced_motion else loser_rect.position
+			hero.scale = Vector2.ONE; loser.scale = Vector2.ONE; front.modulate.a = 1
+		else:
+			var leap = clampf(age/Motion.CLASH,0,1)
+			var e = 1.0-Motion.out_cubic(leap)
+			hero.position = hero_rect.position+Vector2(-s.x*.13*sin(leap*PI),s.y*.9*e-s.y*.13*sin(leap*PI)) if not reduced_motion else hero_rect.position
+			if not reduced_motion and age >= .52: hero.position.y += sin((age-.52)*2.3)*3.5
+			var landing = sin(clampf((age-Motion.CLASH)/.18,0,1)*PI)*.12 if not reduced_motion else 0.0
+			hero.scale = Vector2(1+landing,1-landing)*Motion.breath(age,false,reduced_motion)
+			var stagger = Motion.out_cubic((age-.58)/.6)
+			var hit = clampf((age-.4)/.18,0,1)
+			var shake_x = sin(hit*PI*7)*(1.0-hit)*loser_rect.size.x*.07 if age >= .4 else 0.0
+			loser.position = loser_rect.position+Vector2(shake_x,stagger*loser_rect.size.y*.07) if not reduced_motion else loser_rect.position
+			loser.rotation = stagger*.18 if not reduced_motion else 0.0
+			loser.scale = Vector2.ONE
+			loser.modulate.a = clampf((age-.24)/.12,0,1) if not reduced_motion else 1.0
+			var face = "head_pout" if reduced_motion or age >= 1.5 or age >= .58 and age < 1.0 else ("head_panic" if age >= 1.0 else "head_neutral")
+			if loser.art_key != face: loser.art_key = face; loser.expression = face.trim_prefix("head_"); loser.refresh_texture()
+			_sway.set_shader_parameter("cinematic_time",age)
+			_sway.set_shader_parameter("sway_pixels",0.0 if reduced_motion else minf(4,s.x*.006))
+			front.modulate.a = 1
+		front.queue_redraw(); queue_redraw(); return
 	if not active: return
 	var t = age/duration(); var ease = 1-pow(1-clampf(age/.26,0,1),3)
 	modulate.a = minf(1,age/.08)*(1-smoothstep(.82,1.0,t))
@@ -276,7 +355,7 @@ static func card_geometry(s: Vector2, scene_kind: String) -> Dictionary:
 			g.hero = Rect2(-s.x*.02,s.y*.52,s.x*.80,s.y*.45)
 			g.rival = Rect2(s.x*.025,s.y*.085,s.x*.96,s.y*.41)
 			g.player_plate = Rect2(s.x*.43,s.y*.90,s.x*.52,s.y*.065)
-			g.rival_plate = Rect2(s.x*.07,s.y*.018,s.x*.52,s.y*.065)
+			g.rival_plate = Rect2(s.x*.07,s.y*.04,s.x*.52,s.y*.065)
 		else:
 			g.hero = Rect2(0,s.y*.02,s.x*.47,s.y*.96)
 			g.rival = Rect2(s.x*.51,s.y*.025,s.x*.53,s.y*.96)
@@ -297,6 +376,8 @@ static func card_geometry(s: Vector2, scene_kind: String) -> Dictionary:
 			g.subtitle = Rect2(s.x*.51,s.y*.61,s.x*.42,s.y*.055)
 			g.again = Rect2(s.x*.55,s.y*.79,s.x*.18,maxf(44,s.y*.09))
 			g.menu = Rect2(s.x*.76,s.y*.79,s.x*.19,maxf(44,s.y*.09))
+		var head = clampf(s.x*88.0/390.0,84,136) if portrait else clampf(minf(s.x*.12,s.y*.19),80,180)
+		g.rival = Rect2(s.x-head-18,s.y*.46,head,head) if portrait else Rect2(s.x*.055,s.y*.72,head,head)
 		if scene_kind == "draw":
 			g.hero = Rect2(s.x*.03,s.y*.10,s.x*.46,s.y*.49)
 			g.rival = Rect2(s.x*.52,s.y*.10,s.x*.46,s.y*.49)
@@ -304,46 +385,109 @@ static func card_geometry(s: Vector2, scene_kind: String) -> Dictionary:
 				g.hero = Rect2(s.x*.02,s.y*.13,s.x*.25,s.y*.66)
 				g.rival = Rect2(s.x*.24,s.y*.13,s.x*.25,s.y*.66)
 	return g
+## Conservative head lane used to keep the reaction badge away from the face.
+static func winner_head_rect(s: Vector2) -> Rect2:
+	var h: Rect2 = card_geometry(s,"spotlight").hero
+	return Rect2(h.position+Vector2(h.size.x*.20,0),Vector2(h.size.x*.60,h.size.y*.38))
 func _warm(point: Vector2) -> bool:
 	var s = region.size
 	if kind != "versus": return false
 	return point.y < s.y*.56-point.x*.25 if arrangement == "vertical" else point.x > s.x*.58-point.y*.25
+func _build_halftone(s: Vector2):
+	var verts = [PackedVector2Array(),PackedVector2Array()]
+	var colors = [PackedColorArray(),PackedColorArray()]
+	var step = maxf(18,minf(s.x,s.y)/24.0)
+	for y in range(0,int(s.y)+1,int(step)):
+		for x in range(0,int(s.x)+1,int(step)):
+			var at = Vector2(x,y); var side = 1 if _warm(at) else 0
+			var col = Color("d8af4e") if side == 1 else Color("4bc8e6")
+			col.a = .23 if (x < s.x*.28 or x > s.x*.60) else .08
+			for i in range(6):
+				verts[side].append(at); verts[side].append(at+Vector2.from_angle(i*TAU/6)*step*.20); verts[side].append(at+Vector2.from_angle((i+1)*TAU/6)*step*.20)
+				for j in range(3): colors[side].append(col)
+	_dots_cool = P._mesh(verts[0],colors[0]) if not verts[0].is_empty() else null
+	_dots_warm = P._mesh(verts[1],colors[1]) if not verts[1].is_empty() else null
 func _draw_card_background():
 	var s = region.size
-	draw_rect(region,Color("0b142d"))
 	if kind == "versus":
+		if versus_cover_rect().has_area(): draw_rect(versus_cover_rect(),Color("0b142d"))
+		var cool: PackedVector2Array; var warm: PackedVector2Array
 		if arrangement == "vertical":
-			draw_colored_polygon(PackedVector2Array([Vector2.ZERO,Vector2(s.x,0),Vector2(s.x,s.y*.56-s.x*.25),Vector2(0,s.y*.56)]),Color("49320d"))
-			draw_line(Vector2(0,s.y*.56),Vector2(s.x,s.y*.56-s.x*.25),Color("fff2ce"),5,true)
+			warm = PackedVector2Array([Vector2.ZERO,Vector2(s.x,0),Vector2(s.x,s.y*.56-s.x*.25),Vector2(0,s.y*.56)])
+			cool = PackedVector2Array([Vector2(0,s.y*.56),Vector2(s.x,s.y*.56-s.x*.25),s,Vector2(0,s.y)])
 		else:
-			draw_colored_polygon(PackedVector2Array([Vector2(s.x*.58,0),Vector2(s.x,0),s,Vector2(s.x*.58-s.y*.25,s.y)]),Color("49320d"))
-			draw_line(Vector2(s.x*.58,0),Vector2(s.x*.58-s.y*.25,s.y),Color("fff2ce"),5,true)
+			warm = PackedVector2Array([Vector2(s.x*.58,0),Vector2(s.x,0),s,Vector2(s.x*.58-s.y*.25,s.y)])
+			cool = PackedVector2Array([Vector2.ZERO,Vector2(s.x*.58,0),Vector2(s.x*.58-s.y*.25,s.y),Vector2(0,s.y)])
+		var pulse = 1.0 if reduced_motion else .92+.08*sin(age*2.2)
+		for side in range(2):
+			var offset = Motion.wipe_offset(s,age,side == 1,reduced_motion)
+			draw_set_transform(offset)
+			draw_colored_polygon(warm if side == 1 else cool,Color("49320d") if side == 1 else Color("0b142d"))
+			var dots = _dots_warm if side == 1 else _dots_cool
+			if dots: draw_mesh(dots,null,Transform2D.IDENTITY,Color(1,1,1,pulse))
+			if side == 1: draw_line(warm[3],warm[0] if arrangement == "horizontal" else warm[2],Color("fff2ce"),5,true)
+		draw_set_transform(Vector2.ZERO)
 	else:
 		draw_rect(region,Color("14305a"))
-	# Quiet, graduated halftone in the transition panels, never on the illustrations.
-	var step = maxf(10,s.x/75)
-	for y in range(0,int(s.y),int(step)):
-		for x in range(0,int(s.x),int(step)):
-			var at = Vector2(x,y)
-			var c = Color("d8af4e") if _warm(at) else Color("4bc8e6")
-			var weight = .26 if (x < s.x*.28 or x > s.x*.60) else .10
-			draw_circle(at,step*.22,Color(c,weight))
-	var origin = s*Vector2(.5,.5) if kind == "versus" else s*Vector2(.50,.43)
-	for i in range(66):
-		var angle = i*TAU/66+.12
+		if _dots_cool: draw_mesh(_dots_cool,null,Transform2D.IDENTITY,Color(1,1,1,1.0 if reduced_motion else .90+.10*sin(age*1.7)))
+		if kind == "spotlight":
+			var at = loser.position+loser.size*.5
+			var radius = loser.size.x*.5
+			var tint = Color(P.mark_color(3-player),loser.modulate.a)
+			draw_circle(at,radius+4,Color(Color("050c1a"),loser.modulate.a))
+			draw_circle(at,radius,Color(Color("132239"),loser.modulate.a))
+			draw_arc(at,radius,0,TAU,64,tint,4,true)
+			draw_arc(at,radius-5,0,TAU,64,Color(tint,.45*loser.modulate.a),1.5,true)
+	var origin = s*.5 if kind == "versus" else s*Vector2(.50,.43)
+	var reveal = Motion.out_cubic(age/.28) if not reduced_motion else 1.0
+	var fade = (1.0-clampf((age-2.65)/.35,0,1)) if kind == "versus" else 1.0
+	for i in range(44):
+		var angle = i*TAU/44+.12+(0.0 if reduced_motion else age*.035)
 		var v = Vector2.from_angle(angle)
-		var a = origin+v*s.length()*.10
+		var drift = 0.0 if reduced_motion else fmod(age*.075+Motion.unit(i),.32)
+		var a = origin+v*s.length()*(.09+drift)
 		var b = (origin+v*s.length()).clamp(Vector2.ZERO,s)
 		var n = v.orthogonal()*float(1+i%3)
-		draw_colored_polygon(PackedVector2Array([a,b+n,b-n]),Color(1,.94,.79,.08 if i%3 else .20))
-	if kind != "versus":
-		var burst = starburst(origin,Vector2(s.x*.49,s.y*.34),22)
+		draw_colored_polygon(PackedVector2Array([a,b+n,b-n]),Color(1,.94,.79,(.07 if i%3 else .17)*reveal*fade))
+	if kind == "versus":
+		_draw_speed_lines(reveal*fade)
+		_draw_trails()
+	else:
+		var burst = starburst(origin,Vector2(s.x*.49,s.y*.34),22,0.0 if reduced_motion else age*.045)
 		draw_colored_polygon(burst,Color(.8,.88,1,.10))
 		draw_polyline(burst+PackedVector2Array([burst[0]]),Color(1,.89,.67,.38),2,true)
-static func starburst(at: Vector2, radius: Vector2, spikes: int = 9) -> PackedVector2Array:
+func _draw_speed_lines(alpha: float):
+	if reduced_motion: return
+	var s = region.size
+	for i in range(24):
+		var rival = i%2 == 1
+		var v = -Motion.travel(s,rival).normalized()
+		var speed = 1.8 if age < .45 else .09
+		var at = Vector2(fposmod(Motion.unit(i,8)+age*speed,1)*s.x,Motion.unit(i,9)*s.y)
+		var length = minf(s.x,s.y)*(.12+Motion.unit(i,10)*.3)
+		var col = Color(P.mark_color(3-player if rival else player),alpha*(.38 if age < .45 else .10))
+		draw_line(at-v*length,at,col,1+i%2,true)
+func _draw_trails():
+	var exiting = age >= Motion.EXIT_AT and age < Motion.VERSUS_SECONDS
+	if reduced_motion or not exiting and (age >= .48 or age <= .02): return
+	for i in range(3,0,-1):
+		var t = maxf(0,age-i*.033)
+		var alpha = (.30-i*.05)*(1.0-clampf((age-2.9)/.1,0,1) if exiting else 1.0-clampf((age-.30)/.18,0,1))
+		for rival in [false,true]:
+			var art = loser if rival else hero
+			if art.texture == null: continue
+			var r = loser_rect if rival else hero_rect
+			var offset = Motion.actor_offset(region.size,t,rival,false)
+			var rect = art.texture_rect()
+			var xf = Transform2D(0,r.position+offset)*art.mirror_transform()
+			draw_set_transform_matrix(xf)
+			draw_texture_rect(art.texture,rect,false,Color(P.mark_color(3-player if rival else player),alpha))
+			draw_set_transform_matrix(Transform2D.IDENTITY)
+
+static func starburst(at: Vector2, radius: Vector2, spikes: int = 9, rotation_angle: float = 0.0) -> PackedVector2Array:
 	var points = PackedVector2Array()
 	for i in range(spikes*2):
-		var a = -PI*.5+i*PI/spikes
+		var a = -PI*.5+i*PI/spikes+rotation_angle
 		points.append(at+Vector2(cos(a),sin(a))*radius*(1.0 if i%2 == 0 else .61))
 	return points
 ## Bundled Rajdhani, heavy keyline and 0.23 shear: no external font dependencies.
@@ -357,7 +501,7 @@ static func headline(node: CanvasItem, value: String, r: Rect2, color: Color, de
 	var cap_height = fs*.65
 	var baseline = r.position+Vector2((r.size.x-width)*.5,(r.size.y+cap_height)*.5)
 	node.draw_set_transform_matrix(Transform2D(Vector2(1,0),Vector2(-.23,1),Vector2(baseline.y*.23,0)))
-	node.draw_string_outline(font,baseline,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,maxi(3,int(fs*.10)),Color("050c1a"))
+	node.draw_string_outline(font,baseline,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,maxi(3,int(fs*.10)),Color(Color("050c1a"),color.a))
 	node.draw_string_outline(font,baseline,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,maxi(1,int(fs*.015)),color)
 	node.draw_string(font,baseline,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,color)
 	node.draw_set_transform_matrix(Transform2D.IDENTITY)
@@ -371,26 +515,129 @@ static func plate(node: CanvasItem, r: Rect2, screen_name: String, hero_name: St
 	headline(node,hero_name.to_upper(),Rect2(r.position+Vector2(10,r.size.y*.59),Vector2(r.size.x-20,r.size.y*.35)),accent,int(r.size.y*.29))
 func winner_caption() -> String:
 	return "DRAW" if kind == "draw" else winner_name.to_upper()+" WINS!"
+func _build_letters(g: Dictionary):
+	_letters.clear()
+	if kind == "versus": return
+	for wins in [false,true]:
+		if wins and kind == "draw": continue
+		var value = "WINS!" if wins else ("DRAW" if kind == "draw" else winner_name.to_upper())
+		var r: Rect2 = g.wins if wins else g.name
+		var fs = P.fit_size(value,r.size.x,int(r.size.y*1.12*1.4),P.SANS)
+		while fs > 9 and fs*.65 > r.size.y: fs -= 1
+		# Fit the full ink envelope, including shear, keyline and 2x letter slam.
+		var row = {"value":value,"positions":PackedVector2Array(),"fs":fs,"start":Motion.letter_start(winner_name.length(),wins,reduced_motion),"color":Color.WHITE if wins else Color("efc351")}
+		var envelope = Rect2()
+		while fs >= 9:
+			row.fs = fs; row.positions = PackedVector2Array()
+			for i in range(value.length()): row.positions.append(Vector2(P.SANS.get_string_size(value.substr(0,i),HORIZONTAL_ALIGNMENT_LEFT,-1,fs).x,0))
+			envelope = _letter_ink_rect(row,0,2)
+			for i in range(value.length()):
+				for sc in [1.0,2.0]: envelope = envelope.merge(_letter_ink_rect(row,i,sc))
+			if envelope.size.x <= minf(r.size.x,region.size.x-36): break
+			fs -= 1
+		var offset = Vector2(r.get_center().x-envelope.get_center().x,r.position.y+(r.size.y+fs*.65)*.5)
+		for i in range(row.positions.size()): row.positions[i] += offset
+		_letters.append(row)
+func _letter_transform(row: Dictionary, i: int, sc: float) -> Transform2D:
+	var p: Vector2 = row.positions[i]
+	var center = p+Vector2(row.fs*.20,-row.fs*.32)
+	return Transform2D(Vector2(1,0),Vector2(-.23,1),Vector2(p.y*.23,0))*Transform2D(0,Vector2.ONE*sc,0,center)
+func _letter_ink_rect(row: Dictionary, i: int, sc: float) -> Rect2:
+	var w = P.SANS.get_string_size(row.value[i],HORIZONTAL_ALIGNMENT_LEFT,-1,row.fs).x
+	var ink = Rect2(-row.fs*.20,-row.fs*.40,w,row.fs*.76).grow(maxf(3,row.fs*.10)+2)
+	return _letter_transform(row,i,sc)*ink
+func headline_ink_rects(at: float = -1) -> Array:
+	var out: Array = []; var t = age if at < 0 else at
+	for row in _letters:
+		var start = Motion.letter_start(winner_name.length(),row.value == "WINS!",reduced_motion)
+		for i in range(row.value.length()):
+			if t < start+(0.0 if reduced_motion else i*Motion.LETTER_STEP): continue
+			out.append(_letter_ink_rect(row,i,Motion.letter_scale(t,i,start,reduced_motion)))
+	return out
+func _draw_letters():
+	for row in _letters:
+		for i in range(row.value.length()):
+			var start = Motion.letter_start(winner_name.length(),row.value == "WINS!",reduced_motion)
+			if age < start+(0.0 if reduced_motion else i*Motion.LETTER_STEP): continue
+			var sc = Motion.letter_scale(age,i,start,reduced_motion)
+			var p: Vector2 = row.positions[i]
+			var center = p+Vector2(row.fs*.20,-row.fs*.32)
+			front.draw_set_transform_matrix(_letter_transform(row,i,sc))
+			front.draw_string_outline(P.SANS,p-center,row.value[i],HORIZONTAL_ALIGNMENT_LEFT,-1,row.fs,maxi(3,int(row.fs*.10)),Color("050c1a"))
+			front.draw_string(P.SANS,p-center,row.value[i],HORIZONTAL_ALIGNMENT_LEFT,-1,row.fs,row.color)
+	front.draw_set_transform_matrix(Transform2D.IDENTITY)
+func particle_limit() -> int:
+	if reduced_motion or kind == "draw": return 0
+	return 88 if kind == "versus" else Motion.WINNER_PARTICLES
+func particle_pose(i: int, at: float = -1) -> Dictionary:
+	if reduced_motion or kind == "draw": return {}
+	var t = age if at < 0 else at
+	if kind == "versus": return Motion.particle(i,t,region.size,true,player) if t < Motion.EXIT_AT else {}
+	if i >= 108:
+		var second = Motion.letter_start(winner_name.length(),true,false)+4*Motion.LETTER_STEP+.27
+		t -= second-Motion.CLASH
+	return Motion.particle(i,t,region.size,false,player)
+func live_particle_count(at: float = -1) -> int:
+	var count = 0
+	for i in range(particle_limit()):
+		if not particle_pose(i,at).is_empty(): count += 1
+	return count
+func _draw_particles():
+	for i in range(particle_limit()):
+		var p = particle_pose(i)
+		if p.is_empty(): continue
+		var col = Color(P.mark_color(2 if p.gold else 1),p.alpha*.9)
+		if kind != "versus": col = Color(Color.WHITE if p.confetti and i%4 == 0 else winner_accent(),p.alpha*.96)
+		if not p.confetti: P.shard(front,p.position,p.length if kind == "versus" else p.length*.5,p.angle,col)
+		else:
+			var v = Vector2.from_angle(p.angle)*p.length*.5
+			front.draw_line(p.position-v,p.position+v,col,maxf(1,p.length*.42),true)
 func _draw_front():
 	if not visible or not kind in ["versus","spotlight","draw"]: return
 	var s = region.size; var g = card_geometry(s,kind)
+	_draw_particles()
 	if kind == "versus":
-		if age > .26 or reduced_motion:
-			var offset = 0.0 if reduced_motion else (1-clampf((age-.26)/.18,0,1))*s.x
-			plate(front,Rect2(g.player_plate.position+Vector2(offset,0),g.player_plate.size),winner_name,R.get_hero(winner_id).name,P.BLUE)
-			plate(front,Rect2(g.rival_plate.position-Vector2(offset,0),g.rival_plate.size),loser_name,R.get_hero(loser_id).name,Color("e6bc52"))
-		if age >= .18:
+		for rival in [false,true]:
+			var start = .53 if rival else .45
+			if age < start and not reduced_motion: continue
+			var progress = 1.0 if reduced_motion else Motion.back((age-start)/.22,.7)
+			var base: Rect2 = g.rival_plate if rival else g.player_plate
+			var r = Rect2(base.position+Vector2((1-progress)*s.x*(-1 if rival else 1),(1-progress)*-s.y*.07),base.size)
+			var accent = P.mark_color(3-player if rival else player)
+			plate(front,r,loser_name if rival else winner_name,R.get_hero(loser_id if rival else winner_id).name,accent)
+			var glint = (age-start-.20)/.28
+			if not reduced_motion and glint >= 0 and glint <= 1:
+				var x = lerpf(r.position.x+12,r.end.x-12,glint)
+				front.draw_line(Vector2(x+6,r.position.y+4),Vector2(x-6,r.end.y-4),Color(1,1,1,sin(glint*PI)*.8),4,true)
+		var sc = Motion.vs_scale(age,reduced_motion)
+		if sc.x > 0:
 			var radius = minf(s.x,s.y)*.16
-			if not reduced_motion:
-				var t = clampf((age-.18)/.22,0,1)-1
-				radius *= maxf(.01,1+2.7*t*t*t+1.7*t*t)
 			var at = s*.5
-			var burst = starburst(at,Vector2.ONE*radius)
+			var burst = starburst(at,Vector2.ONE*radius*sc)
 			front.draw_colored_polygon(burst,Color("fffbea")); front.draw_polyline(burst+PackedVector2Array([burst[0]]),Color("080c19"),3,true)
-			headline(front,"VS",Rect2(at-Vector2(radius*.8,radius*.65),Vector2(radius*1.6,radius*1.3)),Color("efc351"),int(radius*1.5))
+			headline(front,"VS",Rect2(at-Vector2(radius*.8,radius*.65)*sc,Vector2(radius*1.6,radius*1.3)*sc),Color("efc351"),int(radius*1.5*sc.y))
+		var flash = Motion.flash(age,reduced_motion)
+		if flash != 0:
+			front.draw_rect(region,Color.WHITE if flash > 0 else Color("050914"))
+			var at = s*.5
+			for i in range(18):
+				var v = Vector2.from_angle(i*TAU/18+.2)
+				front.draw_line(at+v*30,at+v*s.length(),Color("050914") if flash > 0 else Color.WHITE,3+i%4,true)
 	else:
-		if age >= .38 or reduced_motion:
-			headline(front,"DRAW" if kind == "draw" else winner_name.to_upper(),g.name,Color("efc351"),int(g.name.size.y*1.12))
-			if kind != "draw": headline(front,"WINS!",g.wins,Color.WHITE,int(g.wins.size.y*1.13))
-			headline(front,"A PERFECT STANDOFF" if kind == "draw" else R.get_hero(winner_id).name.to_upper(),g.subtitle,P.BLUE,int(g.subtitle.size.y*.92))
-			P.text(front,result_score,Rect2(g.subtitle.position+Vector2(0,g.subtitle.size.y+2),Vector2(g.subtitle.size.x,18)),13,P.PALE)
+		if kind == "spotlight" and loser.modulate.a > 0:
+			var center = loser.position+loser.size*.5
+			front.draw_arc(center,loser.size.x*.5,0,TAU,64,Color(P.mark_color(3-player),loser.modulate.a),4,true)
+			var at = loser.position+Vector2(loser.size.x*.91,loser.size.y*.14)
+			var tint = Color(P.mark_color(3-player),loser.modulate.a)
+			if reduced_motion or age >= .58:
+				front.draw_circle(at,8*loser.size.x/88.0,Color("0b142d"))
+				for v in [Vector2(1,1),Vector2(-1,1)]: front.draw_line(at-v*4*loser.size.x/88.0,at+v*4*loser.size.x/88.0,tint,2,true)
+		_draw_letters()
+		var reveal = .12 if reduced_motion else Motion.letter_start(winner_name.length(),true,false)+.48
+		var fade = clampf((age-reveal)/.24,0,1)
+		if reduced_motion: fade = clampf((age-.12)/.12,0,1)
+		if fade > 0:
+			var offset = Vector2.ZERO if reduced_motion else Vector2(0,(1-Motion.out_cubic(fade))*12)
+			headline(front,"A PERFECT STANDOFF" if kind == "draw" else R.get_hero(winner_id).name.to_upper(),Rect2(g.subtitle.position+offset,g.subtitle.size),Color(winner_accent(),fade),int(g.subtitle.size.y*.92))
+			var fs = score_font_size()
+			P.text(front,result_score,Rect2(g.subtitle.position+Vector2(0,g.subtitle.size.y+2)+offset,Vector2(g.subtitle.size.x,fs*1.25)),fs,Color(P.PALE,fade))

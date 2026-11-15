@@ -23,7 +23,7 @@ func run():
 	ok(ui.page == "title" and ui.controls.has_all(["computer","online","local","settings","how"]),"title choices")
 	ui.controls.computer.pressed.emit(); await frames()
 	ok(ui.overlay == "setup" and ui.controls.has("choose_o"),"difficulty and seat chooser")
-	ui.controls.choose_x.pressed.emit(); ui._confirm_hero("vesper_vale","You"); ui.cinematic.advance(2.81); ui.thinking = false; await frames()
+	ui.controls.choose_x.pressed.emit(); ui._confirm_hero("vesper_vale","You"); ui.cinematic.advance(3.01); ui.thinking = false; await frames()
 	ok(ui.mode == "computer" and ui.human_mark == 1 and ui.turn_label == "Turn: X","X first")
 	ui.start_game("local")
 	# Simulated pointer input travels through the board's real hit-test API.
@@ -181,7 +181,7 @@ func run():
 	ok(ui.online_state == "waiting" and ui.room_code.length() == 5,"room code screen")
 	ui.invite_demo_rival(); await frames()
 	ok(ui.page == "game" and ui.mode == "online" and ui.remote_ready,"demo enters same game screen")
-	ui.cinematic.advance(2.81); ui._debug_capture = false
+	ui.cinematic.advance(3.01); ui._debug_capture = false
 	if ui.human_mark == 1: ui.play_cell(0,4)
 	for i in range(220):
 		ui._process(.02)

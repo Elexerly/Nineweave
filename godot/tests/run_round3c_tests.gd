@@ -263,11 +263,11 @@ func controls_and_scorecards(ui):
 			for n in [0,1,9]:
 				var c = MainScript.claimed_line(n,g.line.size.x,card.size.y)
 				ok(c.width <= g.line.size.x-4 and c.fs >= 11,"%s '%s' fits beside the medallion" % [s,c.text])
-	# The approved Round 4 winner card replaces the old loser inset completely.
+	# Round 4b keeps the winner pose and adds a small, separate loser head reaction.
 	for size in SIZES:
 		ui.set_view_size(Vector2(size[0],size[1])); ui.debug_scenario("win_spotlight",.5)
 		var c = ui.cinematic; var g = Cinema.card_geometry(ui.layout.size,"spotlight")
-		ok(c.active and c.kind == "spotlight" and c.hero_rect == g.hero and c.hero.art_key == "victory" and not c.loser.visible,"%s live winner card uses only the winner's illustrated victory pose" % str(size))
+		ok(c.active and c.kind == "spotlight" and c.hero_rect == g.hero and c.hero.art_key == "victory" and c.loser.visible and c.loser.bust,"%s live winner card uses the winner victory pose plus a small loser head" % str(size))
 		ok(Rect2(Vector2.ZERO,ui.layout.size).encloses(c.hero_rect) and not g.again.intersects(g.menu),"%s winner art inside viewport, actions apart" % str(size))
 		c.clear()
 

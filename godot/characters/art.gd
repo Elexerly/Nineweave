@@ -68,17 +68,26 @@ func _process(delta): advance(delta)
 func pose(_time: float = 0): queue_redraw()
 func _draw():
 	if texture == null or size.x <= 0 or size.y <= 0: return
-	var factor = size.y/texture.get_height() if fit_height else minf(size.x/texture.get_width(),size.y/texture.get_height())
-	var dim = texture.get_size()*factor*(.92 if bust else 1.0)
 	var stretch = Vector2.ONE
 	if not frozen and not reduced_motion and reaction.remaining > 0 and _delay <= 0:
 		var t = maxf(0,_face_age-(.28 if reaction.event in ["opponent_claim","loss","near_loss"] else 0))
 		if t < .08: stretch = Vector2(.90,1.08).lerp(Vector2(1.06,.94),t/.08)
 		elif t < .20: stretch = Vector2(1.06,.94).lerp(Vector2.ONE,(t-.08)/.12)
 	# Leave 4% gutter: even the overshoot is clipped to the original safe region.
-	dim *= stretch
-	var rect = Rect2((size-dim)*.5,dim)
+	var rect = texture_rect(stretch)
 	# Mirror around the control's centre (negative rect sizes are renderer-dependent).
-	if facing < 0: draw_set_transform(Vector2(size.x,0),0.0,Vector2(-1,1))
+	draw_set_transform_matrix(mirror_transform())
 	draw_texture_rect(texture,rect,false)
-	if facing < 0: draw_set_transform(Vector2.ZERO,0.0,Vector2.ONE)
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+## Positive draw rectangles plus an explicit centre reflection work on GL/Web alike.
+## The render path and the regression test use these very same transforms.
+func texture_rect(stretch: Vector2 = Vector2.ONE) -> Rect2:
+	if texture == null: return Rect2()
+	var factor = size.y/texture.get_height() if fit_height else minf(size.x/texture.get_width(),size.y/texture.get_height())
+	var dim = texture.get_size()*factor*(.92 if bust else 1.0)*stretch
+	return Rect2((size-dim)*.5,dim)
+func mirror_transform() -> Transform2D:
+	return Transform2D(0,Vector2(-1,1),0,Vector2(size.x,0)) if facing < 0 else Transform2D.IDENTITY
+func visible_art_rect() -> Rect2:
+	return (mirror_transform()*texture_rect()).intersection(Rect2(Vector2.ZERO,size))

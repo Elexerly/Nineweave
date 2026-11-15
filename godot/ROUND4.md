@@ -12,7 +12,7 @@ requests, installs, new fonts, audio-system changes, or source-art alterations.
   rig has no runtime UI references. It remains only for the legacy internal
   `tools/rig_proof.gd` geometry tool; it is not instantiated by the game.
 - Roster order: Cryon, Aurelia, Vesper Vale, Auric Rex, Nyx Thread, Cobalt Bastion,
-  Ember Quill, Lumen Pike, Jack Riot (`shard_jack` stays protocol-stable), Madame
+  Ember Quill, Lumen Pike, Jack Sovereign (`shard_jack` stays protocol-stable), Madame
   Solstice, Bramble Ox, Kite Hollow, Professor Gilt, Siren Coil, Ryan Blaze,
   Tempest Vega. New heroes have original pop, victory and action lines. Jack's
   lines are updated, Kite is male, Siren is a human diver. Unknown profile IDs

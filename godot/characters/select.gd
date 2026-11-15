@@ -20,7 +20,8 @@ class Portrait extends Button:
 	func _draw():
 		var r = Rect2(Vector2(2,2),size-Vector2(4,4))
 		draw_style_box(_frame(),r)
-		P.text(self,R.DATA[index].name.get_slice(" ",0).to_upper(),Rect2(3,size.y-20,size.x-6,18),13,P.PALE,P.SANS)
+		var label = R.tile_label(R.DATA[index].id)
+		P.text(self,label,Rect2(3,size.y-20,size.x-6,18),P.fit_size(label,size.x-8,14),P.PALE,P.SANS)
 		if selected: P.outline(self,r.grow(-1),P.BLUE,2)
 	func _frame() -> StyleBoxFlat:
 		var style = StyleBoxFlat.new(); style.bg_color = Color("14243a") if not selected else Color("25425c")
@@ -43,24 +44,29 @@ var _drag_start = Vector2.ZERO
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	geo = geometry(size,hinge)
-	page = int(R.index_of(selected_id)/8) if geo.paged else 0
+	page = int(R.index_of(selected_id)/geo.per_page) if geo.paged else 0
 	hero = Rig.new(); hero.hero_id = selected_id; hero.bust = false; hero.art_key = "splash"
 	hero.position = geo.hero.position; hero.size = geo.hero.size; hero.reduced_motion = reduced_motion; add_child(hero)
-	for i in range(16):
+	for i in range(R.DATA.size()):
 		var tile = Portrait.new(); tile.index = i; tile.selected = R.DATA[i].id == selected_id
-		tile.position = geo.tiles[i%8 if geo.paged else i].position; tile.size = geo.tiles[i%8 if geo.paged else i].size
+		tile.position = geo.tiles[i%geo.per_page].position; tile.size = geo.tiles[i%geo.per_page].size
 		tile.disabled = R.DATA[i].id == blocked_id; tile.modulate.a = .28 if tile.disabled else 1.0
 		tile.pressed.connect(func(): focus_hero(R.DATA[i].id))
 		tile.focus_entered.connect(func(): focus_hero(R.DATA[i].id))
+		tile.visible = not geo.paged or int(i/geo.per_page) == page
 		add_child(tile); portraits.append(tile)
 	var exit_button = ButtonArt.new(); exit_button.icon_kind = "back"; exit_button.position = geo.back.position; exit_button.size = geo.back.size
 	exit_button.pressed.connect(func(): back.emit()); add_child(exit_button)
 	field = LineEdit.new(); field.position = geo.field.position; field.size = geo.field.size; field.text = display_name
 	field.placeholder_text = "Your screen name"; field.max_length = 24
 	field.add_theme_font_override("font",P.SANS); field.add_theme_font_size_override("font_size",20)
-	var style = StyleBoxFlat.new(); style.bg_color = P.NAVY; style.border_color = P.GOLD; style.set_border_width_all(2); style.content_margin_left = 10
+	var style = StyleBoxEmpty.new(); style.content_margin_left = 16; style.content_margin_right = 16; style.content_margin_top = 12
 	field.add_theme_stylebox_override("normal",style); field.add_theme_stylebox_override("focus",style)
+	field.add_theme_stylebox_override("read_only",style)
 	field.add_theme_color_override("font_color",P.PALE); field.add_theme_color_override("caret_color",P.BLUE)
+	field.add_theme_color_override("font_placeholder_color",P.MUTED)
+	field.add_theme_color_override("font_uneditable_color",P.PALE)
+	field.focus_entered.connect(queue_redraw); field.focus_exited.connect(queue_redraw)
 	field.text_changed.connect(func(value): display_name = value; name_changed.emit(value))
 	field.text_submitted.connect(func(_value): _confirm()); add_child(field)
 	confirm_button = ButtonArt.new(); confirm_button.caption = "LOCK IN"; confirm_button.accent = true
@@ -69,11 +75,11 @@ func _ready():
 	if geo.paged:
 		for direction in [-1,1]:
 			var arrow = ButtonArt.new(); arrow.caption = "‹" if direction < 0 else "›"
-			arrow.position = Vector2(20 if direction < 0 else size.x-64,geo.nav.position.y); arrow.size = Vector2(44,44)
+			arrow.position = Vector2(geo.nav.position.x if direction < 0 else geo.nav.end.x-44,geo.nav.position.y); arrow.size = Vector2(44,44)
 			arrow.pressed.connect(func(): change_page(direction)); add_child(arrow); paging_controls.append(arrow)
-		for dot in range(2):
-			var button = Button.new(); button.text = "•"; button.position = Vector2(size.x*.5-44+dot*44,geo.nav.position.y); button.size = Vector2(44,44)
-			button.add_theme_font_size_override("font_size",36)
+		for dot in range(geo.pages):
+			var button = Button.new(); button.text = "•"; button.position = Vector2(geo.nav.get_center().x-geo.pages*22+dot*44,geo.nav.position.y); button.size = Vector2(44,44)
+			button.add_theme_font_override("font",P.SANS); button.add_theme_font_size_override("font_size",36)
 			for state in ["normal","hover","pressed","focus"]: button.add_theme_stylebox_override(state,StyleBoxEmpty.new())
 			button.pressed.connect(func(): set_page(dot)); add_child(button); paging_controls.append(button)
 	_sync_page()
@@ -90,15 +96,17 @@ func swipe(distance: Vector2):
 		change_page(1 if distance.x < 0 else -1)
 func change_page(direction: int): set_page(page+direction)
 func set_page(value: int):
-	page = posmod(value,2) if geo.paged else 0; _sync_page()
+	page = posmod(value,geo.pages) if geo.paged else 0; _sync_page()
 func _sync_page():
 	for tile in portraits:
-		var local_index = tile.index%8 if geo.paged else tile.index
+		var local_index = tile.index%geo.per_page
 		tile.position = geo.tiles[local_index].position; tile.size = geo.tiles[local_index].size
-		tile.visible = not geo.paged or int(tile.index/8) == page
-		if is_instance_valid(tile.rig): tile.rig.size = Vector2(tile.size.x-6,tile.size.y-18)
+		tile.visible = not geo.paged or int(tile.index/geo.per_page) == page
+		if is_instance_valid(tile.rig):
+			tile.rig.size = Vector2(tile.size.x-6,tile.size.y-18)
+			if tile.visible and tile.rig.texture == null: tile.rig.refresh_texture()
 	if geo.paged:
-		for dot in range(2): paging_controls[2+dot].add_theme_color_override("font_color",P.BLUE if page == dot else P.MUTED)
+		for dot in range(geo.pages): paging_controls[2+dot].add_theme_color_override("font_color",P.BLUE if page == dot else P.MUTED)
 	queue_redraw()
 func _confirm():
 	if confirm_button.disabled or selected_id == blocked_id: return
@@ -110,10 +118,10 @@ func focus_hero(id: String):
 	for tile in portraits: tile.selected = R.DATA[tile.index].id == id; tile.queue_redraw()
 	queue_redraw()
 static func geometry(s: Vector2, seam: Rect2 = Rect2()) -> Dictionary:
-	var paged = Layout.mode_for(s) == "phone_portrait" and seam.size.x <= 0
-	var g = {"tiles":[],"back":Rect2(12,12,44,44),"paged":paged,"pages":2 if paged else 1,"per_page":8 if paged else 16,"nav":Rect2()}
+	var phone = Layout.mode_for(s) == "phone_portrait" and seam.size.x <= 0
+	var g = {"tiles":[],"back":Rect2(12,12,44,44),"paged":phone,"pages":4 if phone else 1,"per_page":8 if phone else 32,"nav":Rect2(),"columns":4,"rows":2}
 	var grid: Rect2
-	if paged:
+	if phone:
 		g.heading = Rect2(66,12,s.x-78,40)
 		g.hero = Rect2(12,60,s.x-24,s.y-480)
 		g.plaque = Rect2(20,s.y-412,s.x-40,60)
@@ -122,22 +130,51 @@ static func geometry(s: Vector2, seam: Rect2 = Rect2()) -> Dictionary:
 		g.field = Rect2(24,s.y-112,s.x-48,44)
 		g.confirm = Rect2(24,s.y-60,s.x-48,48)
 	else:
-		var split = seam.end.x+12 if seam.size.x > 0 else s.x*.46
+		# Eight columns when they read cleanly; compact landscape uses a 4x4 page.
+		var split = seam.end.x+12 if seam.size.x > 0 else s.x*(.46 if s.y < 360 else .42)
 		var left_end = seam.position.x-12 if seam.size.x > 0 else split-12
 		g.hero = Rect2(12,58,left_end-24,s.y-146)
 		g.plaque = Rect2(16,s.y-80,left_end-32,64)
 		g.heading = Rect2(split,12,s.x-split-16,38)
-		grid = Rect2(split,58,s.x-split-12,s.y-130)
+		grid = Rect2(split,58,s.x-split-12,s.y-132)
+		g.columns = 8; g.rows = 4
+		# A 56px tile leaves a readable 50px head above its caption.
+		var fit = Vector2(grid.size.x/8-4,grid.size.y/4-3)
+		if fit.x < 56 or fit.y < 56:
+			g.paged = true; g.pages = 2; g.per_page = 16
+			g.columns = 8 if grid.size.x/8-4 >= 52 else 4
+			g.rows = 16/g.columns
+			grid.size.y -= 48
+			g.nav = Rect2(split, s.y-116,s.x-split-12,44)
 		g.field = Rect2(split,s.y-62,(s.x-split-20)*.55,44)
 		g.confirm = Rect2(g.field.end.x+8,s.y-62,(s.x-split-20)*.45,44)
+		if s.y < 360:
+			# Put the form below the splash so four touchable rows have real room.
+			g.paged = true; g.pages = 2; g.per_page = 16; g.columns = 4; g.rows = 4
+			g.hero = Rect2(12,58,left_end-24,s.y-234)
+			g.plaque = Rect2(16,s.y-172,left_end-32,60)
+			g.field = Rect2(24,s.y-104,left_end-48,44)
+			g.confirm = Rect2(24,s.y-52,left_end-48,44)
+			grid = Rect2(split,58,s.x-split-12,s.y-114)
+			g.nav = Rect2(split,s.y-52,s.x-split-12,44)
 	g.grid = grid
-	var rows = 2 if paged else 4
-	var pitch = Vector2(grid.size.x/4,grid.size.y/rows)
-	for i in range(8 if paged else 16): g.tiles.append(Rect2(grid.position+Vector2(i%4*pitch.x,int(i/4)*pitch.y),pitch-Vector2(4,3)))
+	var pitch = Vector2(grid.size.x/g.columns,minf(grid.size.y/g.rows,grid.size.x/g.columns*1.30))
+	var top = grid.position+Vector2(0,(grid.size.y-pitch.y*g.rows)*.5)
+	for i in range(g.per_page): g.tiles.append(Rect2(top+Vector2(i%g.columns*pitch.x,int(i/g.columns)*pitch.y),pitch-Vector2(4,3)))
 	return g
+
 func _draw():
 	if geo.is_empty(): return
 	draw_rect(Rect2(Vector2.ZERO,size),Color("081326"))
+	var r: Rect2 = geo.field
+	var edge = P.BLUE if is_instance_valid(field) and field.has_focus() else P.GOLD
+	var points = PackedVector2Array([r.position+Vector2(10,0),Vector2(r.end.x,r.position.y),r.end-Vector2(10,0),Vector2(r.position.x,r.end.y)])
+	draw_colored_polygon(points,P.NAVY)
+	draw_polyline(points+PackedVector2Array([points[0]]),P.GOLD_DARK,5,true)
+	draw_polyline(points+PackedVector2Array([points[0]]),edge,1.5,true)
+	draw_line(points[0]+Vector2(3,2),points[3]+Vector2(3,-2),edge,3,true)
+	P.diamond(self,Vector2(r.end.x-12,r.position.y+10),3,edge)
+	P.text(self,"SCREEN NAME",Rect2(r.position+Vector2(16,1),Vector2(r.size.x-32,13)),11,P.GOLD,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 	var h = R.get_hero(selected_id); var col = Color(h.palette[0])
 	P.text(self,heading,geo.heading,P.fit_box(heading,geo.heading,25,P.SANS),P.PALE,P.SANS)
 	P.halo(self,geo.hero.get_center(),minf(geo.hero.size.x,geo.hero.size.y)*.8,Color(col,.3))

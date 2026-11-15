@@ -24,7 +24,7 @@ func leave() -> void: pass
 var character_id: String = "vesper_vale"
 var remote_character_id: String = "auric_rex"
 func character_payload() -> Dictionary:
-	return {"character_id":character_id if Roster.valid(character_id) else "vesper_vale"}
+	return {"character_id":Roster.canonical_id(character_id) if Roster.valid(character_id) else "vesper_vale"}
 func lobby_payload() -> Dictionary:
 	var payload = character_payload(); payload["name"] = player_name.left(24); return payload
 func receive_characters(characters: Dictionary) -> bool:
@@ -32,7 +32,7 @@ func receive_characters(characters: Dictionary) -> bool:
 		if str(key) not in ["1","2"] or not Roster.valid(str(characters[key])):
 			error.emit("Unknown character in room response"); return false
 	for key in characters:
-		var mark = int(key); var id = str(characters[key])
+		var mark = int(key); var id = Roster.canonical_id(str(characters[key]))
 		if mark != seat: remote_character_id = id
 		character_received.emit(mark,id)
 	return true

@@ -13,11 +13,12 @@ func run():
 			if tex == null or tex.get_width() <= 0:
 				push_error("Packed hero texture missing: "+hero.id+"/"+key); quit(1); return
 			count += 1
+	if count != 320: push_error("Expected 320 packed hero resources"); quit(1); return
 	var main = Main.instantiate(); main.settings.values.sound = false; root.add_child(main)
 	main.set_process(false); main.set_view_size(Vector2(390,844)); main.request_game("computer")
 	main._confirm_hero("ryan_blaze","Pack Check")
 	if main.cinematic.kind != "versus": push_error("Packed select/versus flow failed"); quit(1); return
-	main.cinematic.advance(2.81)
+	main.cinematic.advance(3.01)
 	main.game.status = 2; main._show_spotlight(); main.cinematic.advance(5.1)
 	if not main.controls.has_all(["again","menu"]) or main.cinematic.hero.art_key != "victory":
 		push_error("Packed winner flow failed"); quit(1); return

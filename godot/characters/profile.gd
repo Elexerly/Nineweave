@@ -17,11 +17,12 @@ func _init(file_path: String = "user://nineweave-profile.cfg"):
 	if not data.display_name is String: data.display_name = "You"
 	if not data.identity is Dictionary or data.identity.is_empty(): data.identity = {"kind":"local","id":"local-"+str(Time.get_unix_time_from_system()).sha256_text().left(16)}
 	if not Roster.valid(str(data.character_id)): data.character_id = "vesper_vale"
+	data.character_id = Roster.canonical_id(data.character_id)
 	data.display_name = str(data.display_name).strip_edges().left(24)
 	if data.display_name.is_empty(): data.display_name = "You"
 func choose(id: String, display_name: String):
 	if not Roster.valid(id): return false
-	data.character_id = id; data.display_name = display_name.strip_edges().left(24)
+	data.character_id = Roster.canonical_id(id); data.display_name = display_name.strip_edges().left(24)
 	if data.display_name.is_empty(): data.display_name = "You"
 	data.onboarded = true; save(); return true
 func save():

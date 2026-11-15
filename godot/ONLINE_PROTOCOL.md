@@ -83,6 +83,14 @@ adds `character_received(seat, character_id)`, `character_id` and
 produce an error rather than accepting arbitrary assets. Missing maps keep the
 legacy default for compatibility with a v1 endpoint.
 
+Round 4b pass 2 canonicalizes the five legacy IDs through `Roster.ALIASES`:
+`erik_comet` → `erick_comet`, `ak_shade` → `simon_shade`,
+`derrick_torque` → `devin_torque`, `nova_sable` → `aiden_vortex`, and
+`mateo_ricochet` → `ethan_ricochet`. Incoming legacy seat maps remain valid;
+outgoing lobby payloads and received character signals use canonical IDs.
+Backends should apply the same aliases before validating/freezing selections.
+`shard_jack` remains protocol-stable; its display name is Jack Sovereign.
+
 `LoopbackTransport` stores only the two starter IDs beside its authoritative rules
 state and exchanges them on joining. `HttpPollingTransport` sends the same lobby
 payload and consumes the same seat map. Moves/acknowledgements and rules snapshots

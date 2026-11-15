@@ -246,7 +246,14 @@ func _sync_fx():
 	if overlay == "result": _apply_result_anim()
 	if fx_overlay: fx_overlay.queue_redraw()
 func _apply_result_anim():
-	if cinematic.kind in ["spotlight","draw"]: return
+	if cinematic.kind in ["spotlight","draw"]:
+		var g = Cinematic.card_geometry(layout.size,cinematic.kind)
+		var progress = cinematic.buttons_progress()
+		for id in ["again","menu"]:
+			if controls.has(id) and is_instance_valid(controls[id]):
+				controls[id].position = g[id].position+Vector2(0,0 if cinematic.reduced_motion else (1-Cinematic.Motion.out_cubic(progress))*maxf(0,minf(24,layout.size.y-g[id].end.y-2)))
+				controls[id].modulate.a = progress
+		return
 	var e = Board.back_out(_result_t)
 	for id in _result_bases:
 		if controls.has(id) and is_instance_valid(controls[id]):
@@ -263,6 +270,7 @@ func open_character_select():
 	_rebuild()
 func _confirm_hero(id: String, display_name: String):
 	if not Roster.valid(id): return
+	id = Roster.canonical_id(id)
 	if _select_player == 2:
 		if id == str(profile.data.character_id): return
 		rival_character = id; _local_picked = true; _select_player = 0
@@ -718,7 +726,7 @@ func _refresh_history():
 	for i in range(game.history.size()):
 		var m = game.history[i]
 		# Named sides avoid the ambiguous "O 0" glyph pairing in Rajdhani.
-		lines.append("%d. %s → %s · %s" % [i+1,"Crystal X" if m.player == 1 else "Gold O",Rules.BOARD_NAMES[m.board],Rules.BOARD_NAMES[m.cell]])
+		lines.append("%d. %s > %s · %s" % [i+1,"Crystal X" if m.player == 1 else "Gold O",Rules.BOARD_NAMES[m.board],Rules.BOARD_NAMES[m.cell]])
 	history_label.text = "\n".join(lines) if not lines.is_empty() else "Your story begins here."
 func _online_controls(s: Vector2):
 	var short = (s.x > s.y and s.y < 500) or hinge_rect.size.x > 0
@@ -1272,18 +1280,20 @@ func debug_scenario(scenario: String, progress: float = .45):
 	if not OS.is_debug_build(): return
 	_debug_capture = true; clock = 4; backdrop.clock = 4; P.clock = 4
 	if scenario == "title": page = "title"; overlay = ""; board.clear_effects(); _rebuild(); return
-	if scenario in ["select_p1","select_p2"]:
+	if scenario in ["select_p1","select_p2","select_p3","select_p4"]:
 		request_game("local"); _hero_focus = "vesper_vale"
 		if scenario == "select_p2":
 			_confirm_hero("vesper_vale","PLAYER 1"); _hero_focus = "ryan_blaze"; _rebuild()
-		if is_instance_valid(hero_select): hero_select.set_page(1 if scenario == "select_p2" else 0)
+		if is_instance_valid(hero_select):
+			hero_select.set_page(int(scenario.right(1))-1)
+			if scenario in ["select_p3","select_p4"]: hero_select.focus_hero(Roster.DATA[(int(scenario.right(1))-1)*8].id)
 		return
 	if scenario == "versus":
-		profile.data.character_id = "vesper_vale"; profile.data.display_name = "Patrick"; settings.values.player_name = "Patrick"
-		rival_character = "auric_rex"; start_game("computer",1,true,true)
-		cinematic.age = 1.4; cinematic.frozen = true; cinematic.pose(); return
+		profile.data.character_id = OS.get_environment("NW_HERO") if OS.has_environment("NW_HERO") else "vesper_vale"; profile.data.display_name = "Patrick"; settings.values.player_name = "Patrick"
+		rival_character = OS.get_environment("NW_RIVAL") if OS.has_environment("NW_RIVAL") else "auric_rex"; start_game("computer",1,true,true)
+		cinematic.seek(1.4); _debug_capture = true; return
 	if scenario in ["winner","winner_cpu","draw"]:
-		profile.data.character_id = "vesper_vale"; settings.values.player_name = "Patrick"; rival_character = "auric_rex"
+		profile.data.character_id = OS.get_environment("NW_HERO") if OS.has_environment("NW_HERO") else "vesper_vale"; settings.values.player_name = "Patrick"; rival_character = OS.get_environment("NW_RIVAL") if OS.has_environment("NW_RIVAL") else "auric_rex"
 		if scenario == "draw":
 			var rows = ["XXXOO....","OOOXX....","XXXOO....","XXXOO....","OOOXX....","OOOXX....","OOOXX....","XXXOO....","XXXOO...."]
 			var staged_draw = Rules.new(); staged_draw.deserialize({"v":1,"cells":"".join(rows),"turn":1,"active":-1,"history":[]})
@@ -1297,7 +1307,7 @@ func debug_scenario(scenario: String, progress: float = .45):
 			var staged_winner = Rules.new(); staged_winner.deserialize({"v":1,"cells":"".join(patterns),"turn":result_mark,"active":2,"history":[]})
 			debug_load_position(staged_winner.serialize())
 			game.play(2,2)
-		_refresh_labels(); _show_spotlight(); cinematic.age = progress*5; cinematic.buttons_shown = cinematic.age >= 1.8
+		_refresh_labels(); _show_spotlight(); cinematic.age = progress*5; cinematic.buttons_shown = cinematic.age >= cinematic.buttons_at()
 		cinematic.frozen = true; cinematic.pose(); _result_shown = true
 		if cinematic.buttons_shown: overlay = "result"; _rebuild()
 		return
@@ -1356,7 +1366,7 @@ func debug_refresh():
 	_sync_fx(); board.refresh(); backdrop.refresh(); queue_redraw()
 	for rig in field_heroes.values(): rig.frozen = true; rig.clip_age = 1.4; rig.pose(1.4)
 	if is_instance_valid(hero_select): hero_select.hero.frozen = true; hero_select.hero.clip_age = .5; hero_select.hero.pose(1.4)
-	if cinematic.active:
+	if cinematic.visible:
 		for rig in [cinematic.hero,cinematic.loser]: rig.frozen = true; rig.clip_age = cinematic.age; rig.pose(1.4)
 		cinematic.pose()
 	callout.frozen = true
@@ -1370,6 +1380,7 @@ func _winner_controls(s: Vector2):
 		button.caption = item[1]; button.position = item[2].position; button.size = item[2].size; button.accent = item[4]
 		button.z_index = 31; button.pressed.connect(item[3]); button.pressed.connect(func(): sound.cue("ui"))
 		add_child(button); ui_nodes.append(button); controls[item[0]] = button
+	_apply_result_anim()
 	if mode == "online" and is_instance_valid(transport):
 		controls.again.disabled = transport.local_rematch
 		controls.again.caption = "ACCEPT" if transport.remote_rematch and not transport.local_rematch else "REMATCH"
@@ -1378,3 +1389,12 @@ func _winner_controls(s: Vector2):
 		label.position = Vector2(s.x*.04,g.again.position.y-38); label.size = Vector2(s.x*.92,32)
 		label.add_theme_font_override("font",P.SANS); label.add_theme_font_size_override("font_size",18)
 		add_child(label); ui_nodes.append(label)
+
+## Deterministic arbitrary-time capture, including seeking backwards across actions.
+func debug_seek_cinematic(seconds: float):
+	cinematic.seek(seconds); _debug_capture = true; thinking = false
+	board.frozen = cinematic.kind != "versus" or cinematic.active
+	var want = "result" if cinematic.buttons_shown else ""
+	if overlay != want: overlay = want; _rebuild()
+	_result_shown = cinematic.kind in ["spotlight","draw"]
+	debug_refresh()

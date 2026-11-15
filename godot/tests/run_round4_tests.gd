@@ -39,10 +39,10 @@ func run():
 func roster_assets():
 	var order = ["cryon","aurelia","vesper_vale","auric_rex","nyx_thread","cobalt_bastion","ember_quill","lumen_pike","shard_jack","madame_solstice","bramble_ox","kite_hollow","professor_gilt","siren_coil","ryan_blaze","tempest_vega"]
 	var ids = {}
-	ok(R.DATA.size() == 16,"16 heroes")
+	ok(R.DATA.size() == 32,"32 heroes")
 	for i in range(R.DATA.size()):
 		var hero = R.DATA[i]; ids[hero.id] = true
-		ok(hero.id == order[i],"approved display order "+hero.id)
+		if i < order.size(): ok(hero.id == order[i],"approved original display order "+hero.id)
 		for key in ["splash","versus","victory","head_neutral","head_smug","head_panic","head_doubletake","head_eyeroll","head_cheer","head_pout"]:
 			var tex = Art.get_texture(hero.id,key)
 			ok(tex is Texture2D and tex.get_width() > 0 and tex.get_height() > 0,"load "+hero.id+"/"+key)
@@ -51,7 +51,7 @@ func roster_assets():
 			ok(cfg.get_value("params","compress/mode") == 1 and cfg.get_value("params","compress/lossy_quality") == .85 and not cfg.get_value("params","mipmaps/generate"),"hero-only lossy settings "+hero.id+key)
 	for i in range(R.AUDIO_IDS.size()): ok(R.audio_index(R.AUDIO_IDS[i]) == i,"original audio motif retained "+R.AUDIO_IDS[i])
 	for id in ["cryon","aurelia","ryan_blaze","tempest_vega"]: ok(R.audio_index(id) in range(12),"new hero reuses existing audio "+id)
-	ok(ids.size() == 16 and R.get_hero("shard_jack").name == "Jack Riot","unique stable IDs and Jack rename")
+	ok(ids.size() == 32 and R.get_hero("shard_jack").name == "Jack Sovereign","unique stable IDs and Jack rename")
 	ok(not "she" in R.get_hero("kite_hollow").defeat and R.get_hero("siren_coil").body == "diver","updated concepts")
 	ok(R.valid(R.get_hero("bad-id").id) and Art.get_texture("bad-id","head_neutral") != null,"unknown renderer ID safe fallback")
 	var path = "user://r4-corrupt-profile.cfg"; var cfg = ConfigFile.new()
@@ -63,10 +63,10 @@ func selection(ui):
 	for entry in SIZES:
 		var s = Layout.logical_size(Vector2(entry[0],entry[1])); ui.set_view_size(s); ui.request_game("computer")
 		var select = ui.hero_select; var phone = Layout.mode_for(s) == "phone_portrait"
-		ok(select.geo.paged == phone and select.geo.per_page == (8 if phone else 16),"select mode "+str(s))
-		ok(visible_tiles(select).size() == (8 if phone else 16),"visible count "+str(s))
-		ok(select.paging_controls.size() == (4 if phone else 0),"arrows and dots only on phone "+str(s))
-		for p in range(2 if phone else 1):
+		ok((select.geo.paged and select.geo.per_page == 8 and select.geo.pages == 4) if phone else (select.geo.per_page in [16,32] and select.geo.pages == (2 if select.geo.paged else 1)),"select mode "+str(s))
+		ok(visible_tiles(select).size() == select.geo.per_page,"visible count "+str(s))
+		ok(select.paging_controls.size() == (2+select.geo.pages if select.geo.paged else 0),"arrows and page dots when paged "+str(s))
+		for p in range(select.geo.pages):
 			select.set_page(p)
 			for tile in visible_tiles(select):
 				ok(tile.size.x >= 44 and tile.size.y >= 44 and Rect2(Vector2.ZERO,s).encloses(tile.get_rect()),"tile touch and viewport %s %d" % [s,tile.index])
@@ -79,7 +79,7 @@ func selection(ui):
 			var release = InputEventScreenTouch.new(); release.pressed = false; release.position = Vector2(100,440); select._input(release)
 			ok(select.page == 1,"real touch swipe")
 			select.swipe(Vector2(100,0)); ok(select.page == 0,"right swipe")
-			select.change_page(-1); ok(select.page == 1,"page wraps consistently")
+			select.change_page(-1); ok(select.page == select.geo.pages-1,"page wraps consistently")
 		await frames(1)
 	ui.set_view_size(Vector2(390,844)); ui.request_game("local")
 	ok(ui.hero_select.heading.begins_with("PLAYER 1"),"P1 select header")
@@ -90,13 +90,13 @@ func selection(ui):
 	ui._confirm_hero("shard_jack","PLAYER 2"); ok(ui.page == "character_select","controller also rejects duplicate P2")
 	ui.hero_select.focus_hero("ryan_blaze"); ui.hero_select._confirm()
 	ok(ui.mode == "local" and ui.cinematic.kind == "versus" and ui.hero_for(1) == "shard_jack" and ui.hero_for(2) == "ryan_blaze","two picks enter versus")
-	ui.cinematic.advance(2.81)
+	ui.cinematic.advance(3.01)
 	var p1 = ui.hero_for(1); var p2 = ui.hero_for(2)
 	ui.game.status = 1; ui.overlay = "result"; ui._rebuild(); ui.controls.again.pressed.emit()
 	ok(ui.human_mark == 2 and ui.game.turn == 1 and ui.game.history.is_empty(),"one-tap pass-and-play rematch swaps X/O and X starts")
 	ok(ui.hero_for(1) == p2 and ui.hero_for(2) == p1 and ui.side_name(1) == "PLAYER 2","heroes and names stay with players")
 	ok(ui.cinematic.active and ui.cinematic.kind == "versus","rematch plays versus again")
-	ui.cinematic.advance(2.81); ok(ui.play_cell(4,4) and ui.game.cells[40] == 1,"new X moves first")
+	ui.cinematic.advance(3.01); ok(ui.play_cell(4,4) and ui.game.cells[40] == 1,"new X moves first")
 	ui.request_online(); ok(ui.page == "online" and ui.hero_select == null,"online bypasses select")
 func versus_flow(ui):
 	for s in [Vector2(390,844),Vector2(867,553),Vector2(1366,1024)]:
@@ -108,8 +108,8 @@ func versus_flow(ui):
 		ok(not ui.play_cell(4,4) and not ui.cinematic.skip(),"early skip and board input guarded")
 		ui.cinematic.advance(.59); ok(not ui.cinematic.skip(),"skip unavailable before 600ms")
 		ui.cinematic.advance(.02); ok(ui.cinematic.skip() and not ui.board.frozen,"versus skip starts match")
-		ui.rematch(); ui.cinematic.advance(2.79); ok(ui.cinematic.active and ui.game.history.is_empty(),"holds until 2.8 seconds")
-		ui.cinematic.advance(.02); ok(not ui.cinematic.active and not ui.board.frozen,"automatic start at 2.8 seconds")
+		ui.rematch(); ui.cinematic.advance(2.99); ok(ui.cinematic.active and ui.game.history.is_empty(),"holds until 3 seconds")
+		ui.cinematic.advance(.02); ok(not ui.cinematic.active and not ui.board.frozen,"automatic start at 3 seconds")
 	ui.thinking = false; ui.go_home()
 func winner_flow(ui):
 	ui.set_view_size(Vector2(390,844)); ui.profile.data.character_id = "shard_jack"; ui.rival_character = "ryan_blaze"
@@ -125,7 +125,7 @@ func winner_flow(ui):
 		ui.controls.menu.pressed.emit(); ok(ui.page == "title" and not ui.cinematic.visible,"main menu button works")
 	ui.debug_scenario("winner",.25); ui.cinematic.frozen = false
 	ok(not ui.controls.has("again"),"buttons hidden during entrance")
-	ui.cinematic.advance(.56); ok(ui.cinematic.buttons_shown and ui.controls.has("again"),"buttons appear at 1.8s")
+	ui.cinematic.advance(1.76); ok(ui.cinematic.buttons_shown and ui.controls.has("again"),"buttons appear at 3s")
 	ui.cinematic.advance(4); ok(not ui.cinematic.active and ui.cinematic.visible,"5s beat settles into persistent result")
 	ui.set_view_size(Vector2(867,553))
 	ok(ui.cinematic.hero_rect == Cinema.card_geometry(Vector2(867,553),"spotlight").hero and ui.cinematic.arrangement == "horizontal","settled winner relayouts on rotation")
@@ -211,7 +211,7 @@ func online_flow(ui):
 	ok(seats.size() == 2,"first assignment random across fixed seeds")
 	Loopback.assignment_rng.seed = 18; ui.request_online(); ui.create_online(true); ui.invite_demo_rival(); await frames(1)
 	ok(ui.mode == "online" and ui.cinematic.kind == "versus","online enters versus with profile hero")
-	ui.cinematic.advance(2.81); ui.thinking = false
+	ui.cinematic.advance(3.01); ui.thinking = false
 	var old_mark = ui.human_mark; var room = Loopback.rooms[ui.room_code]
 	room.game = F.big_tactic(1); room.game.play(2,2); ui.game.deserialize(room.game.serialize()); ui._show_spotlight(); ui.cinematic.advance(5.1)
 	ui.controls.again.pressed.emit()
@@ -219,7 +219,7 @@ func online_flow(ui):
 	ui.demo_rival.request_rematch()
 	ok(ui.human_mark == 3-old_mark and ui.game.turn == 1 and ui.cinematic.kind == "versus","transport agreement reaches main controller")
 	# Opponent-first request must expose ACCEPT on the actual winner screen.
-	ui.cinematic.advance(2.81); ui.thinking = false
+	ui.cinematic.advance(3.01); ui.thinking = false
 	room = Loopback.rooms[ui.room_code]; room.game = F.big_tactic(1); room.game.play(2,2)
 	ui.game.deserialize(room.game.serialize()); ui._show_spotlight(); ui.cinematic.advance(5.1)
 	ui.demo_rival.request_rematch()

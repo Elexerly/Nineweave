@@ -96,7 +96,7 @@ func run():
 	for key in ["id","name","pop","victory","mark","action"]:
 		unique.clear()
 		for h in Roster.DATA: unique[h[key]] = true
-		ok(unique.size() == 16,"16 unique "+key)
+		ok(unique.size() == 32,"32 unique "+key)
 	var theme_path = "user://r3-themes.cfg"; DirAccess.remove_absolute(theme_path)
 	var themed = Store.new(theme_path)
 	ok(themed.values.background_theme == Themes.DEFAULT_BACKGROUND and themed.values.board_theme == Themes.DEFAULT_BOARD,"crystal defaults")
@@ -140,7 +140,7 @@ func run():
 	root.add_child(ui); ui.set_view_size(Vector2(390,844))
 	ok(ui.controls.has("hero"),"Hero reachable from title")
 	ui.request_game("local")
-	ok(ui.page == "character_select" and ui.hero_select.portraits.size() == 16,"first match gates through illustrated 16-hero selection")
+	ok(ui.page == "character_select" and ui.hero_select.portraits.size() == 32,"first match gates through illustrated 32-hero selection")
 	ui.hero_select.focus_hero("cobalt_bastion")
 	ok(ui.hero_select.hero.hero_id == "cobalt_bastion" and ui.hero_select.hero.clip == "hover_react","focus reacts with selected hero")
 	ui.hero_select.field.text = "Ada"; ui.hero_select._confirm()

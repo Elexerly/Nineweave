@@ -110,9 +110,17 @@ func _draw():
 	P.outline(self,r.grow(-3),Color(P.GOLD,.3),1)
 	var plaque: Rect2 = geo.plaque
 	P.panel(self,plaque,false,1,true)
-	P.text(self,h.name.to_upper(),Rect2(plaque.position+Vector2(9,1),Vector2(plaque.size.x-52,plaque.size.y*.48)),25,P.PALE,P.SERIF)
-	P.text(self,h.pop,Rect2(plaque.position+Vector2(8,plaque.size.y*.48),Vector2(plaque.size.x-16,plaque.size.y*.4)),18,P.WHITE)
+	var lanes = plaque_lanes(plaque)
+	P.text(self,h.name.to_upper(),lanes.name,P.fit_box(h.name.to_upper(),lanes.name,25,P.SERIF),P.PALE,P.SERIF)
+	P.text(self,h.pop,lanes.line,P.fit_box(h.pop,lanes.line,18),P.WHITE)
 	draw_mark_preview(self,Vector2(plaque.end.x-27,plaque.position.y+plaque.size.y*.27),15,R.index_of(selected_id))
+## Round 3c: text lanes inside the plaque's gold frame (the name used to rise into the
+## top border). The mark preview keeps the right 52 px of the name lane.
+static func plaque_lanes(plaque: Rect2) -> Dictionary:
+	var t = clampf(minf(plaque.size.x,plaque.size.y)*.07,2.6,5.0)+2
+	var split = plaque.size.y*.54
+	return {"frame":t,"name":Rect2(plaque.position.x+9,plaque.position.y+t,plaque.size.x-52,split-t),
+		"line":Rect2(plaque.position.x+8,plaque.position.y+split,plaque.size.x-16,plaque.size.y-split-t)}
 static func draw_mark_preview(node: CanvasItem, center: Vector2, radius: float, index: int):
 	var col = Color(R.DATA[index].palette[0]); var trim = Color(R.DATA[index].palette[2])
 	if index%2 == 0:

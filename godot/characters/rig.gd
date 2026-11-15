@@ -105,6 +105,10 @@ var clip_age: float = 0
 var reduced_motion: bool = false
 var frozen: bool = false
 var bust: bool = false
+## Bust framing in rig units (view size, vertical offset). Round 3c: insets can widen
+## the view or add headroom without touching the art.
+var bust_view: Vector2 = Vector2(150,170)
+var bust_lift: float = -25.0
 var facing: float = 1
 var side: int = 1
 var bones: Dictionary = {}
@@ -390,8 +394,8 @@ func _build():
 	_built = true; _fit(); pose(0)
 func _fit():
 	if not actor: return
-	var s = minf(size.x/(150 if bust else 310),size.y/(170 if bust else 520))
-	actor.position = Vector2(size.x*.5,(-25 if bust else 13)*s)
+	var s = minf(size.x/(bust_view.x if bust else 310.0),size.y/(bust_view.y if bust else 520.0))
+	actor.position = Vector2(size.x*.5,(bust_lift if bust else 13.0)*s)
 	actor.scale = Vector2(s*facing,s)
 func set_clip(value: String):
 	if value == clip or not value in CLIPS: return

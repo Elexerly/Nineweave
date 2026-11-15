@@ -37,13 +37,33 @@ func _draw():
 		_icon(kind,Vector2(r.get_center().x,r.position.y+r.size.y*.36),s,color)
 		P.text(self,label,Rect2(r.position.x,r.position.y+r.size.y*.6,r.size.x,r.size.y*.34),font_size,color,P.SANS)
 	else:
-		var s = minf(r.size.y*.26,12)
-		var tw = P.text_width(label,P.fit_size(label,r.size.x-s*3,font_size))
-		var left = r.get_center().x-(tw+s*2.6)*.5
-		_icon(kind,Vector2(left+s,r.get_center().y),s,color)
-		P.text(self,label,Rect2(left+s*2.6,r.position.y,tw+6,r.size.y),font_size,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+		# Round 3c: icon + caption fitted inside the frame; narrow phone buttons stack.
+		var g = caption_layout(size,label,font_size)
+		_icon(kind,g.icon_center,g.icon_size,color)
+		P.text(self,label,g.text_rect,g.fs,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT if not g.stacked else HORIZONTAL_ALIGNMENT_CENTER)
 	if has_focus(): P.outline(self,r.grow(-7),P.BLUE,.8)
 func _icon(kind: String, center: Vector2, s: float, color: Color):
 	if kind == "x": P.mark(self,center,s*1.1,1)
 	elif kind == "o": P.mark(self,center,s*1.1,2)
 	else: P.icon(self,kind,center,s,color)
+## Round 3c: geometry for an icon + caption button shorter than 62 px. `ink` is the
+## caption's drawn extent; it always stays inside `inner` (inside the gold frame).
+static func caption_layout(button_size: Vector2, label: String, font_size: int) -> Dictionary:
+	var r = Rect2(Vector2(2,2),button_size-Vector2(4,4))
+	var t = clampf(minf(r.size.x,r.size.y)*.07,2.6,5.0)
+	var inner = r.grow(-(t+3))
+	var s = minf(r.size.y*.26,12)
+	var fs = font_size
+	while fs > 9 and P.text_width(label,fs)+s*2.6+2 > inner.size.x: fs -= 1
+	if fs >= mini(font_size,15) or r.size.y < 44:
+		var tw = P.text_width(label,fs)
+		var left = r.get_center().x-(tw+s*2.6)*.5
+		return {"stacked":false,"fs":fs,"icon_center":Vector2(left+s,r.get_center().y),"icon_size":s,
+			"text_rect":Rect2(left+s*2.6-3,r.position.y,tw+6,r.size.y),"ink":Rect2(left+s*2.6,r.get_center().y-fs*.5,tw,fs),"inner":inner}
+	var si = minf(inner.size.y*.2,10)
+	var tr = Rect2(inner.position.x,inner.position.y+inner.size.y*.5,inner.size.x,inner.size.y*.5)
+	var sfs = P.fit_box(label,tr,font_size)
+	while sfs > 9 and P.text_width(label,sfs)+2 > inner.size.x: sfs -= 1
+	var w = P.text_width(label,sfs)
+	return {"stacked":true,"fs":sfs,"icon_center":Vector2(inner.get_center().x,inner.position.y+inner.size.y*.26),"icon_size":si,
+		"text_rect":tr,"ink":Rect2(tr.get_center().x-w*.5,tr.position.y,w,tr.size.y),"inner":inner}

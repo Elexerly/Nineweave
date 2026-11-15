@@ -292,13 +292,17 @@ func hero_for(mark: int) -> String:
 func _show_spotlight():
 	cinematic.show_scene("spotlight",hero_for(game.status),hero_for(3-game.status),game.status,layout)
 	sound.stinger(Roster.index_of(hero_for(game.status)),"full",-.35 if game.status == human_mark else .35)
-func start_game(new_mode: String = "computer", mark: int = 1):
+## `rematch` (Play Again) keeps the same rival hero; a new game from the menu/setup
+## re-rolls. Round 3c product default, reversible: pass rematch=false to always re-roll.
+func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false):
 	_leave_online()
 	cinematic.clear(); callout.callout = ""; _spotlight_done = false
-	var available: Array = []
-	for h in Roster.DATA:
-		if h.id != profile.data.character_id: available.append(h.id)
-	rival_character = str(available[randi()%available.size()])
+	var keep = rematch and Roster.valid(rival_character) and rival_character != str(profile.data.character_id)
+	if not keep:
+		var available: Array = []
+		for h in Roster.DATA:
+			if h.id != profile.data.character_id: available.append(h.id)
+		rival_character = str(available[randi()%available.size()])
 	sound.prepare_character(Roster.index_of(profile.data.character_id)); sound.prepare_character(Roster.index_of(rival_character))
 	mode = new_mode; human_mark = mark; page = "game"; overlay = ""; _debug_capture = false
 	game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
@@ -741,7 +745,7 @@ func _overlay_controls(s: Vector2):
 	elif overlay == "result":
 		_button("again","Play Again",Rect2(r.position.x+26,r.end.y-122,pw-52,50),func():
 			if mode == "online": open_online()
-			else: start_game(mode,human_mark),true)
+			else: start_game(mode,human_mark,true),true)
 		_button("menu","Menu",Rect2(r.position.x+26,r.end.y-62,pw-52,44),go_home,false,"home")
 		for id in ["again","menu"]: _result_bases[id] = controls[id].position
 		_apply_result_anim()
@@ -901,26 +905,49 @@ func _draw_player(r: Rect2, mark: int, caption: String, active: bool, style: Str
 		P.mark(self,Vector2(r.get_center().x,name_y+30*u+ir+4),ir,mark)
 		P.text(self,"%d claimed" % game.owners.count(mark),Rect2(r.position.x+6,name_y+30*u+ir*2+10,r.size.x-12,24*u),int(17*u),col if mark == 1 else P.PALE)
 		return
-	var radius = minf(r.size.y*.5,r.size.x*.24)
 	var right = style == "right"
-	var center = Vector2(r.end.x-radius*.82 if right else r.position.x+radius*.82,r.get_center().y)
-	var body = r.grow_individual(-radius*.6 if not right else 0,0,-radius*.6 if right else 0,0)
-	P.panel(self,body,active,1,r.size.y >= 40)
-	var text_r = Rect2(body.position.x+(8 if right else radius*1.2),r.position.y+3,body.size.x-radius*1.2-8,r.size.y-6)
+	var g = scorecard_geometry(r,right)
+	var radius: float = g.radius; var center: Vector2 = g.center
+	P.panel(self,g.body,active,1,r.size.y >= 40)
 	var shown = "Thinking"+".".repeat(1+int(clock*3)%3) if rival_thinking else caption
-	var align = HORIZONTAL_ALIGNMENT_CENTER
-	P.text(self,shown,Rect2(text_r.position,Vector2(text_r.size.x,text_r.size.y*.52)),17 if r.size.y < 70 else 20,P.WHITE,P.SANS,align)
-	var ir = clampf(r.size.y*.13,6,10)
-	var line = "%d claimed" % game.owners.count(mark)
-	var lfs = 14 if r.size.y < 70 else 16
-	var lw = P.text_width(line,lfs)
-	var lx = text_r.get_center().x-(lw+ir*2.6)*.5
-	var ly = text_r.position.y+text_r.size.y*.74
-	P.mark(self,Vector2(lx+ir,ly),ir,mark)
-	P.text(self,line,Rect2(lx+ir*2.6,ly-10,lw+6,20),lfs,col if mark == 1 else P.PALE,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+	var name_r: Rect2 = g.name
+	P.text(self,fit_label(shown,name_r.size.x,17 if r.size.y < 70 else 20),name_r,17 if r.size.y < 70 else 20,P.WHITE,P.SANS,HORIZONTAL_ALIGNMENT_CENTER)
+	var c = claimed_line(game.owners.count(mark),g.line.size.x,r.size.y)
+	var ly = g.line.get_center().y
+	var lx = g.line.get_center().x-c.width*.5
+	if c.icon > 0: P.mark(self,Vector2(lx+c.icon,ly),c.icon,mark)
+	P.text(self,c.text,Rect2(lx+c.icon*2.6,ly-10,c.width-c.icon*2.6+6,20),c.fs,col if mark == 1 else P.PALE,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 	_medallion(center,radius,mark,portrait,active,rival_thinking)
 	# Crown rides above the name, clear of the corner header buttons.
-	if active: P.crown(self,Vector2(text_r.get_center().x,r.position.y+1),.5)
+	if active: P.crown(self,Vector2(g.text.get_center().x,r.position.y+1),.5)
+## Round 3c: horizontal scorecard geometry. The name and "claimed" lanes end before the
+## medallion's outer ring (radius + ring stroke + gap), so text never runs under it.
+static func scorecard_geometry(r: Rect2, right: bool) -> Dictionary:
+	var radius = minf(r.size.y*.5,r.size.x*.24)
+	var center = Vector2(r.end.x-radius*.82 if right else r.position.x+radius*.82,r.get_center().y)
+	var body = r.grow_individual(-radius*.6 if not right else 0,0,-radius*.6 if right else 0,0)
+	var ring = radius+maxf(2.5,radius*.13)*.5+1.25+3
+	var x0 = body.position.x+8 if right else center.x+ring
+	var x1 = center.x-ring if right else body.end.x-8
+	var text_r = Rect2(x0,r.position.y+3,x1-x0,r.size.y-6)
+	return {"radius":radius,"center":center,"body":body,"ring":ring,"text":text_r,
+		"name":Rect2(text_r.position,Vector2(text_r.size.x,text_r.size.y*.52)),
+		"line":Rect2(text_r.position.x,text_r.position.y+text_r.size.y*.74-10,text_r.size.x,20)}
+## Name shrinks to fit (down to 10 px), then truncates with an ellipsis.
+static func fit_label(value: String, width: float, font_size: int) -> String:
+	if P.text_width(value,10)+4 <= width or value.length() <= 1: return value
+	var cut = value
+	while cut.length() > 1 and P.text_width(cut+"…",10)+4 > width: cut = cut.substr(0,cut.length()-1)
+	return cut.strip_edges()+"…"
+## "N claimed" with its mark: shrink, then drop the mark, then drop the word.
+static func claimed_line(count: int, width: float, card_h: float) -> Dictionary:
+	var ir = clampf(card_h*.13,6,10)
+	var lfs = 14 if card_h < 70 else 16
+	for option in [["%d claimed" % count,ir],["%d claimed" % count,0.0],[str(count),ir]]:
+		for fs in range(lfs,10,-1):
+			var w = P.text_width(option[0],fs)+option[1]*2.6
+			if w+4 <= width: return {"text":option[0],"icon":option[1],"fs":fs,"width":w}
+	return {"text":str(count),"icon":0.0,"fs":11,"width":P.text_width(str(count),11)}
 func _draw_info(r: Rect2, large: bool, u: float):
 	P.panel(self,r,false,1,true)
 	var lines = info_lines()

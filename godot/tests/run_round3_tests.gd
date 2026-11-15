@@ -85,7 +85,7 @@ func run():
 		[position([1,0,0,0,0,0,0,0,0]),position([1,0,0,0,1,0,0,0,0]),"double_lock"],
 		[position([1,0,0,0,1,0,0,0,0]),position([1,0,0,1,1,0,0,0,0]),"triple_weave"],
 		[position([1,0,0,0,0,0,0,0,0]),position([1,1,0,0,0,0,0,0,0]),"match_point"],
-		[position([2,0,0,0,2,0,0,0,0]),position([2,0,1,0,2,0,0,0,0]),"turnaround"],
+		[position([2,0,0,0,0,0,0,0,0]),position([2,0,1,0,0,0,0,0,0]),"turnaround"],
 		[position([2,2,0,0,0,0,0,0,0]),position([2,2,1,0,0,0,0,0,0]),"shutout"],
 		[position([1,1,0,2,0,0,0,0,0]),position([1,1,1,2,0,0,0,0,0],2,1),"nineweave"],
 		[position([1,1,0,0,0,0,0,0,0]),position([1,1,1,0,0,0,0,0,0],2,1),"clean_sweep"],
@@ -181,7 +181,8 @@ func run():
 			var pad = b.size.x*.022; var gap = b.size.x*.018; var edge = (b.size.x-pad*2-gap*2)/3
 			var tile = Rect2(b.position+Vector2(pad+claimed%3*(edge+gap),pad+(claimed/3)*(edge+gap)),Vector2.ONE*edge)
 			ok(not pop.grow(5).intersects(tile),"pop leaves claimed board visible "+str(view)+" "+str(claimed))
-			ok(pop.size.x <= b.size.x*.45 and Rect2(Vector2.ZERO,view).encloses(pop),"compact pop inside view")
+			# Round 3c: the pop never sits on the board, so the old on-board width cap is gone.
+			ok(Rect2(Vector2.ZERO,view).encloses(pop) and not pop.intersects(b),"pop inside view, off the board")
 	ui.start_game("computer",1); ui._debug_capture = true; ui.thinking = false
 	ui._apply_move(0,4); ok(ui.board.last_move.x < 0,"own move does not highlight")
 	ui._apply_move(4,0)

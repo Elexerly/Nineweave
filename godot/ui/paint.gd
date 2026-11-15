@@ -161,7 +161,16 @@ static func panel(node: CanvasItem, r: Rect2, active: bool = false, alpha: float
 		for c in [[r.position,Vector2(1,1)],[Vector2(r.end.x,r.position.y),Vector2(-1,1)],[r.end,Vector2(-1,-1)],[Vector2(r.position.x,r.end.y),Vector2(1,-1)]]:
 			corner_ornament(node,c[0]+c[1]*1.5,c[1],s,BLUE if active else PALE,alpha)
 static func diamond(node: CanvasItem, center: Vector2, radius: float, color: Color):
+	# Round 3c: a sub-pixel diamond is a degenerate polygon (engine triangulation ERROR).
+	if not radius >= DIAMOND_MIN or color.a <= .003: return
 	node.draw_colored_polygon(PackedVector2Array([center+Vector2(0,-radius),center+Vector2(radius*.7,0),center+Vector2(0,radius),center+Vector2(-radius*.7,0)]),color)
+## Below this radius (px) a diamond is not drawn: it would be invisible and degenerate.
+const DIAMOND_MIN = .5
+## Largest size <= font_size whose single line fits the rect's width and height.
+static func fit_box(value: String, r: Rect2, font_size: int, font: Font = SANS) -> int:
+	var fs = fit_size(value,r.size.x,font_size,font)
+	while fs > 9 and font.get_height(fs) > r.size.y+2: fs -= 1
+	return fs
 static func fit_size(value: String, width: float, font_size: int, font: Font = SANS) -> int:
 	var fs = font_size
 	while font.get_string_size(value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs).x > width-4 and fs > 9: fs -= 1

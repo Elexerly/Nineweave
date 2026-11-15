@@ -21,6 +21,7 @@ func _draw():
 	var enter = 1-pow(1-clampf(t/.16,0,1),3)
 	var alpha = 1-smoothstep(.72,1.0,t)
 	var r = region; var center = r.get_center()
+	if r.size.x < 8 or r.size.y < 8: return
 	var sc = 1.0 if reduced_motion else lerpf(.72,1.0,enter)+sin(enter*PI)*.1
 	var shake = Vector2.ZERO if reduced_motion else Vector2(sin(t*83),cos(t*69))*maxf(0,1-t*5)*2
 	draw_set_transform(center+shake,-.035 if not reduced_motion else 0.0,Vector2.ONE*sc)
@@ -35,5 +36,7 @@ func _draw():
 		for i in range(rank*2):
 			var a = i*2.39996; var d = Vector2.from_angle(a)
 			var pos = d*Vector2(r.size.x*.5,r.size.y*.7)*(1+t*.6)
-			P.diamond(self,pos,(1-t)*3,Color(P.GOLD,alpha))
+			# Sparks shrink to nothing at the end; skip them before they degenerate.
+			var spark = (1-t)*3
+			if spark >= P.DIAMOND_MIN: P.diamond(self,pos,spark,Color(P.GOLD,alpha))
 	draw_set_transform(Vector2.ZERO,0,Vector2.ONE)

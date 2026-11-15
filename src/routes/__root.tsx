@@ -3,7 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "Hello World";
+const APP_NAME = "Nineweave";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -13,7 +13,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       {
         name: "description",
-        content: "A simple Hello World site, ready to grow.",
+        content: "Nineweave — the Ultimate Tic Tac Toe game.",
       },
       { name: "theme-color", content: "#f4efe6" },
     ],

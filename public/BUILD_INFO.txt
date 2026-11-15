@@ -1,0 +1,10 @@
+Nineweave Round 4c (online)
+engine: 4.7.2.stable.official.ed1daf0bf
+preset: Web / Compatibility / variant/thread_support=false
+mode: --export-release
+built: 2026-11-15T20:13:05Z
+source SHA: unqueried
+branch: unqueried
+tree: Owner requested no git commands
+staging: /tmp/nineweave-export.D6JGmp/project
+notices: THIRD_PARTY_NOTICES.md and LICENSES/*OFL.txt

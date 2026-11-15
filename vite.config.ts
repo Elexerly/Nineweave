@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -61,6 +61,48 @@ function pgliteBootstrapPlugin(): Plugin {
  * and returns the 302 / completion HTML. Deployed apps do not use the popup
  * (full-page OAuth redirect), so `apply: "serve"` is enough.
  */
+/**
+ * Dev-server only: serve the Godot shell at `/` before TanStack Start's SPA
+ * HTML fallback, so local preview matches production. Production uses the
+ * `/` route handler in src/routes/index.tsx plus public/ static assets.
+ */
+function gameShellPlugin(): Plugin {
+  return {
+    name: "nineweave-game-shell",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const rawUrl = req.url ?? "";
+        const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+        if ((req.method ?? "GET").toUpperCase() !== "GET") {
+          next();
+          return;
+        }
+        // Let the PWA install tutorial keep /?install=1.
+        if (rawUrl.includes("install=")) {
+          next();
+          return;
+        }
+        if (pathOnly !== "/" && pathOnly !== "/index.html") {
+          next();
+          return;
+        }
+        const file = join(server.config.root, "public/index.html");
+        try {
+          const html = readFileSync(file);
+          res.statusCode = 200;
+          res.setHeader("content-type", "text/html; charset=utf-8");
+          res.setHeader("cache-control", "no-cache");
+          res.end(html);
+        } catch (err) {
+          console.error("[nineweave] game shell missing at public/index.html:", err);
+          next();
+        }
+      });
+    },
+  };
+}
+
 function authPopupPlugin(): Plugin {
   return {
     name: "app-builder:auth-popup",
@@ -159,6 +201,8 @@ export default defineConfig(({ command, isPreview }) => ({
   resolve: { tsconfigPaths: true },
   plugins: [
     pgliteBootstrapPlugin(),
+    // Before tanstackStart so `/` is the Godot shell, not the SPA fallback.
+    gameShellPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
     // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.

@@ -50,3 +50,15 @@ and writes it. For local work that must not touch Neon, prefix the command:
 `env -u NINEWEAVE_DATABASE_URL -u DATABASE_URL npm run build`.
 `npm test` never touches a database URL, because tests use their own
 in-process PGlite.
+
+## Game at the site root
+
+`/` serves the Godot web export (`public/index.html` plus `index.js`,
+`index.wasm`, `index.pck`, worklets and icons). `/api/nineweave`, `/terms`
+and `/privacy` are unchanged app routes.
+
+The wasm (~38 MB) and pck (~16 MB) are under GitHub's 100 MB file limit and
+the 50 MB warning, and are served as Vercel CDN static files (not bundled
+into the serverless function). `vercel.json` sets `application/wasm` and
+`application/octet-stream` for those two files. Filenames are unhashed, so
+they are not cached as immutable.

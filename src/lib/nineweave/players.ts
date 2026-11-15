@@ -12,6 +12,11 @@ import { hashToken, newId, newToken } from "./security.ts";
 import { ApiError, type Service } from "./service.ts";
 import { pgCode } from "./store.ts";
 
+export const TOS_VERSION = "2026-11-15";
+export const PRIVACY_VERSION = "2026-11-15";
+const VERSION_MAX = 32;
+const VERSION_RE = /^[A-Za-z0-9._-]{1,32}$/;
+
 export interface PlayerRow {
   id: string;
   screen_name: string | null;
@@ -23,10 +28,14 @@ export interface PlayerRow {
   matches_played: number;
   boards_won: number;
   created_at: Date;
+  tos_version: string | null;
+  privacy_version: string | null;
+  accepted_at: Date | null;
+  age_confirmed: boolean | null;
 }
 
 const PLAYER_COLUMNS =
-  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, created_at";
+  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, created_at, tos_version, privacy_version, accepted_at, age_confirmed";
 
 /** Players eligible for the public leaderboard. */
 const LEADERBOARD_WHERE = "screen_name is not null and matches_played > 0";
@@ -70,6 +79,10 @@ export async function profile(svc: Service, p: PlayerRow) {
     matches_played: p.matches_played,
     matches_lost: p.matches_lost,
     boards_won: p.boards_won,
+    tos_version: p.tos_version,
+    privacy_version: p.privacy_version,
+    accepted_at: p.accepted_at ? new Date(p.accepted_at).toISOString() : null,
+    age_confirmed: p.age_confirmed,
     rank: await rankOf(svc, p.matches_won),
   };
 }
@@ -80,15 +93,33 @@ function screenNameTaken(err: unknown): boolean {
 
 /** POST /auth/device — create a player, returning the raw token exactly once. */
 export async function registerDevice(svc: Service, body: Record<string, unknown>) {
-  const fields = validateProfileFields(body, ["screen_name", "last_hero_id"]);
+  const fields = validateProfileFields(body, [
+    "screen_name",
+    "last_hero_id",
+    "tos_version",
+    "privacy_version",
+    "accepted_at",
+    "age_confirmed",
+  ]);
   const token = newToken("nwd");
   const id = newId("p");
   const now = svc.now();
+  const acceptedAt = fields.accepted_at ?? (fields.tos_version ? now : null);
   try {
     await svc.db.query(
-      `insert into nw_players (id, token_hash, screen_name, last_hero_id, created_at, updated_at, last_seen_at)
-       values ($1, $2, $3, $4, $5, $5, $5)`,
-      [id, hashToken(token), fields.screen_name ?? null, fields.last_hero_id ?? null, now],
+      `insert into nw_players (id, token_hash, screen_name, last_hero_id, tos_version, privacy_version, accepted_at, age_confirmed, created_at, updated_at, last_seen_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $9)`,
+      [
+        id,
+        hashToken(token),
+        fields.screen_name ?? null,
+        fields.last_hero_id ?? null,
+        fields.tos_version ?? null,
+        fields.privacy_version ?? null,
+        acceptedAt,
+        fields.age_confirmed ?? null,
+        now,
+      ],
     );
   } catch (err) {
     if (screenNameTaken(err)) throw new ApiError(409, "That screen name is taken");
@@ -124,6 +155,10 @@ interface ProfileFields {
   last_hero_id?: string;
   purchases?: string[];
   unlocks?: string[];
+  tos_version?: string;
+  privacy_version?: string;
+  accepted_at?: Date;
+  age_confirmed?: boolean;
 }
 
 function validateProfileFields(
@@ -147,7 +182,35 @@ function validateProfileFields(
   }
   if (body.purchases !== undefined) out.purchases = validateStringList(body.purchases, "purchases");
   if (body.unlocks !== undefined) out.unlocks = validateStringList(body.unlocks, "unlocks");
+  if (body.tos_version !== undefined && body.tos_version !== null)
+    out.tos_version = validateVersion(body.tos_version, "tos_version");
+  if (body.privacy_version !== undefined && body.privacy_version !== null)
+    out.privacy_version = validateVersion(body.privacy_version, "privacy_version");
+  if (body.accepted_at !== undefined && body.accepted_at !== null)
+    out.accepted_at = validateAcceptedAt(body.accepted_at);
+  if (body.age_confirmed !== undefined && body.age_confirmed !== null) {
+    if (typeof body.age_confirmed !== "boolean")
+      throw new ApiError(400, "age_confirmed must be a boolean");
+    out.age_confirmed = body.age_confirmed;
+  }
   return out;
+}
+
+function validateVersion(value: unknown, field: string): string {
+  if (typeof value !== "string") throw new ApiError(400, `${field} must be a string`);
+  const v = value.trim();
+  if (!v || v.length > VERSION_MAX || !VERSION_RE.test(v))
+    throw new ApiError(400, `${field} must be 1–${VERSION_MAX} letters, digits, dots, underscores or dashes`);
+  return v;
+}
+
+function validateAcceptedAt(value: unknown): Date {
+  const date = value instanceof Date ? value : typeof value === "string" ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime()))
+    throw new ApiError(400, "accepted_at must be an ISO-8601 timestamp");
+  if (date.getTime() - Date.now() > 24 * 60 * 60 * 1000)
+    throw new ApiError(400, "accepted_at cannot be in the future");
+  return date;
 }
 
 /**
@@ -161,6 +224,10 @@ export async function updateMe(svc: Service, player: PlayerRow, body: Record<str
     "last_hero_id",
     "purchases",
     "unlocks",
+    "tos_version",
+    "privacy_version",
+    "accepted_at",
+    "age_confirmed",
   ]);
   const sets: string[] = [];
   const params: unknown[] = [player.id];
@@ -172,6 +239,15 @@ export async function updateMe(svc: Service, player: PlayerRow, body: Record<str
   if (fields.last_hero_id !== undefined) add("last_hero_id", fields.last_hero_id);
   if (fields.purchases !== undefined) add("purchases", JSON.stringify(fields.purchases), "::jsonb");
   if (fields.unlocks !== undefined) add("unlocks", JSON.stringify(fields.unlocks), "::jsonb");
+  if (fields.tos_version !== undefined) add("tos_version", fields.tos_version);
+  if (fields.privacy_version !== undefined) add("privacy_version", fields.privacy_version);
+  const acceptedAt =
+    fields.accepted_at ??
+    (fields.tos_version !== undefined || fields.privacy_version !== undefined || fields.age_confirmed !== undefined
+      ? svc.now()
+      : undefined);
+  if (acceptedAt !== undefined) add("accepted_at", acceptedAt);
+  if (fields.age_confirmed !== undefined) add("age_confirmed", fields.age_confirmed);
   add("updated_at", svc.now());
   try {
     await svc.db.query(`update nw_players set ${sets.join(", ")} where id = $1`, params);

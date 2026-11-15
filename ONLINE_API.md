@@ -265,13 +265,13 @@ caller isn't the host and `409` if the room isn't waiting.
 
 #### `POST /auth/device`: register an anonymous player
 
-The body is optional: `{"screen_name":"Patrick","last_hero_id":"cryon"}`.
-No other fields are accepted.
+The body is optional: `{"screen_name":"Patrick","last_hero_id":"cryon","tos_version":"2026-11-15","privacy_version":"2026-11-15","accepted_at":"2026-11-15T12:00:00.000Z","age_confirmed":true}`.
+`tos_version`, `privacy_version`, `accepted_at` and `age_confirmed` are optional consent fields (see [Consent](#consent)). No other fields are accepted.
 
 `201`:
 
 ```json
-{"token":"nwd_…","player_id":"p_AbC…","player":{"player_id":"p_AbC…","screen_name":null,"last_hero_id":null,"purchases":[],"unlocks":[],"matches_won":0,"matches_played":0,"matches_lost":0,"boards_won":0,"rank":1}}
+{"token":"nwd_…","player_id":"p_AbC…","player":{"player_id":"p_AbC…","screen_name":null,"last_hero_id":null,"purchases":[],"unlocks":[],"matches_won":0,"matches_played":0,"matches_lost":0,"boards_won":0,"tos_version":null,"privacy_version":null,"accepted_at":null,"age_confirmed":null,"rank":1}}
 ```
 
 The token is shown **only here**, so store it securely on the device.
@@ -291,7 +291,7 @@ Requires a device token. `200`: the `player` object above. `rank` is
 Requires a device token. Send any subset of these fields:
 
 ```json
-{"screen_name":"Patrick","last_hero_id":"vesper_vale","purchases":["sku"],"unlocks":["cryon"]}
+{"screen_name":"Patrick","last_hero_id":"vesper_vale","purchases":["sku"],"unlocks":["cryon"],"tos_version":"2026-11-15","privacy_version":"2026-11-15","accepted_at":"2026-11-15T12:00:00.000Z","age_confirmed":true}
 ```
 
 - `screen_name`: see [Names](#names). Must be unique case-insensitively
@@ -302,6 +302,7 @@ Requires a device token. Send any subset of these fields:
   items. Duplicates are removed and the array **replaces** the stored one.
   ⚠️ These are client-asserted and unverified until Apple IAP receipt
   validation exists. Never treat them as proof of payment.
+- Consent fields: see [Consent](#consent).
 - Unknown fields return `400`.
 
 `200`: the updated `player` object. Errors: `400`, `401`, `409`, `429`.
@@ -376,6 +377,25 @@ The server accepts these aliases on input and always returns the canonical
 ID: `erik_comet→erick_comet`, `ak_shade→simon_shade`,
 `derrick_torque→devin_torque`, `nova_sable→aiden_vortex`,
 `mateo_ricochet→ethan_ricochet`. Unknown IDs return `400`.
+
+## Consent
+
+Creating a screen name records that the player agreed to the current Terms
+of Service and Privacy Policy and confirmed they are 13 or older or have a
+parent or guardian's permission. The documents live at `/terms` and
+`/privacy`. The current document versions are `2026-11-15`.
+
+`POST /auth/device` and `PATCH /me` accept any subset of:
+
+| Field | Rules |
+|---|---|
+| `tos_version` | 1–32 characters: letters, digits, `.`, `_` or `-`. |
+| `privacy_version` | Same as `tos_version`. |
+| `accepted_at` | ISO-8601 timestamp. It may not be more than one day in the future. If the other consent fields are sent without it, the server stores the current time. |
+| `age_confirmed` | JSON boolean. |
+
+`GET /me` returns all four (`null` until recorded). Existing accounts stay
+valid with null columns.
 
 ## Names
 

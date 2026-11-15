@@ -195,6 +195,81 @@ describe("device auth and profile", () => {
       "no orphan player on conflict",
     );
   });
+
+  it("stores consent on PATCH /me and on registration", async () => {
+    const a = await device();
+    assert.equal(a.player.tos_version, null);
+    assert.equal(a.player.privacy_version, null);
+    assert.equal(a.player.accepted_at, null);
+    assert.equal(a.player.age_confirmed, null);
+
+    const acceptedAt = "2026-11-15T12:00:00.000Z";
+    const ok = await call("PATCH", "/me", {
+      token: a.token,
+      body: {
+        tos_version: "2026-11-15",
+        privacy_version: "2026-11-15",
+        accepted_at: acceptedAt,
+        age_confirmed: true,
+      },
+    });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.tos_version, "2026-11-15");
+    assert.equal(ok.body.privacy_version, "2026-11-15");
+    assert.equal(ok.body.accepted_at, acceptedAt);
+    assert.equal(ok.body.age_confirmed, true);
+    const stored = await me(a.token);
+    assert.equal(stored.tos_version, "2026-11-15");
+    assert.equal(stored.age_confirmed, true);
+    const row = (
+      await pg.query<{ tos_version: string; age_confirmed: boolean }>(
+        "select tos_version, age_confirmed from nw_players where id = $1",
+        [a.player_id],
+      )
+    ).rows[0];
+    assert.equal(row.tos_version, "2026-11-15");
+    assert.equal(row.age_confirmed, true);
+
+    const registered = await call("POST", "/auth/device", {
+      body: {
+        screen_name: "Consented",
+        tos_version: "2026-11-15",
+        privacy_version: "2026-11-15",
+        accepted_at: acceptedAt,
+        age_confirmed: true,
+      },
+    });
+    assert.equal(registered.status, 201, JSON.stringify(registered.body));
+    assert.equal(registered.body.player.tos_version, "2026-11-15");
+    assert.equal(registered.body.player.privacy_version, "2026-11-15");
+    assert.equal(registered.body.player.accepted_at, acceptedAt);
+    assert.equal(registered.body.player.age_confirmed, true);
+
+    const missingAt = await call("PATCH", "/me", {
+      token: a.token,
+      body: { tos_version: "2026-11-15", privacy_version: "2026-11-15", age_confirmed: true },
+    });
+    assert.equal(missingAt.status, 200, JSON.stringify(missingAt.body));
+    assert.equal(typeof missingAt.body.accepted_at, "string");
+    assert.ok(Date.parse(missingAt.body.accepted_at));
+
+    assert.equal(
+      (await call("PATCH", "/me", { token: a.token, body: { tos_version: "not a version!" } })).status,
+      400,
+    );
+    assert.equal(
+      (await call("PATCH", "/me", { token: a.token, body: { accepted_at: "Tuesday" } })).status,
+      400,
+    );
+    assert.equal(
+      (await call("PATCH", "/me", { token: a.token, body: { age_confirmed: "yes" } })).status,
+      400,
+    );
+    assert.equal(
+      (await call("PATCH", "/me", { token: a.token, body: { consent: true } })).status,
+      400,
+    );
+  });
 });
 
 describe("lobby", () => {

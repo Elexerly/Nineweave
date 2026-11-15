@@ -4,13 +4,14 @@ extends "res://net/net_transport.gd"
 const Rules = preload("res://kernel/rules.gd")
 static var rooms: Dictionary = {}
 static var next_room: int = 0
+static var assignment_rng = RandomNumberGenerator.new()
 var _peer: WeakRef
 func create_room() -> void:
 	leave()
 	next_room += 1
 	code = "N%04d" % (next_room%10000)
-	seat = 1
-	rooms[code] = {"host":weakref(self),"guest":null,"game":Rules.new(),"seq":0,"characters":{"1":character_payload().character_id}}
+	seat = assignment_rng.randi_range(1,2); match_round = 1; reset_agreement()
+	rooms[code] = {"host":weakref(self),"guest":null,"game":Rules.new(),"seq":0,"round":1,"agreements":{},"characters":{str(seat):character_payload().character_id}}
 	connected.emit(); room_created.emit(code); joined.emit(code,seat)
 func join_room(room_code: String) -> void:
 	room_code = room_code.strip_edges().to_upper()
@@ -18,10 +19,10 @@ func join_room(room_code: String) -> void:
 	var room = rooms[room_code]
 	var host = room.host.get_ref()
 	if host == null or room.guest != null: error.emit("Room is full or has expired."); return
-	code = room_code; seat = 2; room.guest = weakref(self); _peer = room.host
+	code = room_code; seat = 3-host.seat; match_round = 1; reset_agreement(); room.guest = weakref(self); _peer = room.host
 	host._peer = weakref(self)
 	host.remote_name = player_name; remote_name = host.player_name
-	room.characters["2"] = character_payload().character_id
+	room.characters[str(seat)] = character_payload().character_id
 	host.receive_characters(room.characters); receive_characters(room.characters)
 	connected.emit(); joined.emit(code,seat)
 	host.opponent_joined.emit(); opponent_joined.emit()
@@ -43,9 +44,29 @@ func leave() -> void:
 	if code.is_empty(): return
 	if rooms.has(code):
 		var room = rooms[code]
-		var other_ref = room.guest if seat == 1 else room.host
+		var other_ref = room.guest if room.host.get_ref() == self else room.host
 		if other_ref != null and other_ref.get_ref() != null: other_ref.get_ref().opponent_left.emit()
 		rooms.erase(code)
-	code = ""; seat = 0; _peer = null; remote_character_id = "auric_rex"
+	code = ""; seat = 0; _peer = null; reset_agreement(); remote_character_id = "auric_rex"
 func _exit_tree(): leave()
 static func reset_service(): rooms.clear(); next_room = 0
+
+func request_rematch() -> void:
+	if not rooms.has(code): error.emit("Room closed"); return
+	var room = rooms[code]
+	if room.game.status == 0 or room.guest == null: return
+	room.agreements[str(seat)] = true
+	var clients: Array = [room.host.get_ref(),room.guest.get_ref()]
+	for client in clients:
+		if client == null: continue
+		client.local_rematch = room.agreements.get(str(client.seat),false)
+		client.remote_rematch = room.agreements.get(str(3-client.seat),false)
+		client.rematch_changed.emit(client.local_rematch,client.remote_rematch)
+	if room.agreements.size() != 2: return
+	room.round += 1; room.agreements = {}; room.seq = 0; room.game.new_game()
+	var old = room.characters.duplicate(); room.characters = {"1":old["2"],"2":old["1"]}
+	for client in clients:
+		client.seat = 3-client.seat; client.match_round = room.round; client.reset_agreement()
+	for client in clients:
+		client.receive_characters(room.characters)
+		client.match_started.emit(client.seat,client.match_round)

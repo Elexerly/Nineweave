@@ -15,12 +15,10 @@ const Callout = preload("res://fx/comic_callout.gd")
 const Themes = preload("res://themes/registry.gd")
 const Roster = preload("res://characters/roster.gd")
 const Profile = preload("res://characters/profile.gd")
-const HeroRig = preload("res://characters/rig.gd")
+const HeroRig = preload("res://characters/art.gd")
 const HeroSelect = preload("res://characters/select.gd")
 const Cinematic = preload("res://characters/cinematic.gd")
 const Sound = preload("res://fx/sound.gd")
-const GODDESS_PORTRAIT = preload("res://assets/art/goddess_portrait.png")
-const KNIGHT_PORTRAIT = preload("res://assets/art/knight_portrait.png")
 ## Result panel appears at this fraction of the game-win animation (real flow and debug poses).
 const RESULT_AT = .75
 const FIREWORK_BURSTS = 7
@@ -45,6 +43,9 @@ var hero_select
 var cinematic
 var field_heroes: Dictionary = {}
 var _pending_game: Dictionary = {}
+var _select_player: int = 0
+var _local_picked: bool = false
+var _selection_page: int = 0
 var _hero_focus: String = ""
 var _name_draft: String = ""
 var _spotlight_done: bool = false
@@ -111,6 +112,7 @@ func _ready():
 	callout = Callout.new(); callout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(callout)
 	cinematic = Cinematic.new(); cinematic.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(cinematic)
 	cinematic.finished.connect(_cinematic_finished)
+	cinematic.buttons_ready.connect(func(): _result_shown = true; overlay = "result"; _rebuild())
 	sound.voice_started.connect(func(id): callout.show_callout(id))
 	hinge_overlay = Layer.new(); hinge_overlay.name = "FoldGutter"; hinge_overlay.painter = _draw_hinge
 	hinge_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE; hinge_overlay.z_index = 100
@@ -152,7 +154,7 @@ func _relayout():
 	_last_size = logical
 	board.place(layout.board)
 	# Rotation/resize mid-cinematic: recompute its panels against the new board/HUD.
-	if cinematic and cinematic.active: cinematic.relayout(layout)
+	if cinematic and cinematic.visible: cinematic.relayout(layout)
 	callout.region = Rect2(layout.board.position+Vector2(8,-8),Vector2(layout.board.size.x-16,52))
 	_title = _title_geometry()
 	backdrop.title_anchor = _title.anchor; backdrop.title_region = _title.region
@@ -207,7 +209,7 @@ func _process(delta):
 	_update_hero_states()
 	P.clock = clock
 	_input_beat = maxf(0,_input_beat-delta)
-	if page == "game" and overlay.is_empty() and game.status == 0 and not _debug_capture: match_seconds += delta
+	if page == "game" and overlay.is_empty() and game.status == 0 and not _debug_capture and not (cinematic.active and cinematic.kind == "versus"): match_seconds += delta
 	if thinking and overlay.is_empty() and not _debug_capture:
 		thinking_age += delta
 		ai.step(4500)
@@ -224,7 +226,7 @@ func _process(delta):
 			# Only show a hint computed for the position still on the board.
 			if _hint_ply == game.history.size() and game.is_legal(hint_ai.best_move.x,hint_ai.best_move.y): board.hint_move = hint_ai.best_move
 	if page == "game" and game.status != 0 and not board.win_fx.is_empty() and board.win_progress() >= RESULT_AT and not _result_shown:
-		if game.status in [1,2] and not _spotlight_done:
+		if not _spotlight_done:
 			if not cinematic.active:
 				board.frozen = true
 				_show_spotlight()
@@ -244,33 +246,46 @@ func _sync_fx():
 	if overlay == "result": _apply_result_anim()
 	if fx_overlay: fx_overlay.queue_redraw()
 func _apply_result_anim():
+	if cinematic.kind in ["spotlight","draw"]: return
 	var e = Board.back_out(_result_t)
 	for id in _result_bases:
 		if controls.has(id) and is_instance_valid(controls[id]):
 			controls[id].position = _result_bases[id]+Vector2(0,(1-e)*60)
 			controls[id].modulate.a = clampf(_result_t*1.4,0,1)
 func request_game(new_mode: String = "computer", mark: int = 1):
-	if not profile.data.onboarded:
-		_pending_game = {"mode":new_mode,"mark":mark}; open_character_select(); return
-	start_game(new_mode,mark)
+	if new_mode == "online": open_online(); return
+	_pending_game = {"mode":new_mode,"mark":mark}
+	_select_player = 1 if new_mode == "local" else 0; _local_picked = false
+	open_character_select()
 func open_character_select():
 	thinking = false; page = "character_select"; overlay = ""
 	_hero_focus = str(profile.data.character_id); _name_draft = str(profile.data.display_name)
 	_rebuild()
 func _confirm_hero(id: String, display_name: String):
-	profile.choose(id,display_name); settings.set_value("player_name",profile.data.display_name)
-	sound.prepare_character(Roster.index_of(id))
-	sound.cue("ui"); sound.stinger(Roster.index_of(id),"tag",-.35)
-	cinematic.show_scene("lock_in",id,rival_character,human_mark,layout)
+	if not Roster.valid(id): return
+	if _select_player == 2:
+		if id == str(profile.data.character_id): return
+		rival_character = id; _local_picked = true; _select_player = 0
+		_pending_game = {}; start_game("local",1,false,true); return
+	var saved_name = str(profile.data.display_name) if _select_player == 1 else display_name
+	profile.choose(id,saved_name); settings.set_value("player_name",profile.data.display_name)
+	sound.prepare_character(Roster.audio_index(id)); sound.cue("ui")
+	if not _pending_game.is_empty():
+		if _pending_game.mode == "local":
+			_select_player = 2
+			_hero_focus = "aurelia" if id != "aurelia" else "cryon"; _name_draft = "PLAYER 2"
+			_rebuild(); return
+		var pending = _pending_game; _pending_game = {}; _select_player = 0
+		if pending.mode == "resume": resume_game()
+		else: start_game(pending.mode,pending.mark,false,true)
+	else:
+		sound.stinger(Roster.audio_index(id),"tag",-.35)
+		cinematic.show_scene("lock_in",id,rival_character,human_mark,layout)
 func _cinematic_finished(kind: String):
-	if kind == "lock_in":
-		if not _pending_game.is_empty():
-			var pending = _pending_game; _pending_game = {}
-			if pending.mode == "online_lobby": open_online()
-			elif pending.mode == "resume": resume_game()
-			else: start_game(pending.mode,pending.mark)
-		else: go_home()
-	elif kind == "spotlight":
+	if kind == "lock_in": go_home()
+	elif kind == "versus":
+		board.frozen = false; overlay = ""; _rebuild(); _schedule_ai(); _announce("ready")
+	elif kind in ["spotlight","draw"]:
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
 func _input(event):
@@ -281,7 +296,7 @@ func _input(event):
 		if not event.pressed: _skip_guard_until = 0
 		get_viewport().set_input_as_handled(); return
 	var tap = (pointer and event.pressed) or (event is InputEventKey and event.pressed and not event.echo)
-	if tap and cinematic and cinematic.active:
+	if tap and cinematic and cinematic.active and not cinematic.buttons_shown:
 		var was = cinematic.kind
 		var skipped = cinematic.skip()
 		if was != "pop":
@@ -290,33 +305,59 @@ func _input(event):
 func hero_for(mark: int) -> String:
 	return str(profile.data.character_id) if mark == human_mark else rival_character
 func _show_spotlight():
-	cinematic.show_scene("spotlight",hero_for(game.status),hero_for(3-game.status),game.status,layout)
-	sound.stinger(Roster.index_of(hero_for(game.status)),"full",-.35 if game.status == human_mark else .35)
+	var winner = game.status if game.status in [1,2] else human_mark
+	cinematic.winner_name = side_name(winner); cinematic.loser_name = side_name(3-winner)
+	cinematic.result_score = "%d — %d  BOARDS CLAIMED" % [game.owners.count(winner),game.owners.count(3-winner)]
+	cinematic.show_scene("draw" if game.status == 3 else "spotlight",hero_for(winner),hero_for(3-winner),winner,layout)
+	if game.status != 3: sound.stinger(Roster.audio_index(hero_for(winner)),"full",-.35 if winner == human_mark else .35)
+func _begin_versus():
+	thinking = false; board.frozen = true
+	cinematic.winner_name = side_name(human_mark); cinematic.loser_name = side_name(3-human_mark)
+	cinematic.show_scene("versus",hero_for(human_mark),hero_for(3-human_mark),human_mark,layout)
+	sound.cue("route"); sound.stinger(Roster.audio_index(hero_for(human_mark)),"tag",-.35)
+func rematch():
+	if mode == "online":
+		message = ""
+		if is_instance_valid(transport):
+			transport.request_rematch()
+			if is_instance_valid(demo_rival) and transport.local_rematch:
+				var peer = weakref(demo_rival); var round_number = transport.match_round
+				get_tree().create_timer(1.0).timeout.connect(func():
+					var other = peer.get_ref()
+					if is_instance_valid(other) and other.match_round == round_number: other.request_rematch())
+		_result_controls_refresh(); return
+	start_game(mode,3-human_mark if mode == "local" else human_mark,true,true)
+func _result_controls_refresh():
+	if overlay == "result": _rebuild()
+
 ## `rematch` (Play Again) keeps the same rival hero; a new game from the menu/setup
 ## re-rolls. Round 3c product default, reversible: pass rematch=false to always re-roll.
-func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false):
+func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false, present: bool = false):
 	_leave_online()
 	cinematic.clear(); callout.callout = ""; _spotlight_done = false
-	var keep = rematch and Roster.valid(rival_character) and rival_character != str(profile.data.character_id)
+	var keep = (rematch or (new_mode == "local" and _local_picked)) and Roster.valid(rival_character) and rival_character != str(profile.data.character_id)
 	if not keep:
 		var available: Array = []
 		for h in Roster.DATA:
 			if h.id != profile.data.character_id: available.append(h.id)
 		rival_character = str(available[randi()%available.size()])
-	sound.prepare_character(Roster.index_of(profile.data.character_id)); sound.prepare_character(Roster.index_of(rival_character))
+	sound.prepare_character(Roster.audio_index(profile.data.character_id)); sound.prepare_character(Roster.audio_index(rival_character))
 	mode = new_mode; human_mark = mark; page = "game"; overlay = ""; _debug_capture = false
 	game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
 	thinking = false; hint_busy = false; _result_shown = false; match_seconds = 0; message = ""; online_sequence = 0
-	_refresh_labels(); _rebuild(); _schedule_ai()
-	sound.clear_announcer(); _announce("ready")
+	_refresh_labels(); _rebuild()
+	sound.clear_announcer()
+	if present: _begin_versus()
+	else: _schedule_ai(); _announce("ready")
 func _schedule_ai():
-	if _debug_capture or game.status != 0 or not overlay.is_empty(): return
+	if _debug_capture or game.status != 0 or not overlay.is_empty() or (cinematic.active and cinematic.kind == "versus"): return
 	var should = mode == "computer" and game.turn != human_mark
 	should = should or (mode == "online" and demo_rival != null and remote_ready and game.turn != human_mark)
 	if should:
 		thinking = true; thinking_age = 0
 		ai.begin(game,str(settings.values.difficulty),ai_seed+game.history.size()*17)
 func play_cell(b: int, c: int) -> bool:
+	if cinematic.active and cinematic.kind == "versus": return false
 	if page != "game" or not overlay.is_empty() or thinking or game.status != 0 or _input_beat > 0: return false
 	if mode == "computer" and game.turn != human_mark: return false
 	if mode == "online":
@@ -336,7 +377,7 @@ func _apply_move(b: int, c: int) -> bool:
 		board.start_claim(b,game.owners[b]); sound.cue("claim_x" if player == 1 else "claim_o",pan); _input_beat = .16 if not board.reduced_motion else .05
 		if game.owners[b] in [1,2] and game.status == 0:
 			cinematic.show_scene("pop",hero_for(player),hero_for(3-player),player,layout,b)
-			sound.stinger(Roster.index_of(hero_for(player)),"stab",pan)
+			sound.stinger(Roster.audio_index(hero_for(player)),"stab",pan)
 			if field_heroes.has(player): field_heroes[player].set_clip("mark_push")
 			if player == human_mark and field_heroes.has("panel"): field_heroes.panel.set_clip("score_flash")
 	if game.status != 0:
@@ -391,7 +432,7 @@ func _refresh_labels():
 		active_label = result_line()
 func side_name(mark: int) -> String:
 	if mark == human_mark and mode != "local": return str(settings.values.player_name)
-	if mode == "local": return "Player "+("X" if mark == 1 else "O")
+	if mode == "local": return "PLAYER 1" if mark == human_mark else "PLAYER 2"
 	return _rival_name()
 ## One-line result for the info pill / panels after game over.
 func result_line() -> String:
@@ -440,6 +481,7 @@ func resume_game():
 	page = "game"; overlay = ""; board.clear_effects(); _result_shown = false; _spotlight_done = false; cinematic.clear()
 	_refresh_labels(); _rebuild(); _schedule_ai()
 func go_home():
+	_pending_game = {}; _select_player = 0
 	sound.clear_announcer()
 	_save_match(); _leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
 func show_settings():
@@ -453,9 +495,7 @@ func _leave_online():
 	if is_instance_valid(transport): transport.leave(); transport.queue_free()
 	demo_rival = null; transport = null; remote_ready = false
 func request_online():
-	if not profile.data.onboarded:
-		_pending_game = {"mode":"online_lobby","mark":1}; open_character_select(); return
-	open_online()
+	_pending_game = {}; _select_player = 0; open_online()
 func request_resume():
 	if not profile.data.onboarded:
 		_pending_game = {"mode":"resume","mark":human_mark}; open_character_select(); return
@@ -471,6 +511,10 @@ func _attach_transport(t):
 	t.room_created.connect(func(code): room_code = code; online_state = "waiting"; message = "Waiting for opponent…"; _rebuild())
 	t.joined.connect(func(code,seat): room_code = code; human_mark = seat)
 	t.opponent_joined.connect(_online_ready)
+	t.rematch_changed.connect(func(_local,_remote): _result_controls_refresh())
+	t.match_started.connect(func(seat,_round):
+		human_mark = seat
+		if remote_ready: _reset_online_match())
 	t.move_received.connect(_receive_move)
 	t.state_received.connect(_receive_state)
 	t.opponent_left.connect(func(): remote_ready = false; thinking = false; message = "Your opponent has left the room."; _rebuild())
@@ -489,10 +533,12 @@ func invite_demo_rival():
 	demo_rival.join_room(room_code)
 func _online_ready():
 	remote_ready = true; opponent_name = transport.remote_name; rival_character = transport.remote_character_id
+	human_mark = transport.seat; _reset_online_match()
+func _reset_online_match():
 	_spotlight_done = false; cinematic.clear(); _debug_capture = false
 	game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
 	board.clear_effects(); thinking = false; _result_shown = false; match_seconds = 0; message = ""
-	_refresh_labels(); _rebuild(); _announce("ready")
+	_refresh_labels(); _rebuild(); _begin_versus()
 func _receive_move(b: int, c: int, seq: int):
 	if seq <= online_sequence: return
 	if seq != online_sequence+1: message = "Resynchronizing room…"; return
@@ -550,11 +596,15 @@ func _rebuild():
 		hero_select.selected_id = _hero_focus if not _hero_focus.is_empty() else str(profile.data.character_id)
 		hero_select.display_name = _name_draft if not _name_draft.is_empty() else str(profile.data.display_name)
 		hero_select.reduced_motion = board.reduced_motion
-		hero_select.focused.connect(func(id): _hero_focus = id; sound.prepare_character(Roster.index_of(id)); sound.cue("ui",-.35))
+		hero_select.heading = "PLAYER %d · CHOOSE HERO" % _select_player if _select_player > 0 else "CHOOSE YOUR HERO"
+		hero_select.blocked_id = str(profile.data.character_id) if _select_player == 2 else ""
+		if _select_player > 0: hero_select.display_name = "PLAYER %d" % _select_player
+		hero_select.focused.connect(func(id): _hero_focus = id; sound.prepare_character(Roster.audio_index(id)); sound.cue("ui",-.35))
 		hero_select.name_changed.connect(func(value): _name_draft = value)
 		hero_select.confirmed.connect(_confirm_hero)
 		hero_select.back.connect(func(): _pending_game = {}; go_home())
 		add_child(hero_select); ui_nodes.append(hero_select)
+		if _select_player > 0: hero_select.field.editable = false
 	elif page == "game":
 		var hdr: Rect2 = layout.header
 		var big = layout.mode == "landscape"
@@ -575,7 +625,8 @@ func _rebuild():
 		if layout.has("history"): _create_history(layout.history)
 		_create_field_heroes()
 	elif page == "online": _online_controls(s)
-	if not overlay.is_empty(): _overlay_controls(s)
+	if overlay == "result": _winner_controls(s)
+	elif not overlay.is_empty(): _overlay_controls(s)
 	queue_redraw()
 func _create_field_heroes():
 	var r: Rect2 = layout.players
@@ -593,7 +644,7 @@ func _create_field_heroes():
 			var cx = rr.position.x+radius if mark == human_mark else rr.end.x-radius
 			hero_r = Rect2(Vector2(cx-radius,rr.get_center().y-radius),Vector2.ONE*radius*2)
 		var rig = HeroRig.new(); rig.hero_id = hero_for(mark); rig.side = mark; rig.facing = 1 if mark == human_mark else -1
-		rig.bust = not is_vertical; rig.position = hero_r.position; rig.size = hero_r.size; rig.reduced_motion = board.reduced_motion
+		rig.bust = true; rig.position = hero_r.position; rig.size = hero_r.size; rig.reduced_motion = board.reduced_motion
 		add_child(rig); ui_nodes.append(rig)
 		var corner_r: Rect2 = layout.hero_player if mark == human_mark else layout.hero_opponent
 		var hosted = mark == human_mark and not str(layout.get("hero_player_host","")).is_empty()
@@ -611,7 +662,7 @@ func _create_field_heroes():
 	if layout.has("character"):
 		var rig = HeroRig.new(); rig.hero_id = hero_for(human_mark); rig.side = human_mark
 		rig.position = layout.character.position+Vector2(4,24); rig.size = layout.character.size-Vector2(8,28)
-		rig.bust = rig.size.y < 115; rig.reduced_motion = board.reduced_motion
+		rig.bust = true; rig.reduced_motion = board.reduced_motion
 		add_child(rig); ui_nodes.append(rig)
 		if layout.get("hero_player_host","") == "character": field_heroes[human_mark] = rig
 		else: field_heroes["panel"] = rig
@@ -742,6 +793,7 @@ func _overlay_controls(s: Vector2):
 			settings.set_value("board_theme",Themes.next(settings.values.board_theme,Themes.BOARDS)); _apply_preferences(); _rebuild())
 		_button("classic","Restore crystal",Rect2(x,y+100,w,44),func():
 			settings.set_value("background_theme","crystal"); settings.set_value("board_theme","crystal"); _apply_preferences(); _rebuild())
+		_button("profile_hero","Hero: "+Roster.get_hero(str(profile.data.character_id)).name,Rect2(x,y+150,w,44),func(): _pending_game = {}; _select_player = 0; open_character_select())
 		_button("done","Settings",Rect2(x,r.end.y-62,w,44),func(): overlay = "settings"; _rebuild(),true)
 
 	elif overlay == "how":
@@ -883,8 +935,6 @@ func _rival_name() -> String:
 	if mode == "online": return opponent_name
 	return "Rival AI"
 func is_rival_ai_shown() -> bool: return page == "game" and mode == "computer"
-func _rival_portrait(mark: int) -> Texture2D:
-	return KNIGHT_PORTRAIT if mark == 1 else GODDESS_PORTRAIT
 ## Circular gold-framed medallion: portrait (rival) or bevelled mark, crown and thinking ring.
 func _medallion(center: Vector2, radius: float, mark: int, _portrait: bool, active: bool, rival_thinking: bool):
 	var col = P.mark_color(mark)
@@ -1222,6 +1272,35 @@ func debug_scenario(scenario: String, progress: float = .45):
 	if not OS.is_debug_build(): return
 	_debug_capture = true; clock = 4; backdrop.clock = 4; P.clock = 4
 	if scenario == "title": page = "title"; overlay = ""; board.clear_effects(); _rebuild(); return
+	if scenario in ["select_p1","select_p2"]:
+		request_game("local"); _hero_focus = "vesper_vale"
+		if scenario == "select_p2":
+			_confirm_hero("vesper_vale","PLAYER 1"); _hero_focus = "ryan_blaze"; _rebuild()
+		if is_instance_valid(hero_select): hero_select.set_page(1 if scenario == "select_p2" else 0)
+		return
+	if scenario == "versus":
+		profile.data.character_id = "vesper_vale"; profile.data.display_name = "Patrick"; settings.values.player_name = "Patrick"
+		rival_character = "auric_rex"; start_game("computer",1,true,true)
+		cinematic.age = 1.4; cinematic.frozen = true; cinematic.pose(); return
+	if scenario in ["winner","winner_cpu","draw"]:
+		profile.data.character_id = "vesper_vale"; settings.values.player_name = "Patrick"; rival_character = "auric_rex"
+		if scenario == "draw":
+			var rows = ["XXXOO....","OOOXX....","XXXOO....","XXXOO....","OOOXX....","OOOXX....","OOOXX....","XXXOO....","XXXOO...."]
+			var staged_draw = Rules.new(); staged_draw.deserialize({"v":1,"cells":"".join(rows),"turn":1,"active":-1,"history":[]})
+			debug_load_position(staged_draw.serialize())
+		else:
+			var patterns: Array = []
+			for i in range(9): patterns.append(".........")
+			var result_mark = 2 if scenario == "winner_cpu" else 1
+			patterns[0] = "OOOXX...." if result_mark == 2 else "XXXOO...."; patterns[1] = patterns[0]
+			patterns[2] = "OO.XX...." if result_mark == 2 else "XX.OO...."
+			var staged_winner = Rules.new(); staged_winner.deserialize({"v":1,"cells":"".join(patterns),"turn":result_mark,"active":2,"history":[]})
+			debug_load_position(staged_winner.serialize())
+			game.play(2,2)
+		_refresh_labels(); _show_spotlight(); cinematic.age = progress*5; cinematic.buttons_shown = cinematic.age >= 1.8
+		cinematic.frozen = true; cinematic.pose(); _result_shown = true
+		if cinematic.buttons_shown: overlay = "result"; _rebuild()
+		return
 	if scenario in ["character_select","lock_in"]:
 		open_character_select(); _hero_focus = "vesper_vale"; _name_draft = "Weaver"; _rebuild()
 		if scenario == "lock_in":
@@ -1257,8 +1336,9 @@ func debug_scenario(scenario: String, progress: float = .45):
 	for m in MIDGAME: staged.play(m[0],m[1])
 	debug_load_position(staged.serialize())
 	if scenario in ["duo_hinge","hinge"]: debug_simulate_hinge()
-	if scenario == "reaction":
-		field_heroes[human_mark].react("win"); field_heroes[3-human_mark].react("near_loss")
+	if scenario in ["reaction","midgame_heads"]:
+		field_heroes[human_mark].react("own_claim"); field_heroes[3-human_mark].react("opponent_claim")
+		field_heroes[3-human_mark].advance(.3)
 		for rig in field_heroes.values(): rig.frozen = true; rig.clip_age = .45; rig.pose(1.4)
 	if scenario == "last_move":
 		game.play(MIDGAME_REPLY[0],MIDGAME_REPLY[1]); _refresh_labels(); _rebuild()
@@ -1282,3 +1362,19 @@ func debug_refresh():
 	callout.frozen = true
 	for n in ui_nodes:
 		if is_instance_valid(n): n.queue_redraw()
+
+func _winner_controls(s: Vector2):
+	var g = Cinematic.card_geometry(s,"draw" if game.status == 3 else "spotlight")
+	for item in [["again","REMATCH",g.again,rematch,true],["menu","MAIN MENU",g.menu,go_home,false]]:
+		var button = preload("res://characters/match_button.gd").new()
+		button.caption = item[1]; button.position = item[2].position; button.size = item[2].size; button.accent = item[4]
+		button.z_index = 31; button.pressed.connect(item[3]); button.pressed.connect(func(): sound.cue("ui"))
+		add_child(button); ui_nodes.append(button); controls[item[0]] = button
+	if mode == "online" and is_instance_valid(transport):
+		controls.again.disabled = transport.local_rematch
+		controls.again.caption = "ACCEPT" if transport.remote_rematch and not transport.local_rematch else "REMATCH"
+		var label = Label.new(); label.z_index = 31; label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.text = message if not message.is_empty() else transport.rematch_status(); label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.position = Vector2(s.x*.04,g.again.position.y-38); label.size = Vector2(s.x*.92,32)
+		label.add_theme_font_override("font",P.SANS); label.add_theme_font_size_override("font_size",18)
+		add_child(label); ui_nodes.append(label)

@@ -201,14 +201,14 @@ func spotlight_input(ui):
 	root.push_input(key)
 	ok(ui.cinematic.active,"early key does not skip inside the 200 ms guard")
 	ui._process(.01); ok(ui.cinematic.active and ui.cinematic.kind == "spotlight","no double trigger while active")
-	ui.cinematic.advance(.25)
+	ui.cinematic.advance(.85)
 	root.push_input(key)
 	ok(not ui.cinematic.active and ui.overlay == "result" and not ui.board.frozen,"key skips spotlight, board unfreezes")
 	ui._process(.01); ok(not ui.cinematic.active,"spotlight not re-triggered after skip")
 	# Touch skip: touch press then emulated mouse press/release on Play Again must not press it.
 	ui.undo_move(); ui.thinking = false; ui._debug_capture = false
 	ok(ui.game.status == 0 and ui.overlay.is_empty(),"undo after win reopens game")
-	ui._apply_move(2,2); ui.board.advance(4); ui._process(.01); ui.cinematic.advance(.25)
+	ui._apply_move(2,2); ui.board.advance(4); ui._process(.01); ui.cinematic.advance(.85)
 	var started = [0]
 	var touch = InputEventScreenTouch.new(); touch.pressed = true; touch.position = Vector2(195,600)
 	ui._input(touch)
@@ -229,7 +229,7 @@ func spotlight_input(ui):
 	ui.thinking = false
 	# Menu works after skip.
 	ui.debug_load_position(F.big_tactic(1).serialize(),"local"); ui._debug_capture = false
-	ui._apply_move(2,2); ui.board.advance(4); ui._process(.01); ui.cinematic.advance(.25); ui.cinematic.skip()
+	ui._apply_move(2,2); ui.board.advance(4); ui._process(.01); ui.cinematic.advance(.85); ui.cinematic.skip()
 	ui.controls.menu.pressed.emit(); ok(ui.page == "title" and not ui.cinematic.active,"menu works after skip")
 	await frames()
 
@@ -254,7 +254,12 @@ func hint_and_highlight(ui):
 	ui._process(.01); ok(ui.game.is_legal(ui.board.hint_move.x,ui.board.hint_move.y) and ui.game.active_board == -1,"hint legal on free move in UI")
 	# Online loopback: opponent's move is highlighted, own move clears, rematch clears.
 	Loopback.reset_service()
-	ui.create_online(true); ui.invite_demo_rival()
+	Loopback.assignment_rng.seed = 1
+	while true:
+		var saved_state = Loopback.assignment_rng.state
+		if Loopback.assignment_rng.randi_range(1,2) == 1:
+			Loopback.assignment_rng.state = saved_state; break
+	ui.create_online(true); ui.invite_demo_rival(); ui.cinematic.advance(2.81)
 	ok(not ui._debug_capture,"online match leaves debug capture off")
 	ok(ui.mode == "online" and ui.page == "game" and ui.remote_ready,"loopback match started")
 	ok(ui.play_cell(4,4),"online local move sent")
@@ -335,7 +340,7 @@ func leak_loop(ui):
 			ui._apply_move(m.x,m.y); ui.thinking = false
 			ui.board.advance(.2); ui.cinematic.advance(.2); guard += 1
 		ui.board.advance(4); ui._process(.01)
-		if ui.cinematic.active: ui.cinematic.advance(.25); ui.cinematic.skip()
+		if ui.cinematic.active: ui.cinematic.advance(.85); ui.cinematic.skip()
 		if n%7 == 3: ui.set_view_size(Vector2(867,553) if n%2 else Vector2(390,844))
 		if n%9 == 4: ui.show_settings(); ui._close_overlay()
 		ui.go_home()
@@ -347,4 +352,4 @@ func leak_loop(ui):
 	print("LEAK games=56 nodes_after_6=",baseline_nodes," nodes_after_56=",nodes," orphans=",baseline_orphans,"→",orphans)
 	ok(nodes <= baseline_nodes+2,"node count flat over 50+ games")
 	ok(orphans <= baseline_orphans,"no orphan nodes accumulate")
-	ok(ui.board.claims.is_empty() and ui.cinematic.get_child_count() == 2,"no lingering claim FX or cinematic rigs")
+	ok(ui.board.claims.is_empty() and ui.cinematic.get_child_count() == 3,"no lingering claim FX or cinematic rigs")

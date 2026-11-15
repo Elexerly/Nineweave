@@ -1,7 +1,8 @@
 extends Control
 const R = preload("res://characters/roster.gd")
-const Rig = preload("res://characters/rig.gd")
+const Rig = preload("res://characters/art.gd")
 const P = preload("res://ui/paint.gd")
+const Layout = preload("res://ui/layout.gd")
 const ButtonArt = preload("res://ui/ornate_button.gd")
 signal focused(id: String)
 signal confirmed(id: String, display_name: String)
@@ -15,13 +16,20 @@ class Portrait extends Button:
 		for state in ["normal","hover","pressed","focus","disabled"]: add_theme_stylebox_override(state,StyleBoxEmpty.new())
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		rig = Rig.new(); rig.hero_id = R.DATA[index].id; rig.bust = true; rig.frozen = true
-		rig.position = Vector2(5,4); rig.size = Vector2(size.x-10,size.y-23); add_child(rig); rig.pose(1.4)
+		rig.position = Vector2(3,0); rig.size = Vector2(size.x-6,size.y-18); add_child(rig)
 	func _draw():
-		P.panel(self,Rect2(Vector2(2,2),size-Vector2(4,4)),selected or has_focus())
-		P.text(self,R.DATA[index].name.get_slice(" ",0),Rect2(4,size.y-22,size.x-8,19),14,P.PALE)
-		if selected: P.outline(self,Rect2(Vector2(5,5),size-Vector2(10,10)),P.BLUE,1.5)
-var selected_id: String = "vesper_vale"
+		var r = Rect2(Vector2(2,2),size-Vector2(4,4))
+		draw_style_box(_frame(),r)
+		P.text(self,R.DATA[index].name.get_slice(" ",0).to_upper(),Rect2(3,size.y-20,size.x-6,18),13,P.PALE,P.SANS)
+		if selected: P.outline(self,r.grow(-1),P.BLUE,2)
+	func _frame() -> StyleBoxFlat:
+		var style = StyleBoxFlat.new(); style.bg_color = Color("14243a") if not selected else Color("25425c")
+		style.border_color = P.GOLD if selected else Color("35445a"); style.set_border_width_all(2)
+		return style
+var selected_id: String = "cryon"
 var display_name: String = "You"
+var heading: String = "CHOOSE YOUR HERO"
+var blocked_id: String = ""
 var reduced_motion: bool = false
 var hinge: Rect2
 var geo: Dictionary
@@ -29,15 +37,20 @@ var hero
 var portraits: Array = []
 var field: LineEdit
 var confirm_button
+var page: int = 0
+var paging_controls: Array = []
+var _drag_start = Vector2.ZERO
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	geo = geometry(size,hinge)
-	hero = Rig.new(); hero.hero_id = selected_id; hero.position = geo.hero.position; hero.size = geo.hero.size; hero.reduced_motion = reduced_motion; add_child(hero)
-	for i in range(12):
-		var tile = Portrait.new(); tile.index = i; tile.position = geo.tiles[i].position; tile.size = geo.tiles[i].size
-		tile.selected = R.DATA[i].id == selected_id
+	page = int(R.index_of(selected_id)/8) if geo.paged else 0
+	hero = Rig.new(); hero.hero_id = selected_id; hero.bust = false; hero.art_key = "splash"
+	hero.position = geo.hero.position; hero.size = geo.hero.size; hero.reduced_motion = reduced_motion; add_child(hero)
+	for i in range(16):
+		var tile = Portrait.new(); tile.index = i; tile.selected = R.DATA[i].id == selected_id
+		tile.position = geo.tiles[i%8 if geo.paged else i].position; tile.size = geo.tiles[i%8 if geo.paged else i].size
+		tile.disabled = R.DATA[i].id == blocked_id; tile.modulate.a = .28 if tile.disabled else 1.0
 		tile.pressed.connect(func(): focus_hero(R.DATA[i].id))
-		tile.mouse_entered.connect(func(): focus_hero(R.DATA[i].id))
 		tile.focus_entered.connect(func(): focus_hero(R.DATA[i].id))
 		add_child(tile); portraits.append(tile)
 	var exit_button = ButtonArt.new(); exit_button.icon_kind = "back"; exit_button.position = geo.back.position; exit_button.size = geo.back.size
@@ -49,73 +62,90 @@ func _ready():
 	field.add_theme_stylebox_override("normal",style); field.add_theme_stylebox_override("focus",style)
 	field.add_theme_color_override("font_color",P.PALE); field.add_theme_color_override("caret_color",P.BLUE)
 	field.text_changed.connect(func(value): display_name = value; name_changed.emit(value))
-	field.text_submitted.connect(func(_value): _confirm())
-	add_child(field)
-	confirm_button = ButtonArt.new(); confirm_button.caption = "LOCK IN" if size.y < 360 else "WEAVE YOUR LEGEND"; confirm_button.accent = true
+	field.text_submitted.connect(func(_value): _confirm()); add_child(field)
+	confirm_button = ButtonArt.new(); confirm_button.caption = "LOCK IN"; confirm_button.accent = true
 	confirm_button.position = geo.confirm.position; confirm_button.size = geo.confirm.size
 	confirm_button.pressed.connect(_confirm); add_child(confirm_button)
+	if geo.paged:
+		for direction in [-1,1]:
+			var arrow = ButtonArt.new(); arrow.caption = "‹" if direction < 0 else "›"
+			arrow.position = Vector2(20 if direction < 0 else size.x-64,geo.nav.position.y); arrow.size = Vector2(44,44)
+			arrow.pressed.connect(func(): change_page(direction)); add_child(arrow); paging_controls.append(arrow)
+		for dot in range(2):
+			var button = Button.new(); button.text = "•"; button.position = Vector2(size.x*.5-44+dot*44,geo.nav.position.y); button.size = Vector2(44,44)
+			button.add_theme_font_size_override("font_size",36)
+			for state in ["normal","hover","pressed","focus"]: button.add_theme_stylebox_override(state,StyleBoxEmpty.new())
+			button.pressed.connect(func(): set_page(dot)); add_child(button); paging_controls.append(button)
+	_sync_page()
+func _input(event):
+	if not geo.get("paged",false) or not is_visible_in_tree(): return
+	if event is InputEventScreenTouch:
+		if event.pressed: _drag_start = event.position
+		else: swipe(event.position-_drag_start)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed: _drag_start = event.position
+		else: swipe(event.position-_drag_start)
+func swipe(distance: Vector2):
+	if absf(distance.x) > 48 and absf(distance.x) > absf(distance.y)*1.3:
+		change_page(1 if distance.x < 0 else -1)
+func change_page(direction: int): set_page(page+direction)
+func set_page(value: int):
+	page = posmod(value,2) if geo.paged else 0; _sync_page()
+func _sync_page():
+	for tile in portraits:
+		var local_index = tile.index%8 if geo.paged else tile.index
+		tile.position = geo.tiles[local_index].position; tile.size = geo.tiles[local_index].size
+		tile.visible = not geo.paged or int(tile.index/8) == page
+		if is_instance_valid(tile.rig): tile.rig.size = Vector2(tile.size.x-6,tile.size.y-18)
+	if geo.paged:
+		for dot in range(2): paging_controls[2+dot].add_theme_color_override("font_color",P.BLUE if page == dot else P.MUTED)
+	queue_redraw()
 func _confirm():
-	if confirm_button.disabled: return
+	if confirm_button.disabled or selected_id == blocked_id: return
 	confirm_button.disabled = true; field.release_focus(); confirmed.emit(selected_id,display_name)
 func focus_hero(id: String):
-	if confirm_button != null and confirm_button.disabled: return
+	if not R.valid(id) or id == blocked_id or (confirm_button != null and confirm_button.disabled): return
 	if id == selected_id: return
-	selected_id = id; hero.configure(id); hero.set_clip("hover_react"); focused.emit(id)
+	selected_id = id; hero.configure(id); hero.art_key = "splash"; hero.refresh_texture(); hero.set_clip("hover_react"); focused.emit(id)
 	for tile in portraits: tile.selected = R.DATA[tile.index].id == id; tile.queue_redraw()
 	queue_redraw()
 static func geometry(s: Vector2, seam: Rect2 = Rect2()) -> Dictionary:
-	var wide = s.x > s.y or seam.size.x > 0
-	var g = {"tiles":[],"back":Rect2(12,12,44,44)}
-	var grid: Rect2; var cols = 4
-	if wide:
-		var split = seam.end.x+12 if seam.size.x > 0 else s.x*.49
-		var left_end = seam.position.x-12 if seam.size.x > 0 else split-12
-		g.hero = Rect2(12,54,left_end-24,s.y-149)
-		g.plaque = Rect2(16,s.y-90,left_end-32,70)
-		grid = Rect2(split,62,s.x-split-16,s.y-190)
-		g.field = Rect2(split,s.y-116,s.x-split-16,44)
-		g.confirm = Rect2(split,s.y-62,s.x-split-16,48)
-		g.heading = Rect2(split,12,s.x-split-16,38)
-		if s.y < 360:
-			var right_width = s.x-split-16
-			grid.size.y = s.y-134
-			g.field = Rect2(split,s.y-60,right_width*.46,44)
-			g.confirm = Rect2(split+right_width*.5,s.y-60,right_width*.5,44)
+	var paged = Layout.mode_for(s) == "phone_portrait" and seam.size.x <= 0
+	var g = {"tiles":[],"back":Rect2(12,12,44,44),"paged":paged,"pages":2 if paged else 1,"per_page":8 if paged else 16,"nav":Rect2()}
+	var grid: Rect2
+	if paged:
+		g.heading = Rect2(66,12,s.x-78,40)
+		g.hero = Rect2(12,60,s.x-24,s.y-480)
+		g.plaque = Rect2(20,s.y-412,s.x-40,60)
+		grid = Rect2(16,s.y-348,s.x-32,176)
+		g.nav = Rect2(20,s.y-164,s.x-40,44)
+		g.field = Rect2(24,s.y-112,s.x-48,44)
+		g.confirm = Rect2(24,s.y-60,s.x-48,48)
 	else:
-		var grid_y = s.y*.605
-		g.hero = Rect2(12,60,s.x-24,grid_y-164)
-		g.plaque = Rect2(20,grid_y-104,s.x-40,56)
-		g.field = Rect2(24,grid_y-46,s.x-48,44)
-		grid = Rect2(16,grid_y+8,s.x-32,s.y-grid_y-80)
-		g.confirm = Rect2(24,s.y-62,s.x-48,48)
-		g.heading = Rect2(66,12,s.x-88,40)
+		var split = seam.end.x+12 if seam.size.x > 0 else s.x*.46
+		var left_end = seam.position.x-12 if seam.size.x > 0 else split-12
+		g.hero = Rect2(12,58,left_end-24,s.y-146)
+		g.plaque = Rect2(16,s.y-80,left_end-32,64)
+		g.heading = Rect2(split,12,s.x-split-16,38)
+		grid = Rect2(split,58,s.x-split-12,s.y-130)
+		g.field = Rect2(split,s.y-62,(s.x-split-20)*.55,44)
+		g.confirm = Rect2(g.field.end.x+8,s.y-62,(s.x-split-20)*.45,44)
 	g.grid = grid
-	var pitch = Vector2(grid.size.x/cols,grid.size.y/3)
-	for i in range(12):
-		# A shallow gold arc: the centre columns sit 3px lower.
-		var arc = 3 if i%4 in [1,2] else 0
-		g.tiles.append(Rect2(grid.position+Vector2(i%cols*pitch.x,int(i/cols)*pitch.y+arc),pitch-Vector2(6,6)))
+	var rows = 2 if paged else 4
+	var pitch = Vector2(grid.size.x/4,grid.size.y/rows)
+	for i in range(8 if paged else 16): g.tiles.append(Rect2(grid.position+Vector2(i%4*pitch.x,int(i/4)*pitch.y),pitch-Vector2(4,3)))
 	return g
 func _draw():
 	if geo.is_empty(): return
-	draw_rect(Rect2(Vector2.ZERO,size),Color("061126"))
+	draw_rect(Rect2(Vector2.ZERO,size),Color("081326"))
 	var h = R.get_hero(selected_id); var col = Color(h.palette[0])
-	P.text(self,"CHOOSE YOUR LEGEND",geo.heading,24,P.PALE,P.SERIF)
-	var r: Rect2 = geo.hero
-	P.halo(self,r.get_center(),minf(r.size.x,r.size.y)*.8,Color(col,.3))
-	# Graphic crystal rays stay behind the character and never enter the fold gutter.
-	for i in range(11):
-		var x = r.position.x+r.size.x*i/10
-		draw_line(Vector2(x,r.end.y),r.get_center()+Vector2(0,-r.size.y*.35),Color(col,.08),2)
-	P.outline(self,r.grow(-3),Color(P.GOLD,.3),1)
+	P.text(self,heading,geo.heading,P.fit_box(heading,geo.heading,25,P.SANS),P.PALE,P.SANS)
+	P.halo(self,geo.hero.get_center(),minf(geo.hero.size.x,geo.hero.size.y)*.8,Color(col,.3))
 	var plaque: Rect2 = geo.plaque
 	P.panel(self,plaque,false,1,true)
 	var lanes = plaque_lanes(plaque)
 	P.text(self,h.name.to_upper(),lanes.name,P.fit_box(h.name.to_upper(),lanes.name,25,P.SERIF),P.PALE,P.SERIF)
 	P.text(self,h.pop,lanes.line,P.fit_box(h.pop,lanes.line,18),P.WHITE)
-	draw_mark_preview(self,Vector2(plaque.end.x-27,plaque.position.y+plaque.size.y*.27),15,R.index_of(selected_id))
-## Round 3c: text lanes inside the plaque's gold frame (the name used to rise into the
-## top border). The mark preview keeps the right 52 px of the name lane.
 static func plaque_lanes(plaque: Rect2) -> Dictionary:
 	var t = clampf(minf(plaque.size.x,plaque.size.y)*.07,2.6,5.0)+2
 	var split = plaque.size.y*.54

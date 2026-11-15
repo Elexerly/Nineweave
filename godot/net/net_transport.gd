@@ -36,3 +36,27 @@ func receive_characters(characters: Dictionary) -> bool:
 		if mark != seat: remote_character_id = id
 		character_received.emit(mark,id)
 	return true
+
+# Round 4: agreement and side assignment belong to the authoritative transport.
+signal rematch_changed(local_agreed: bool, remote_agreed: bool)
+signal match_started(assigned_seat: int, round_number: int)
+var local_rematch: bool = false
+var remote_rematch: bool = false
+var match_round: int = 1
+func request_rematch() -> void: error.emit("Rematch is not supported by this server yet")
+func rematch_status() -> String:
+	if local_rematch: return "WAITING FOR OPPONENT…"
+	if remote_rematch: return "OPPONENT WANTS A REMATCH"
+	return ""
+func reset_agreement():
+	local_rematch = false; remote_rematch = false
+func receive_match_info(data: Dictionary):
+	# Server supplies the client's seat and agreement flags; a local click cannot start a round.
+	var next_round = int(data.get("round",match_round))
+	var assigned = int(data.get("seat",seat))
+	if next_round < match_round or assigned not in [1,2]: return
+	if next_round > match_round:
+		match_round = next_round; seat = assigned; reset_agreement(); match_started.emit(seat,match_round)
+	else:
+		local_rematch = bool(data.get("local",local_rematch)); remote_rematch = bool(data.get("remote",remote_rematch))
+		rematch_changed.emit(local_rematch,remote_rematch)

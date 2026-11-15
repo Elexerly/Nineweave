@@ -55,6 +55,10 @@ func _complete(result: int, response: int, _headers: PackedStringArray, body: Pa
 		connected.emit()
 		if _operation == "create": room_created.emit(code)
 		joined.emit(code,seat); _timer.start()
+	if data.has("match") and data.match is Dictionary:
+		var previous_round = match_round
+		receive_match_info(data.match)
+		if match_round > previous_round: sequence = 0
 	if data.has("characters"):
 		if not data.characters is Dictionary or not receive_characters(data.characters): return
 	if data.has("opponent") and not str(data.opponent).is_empty():
@@ -77,3 +81,7 @@ func leave() -> void:
 	if is_instance_valid(_request): _request.cancel_request()
 	if is_instance_valid(_timer): _timer.stop()
 	_busy = false; token = ""; code = ""; seat = 0; sequence = 0; remote_character_id = "auric_rex"
+
+func request_rematch() -> void:
+	if _busy or local_rematch: return
+	_send("/rooms/"+code+"/rematch",HTTPClient.METHOD_POST,{"round":match_round,"token":token},"rematch")

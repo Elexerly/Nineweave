@@ -23,7 +23,7 @@ func run():
 	ok(ui.page == "title" and ui.controls.has_all(["computer","online","local","settings","how"]),"title choices")
 	ui.controls.computer.pressed.emit(); await frames()
 	ok(ui.overlay == "setup" and ui.controls.has("choose_o"),"difficulty and seat chooser")
-	ui.controls.choose_x.pressed.emit(); ui.thinking = false; await frames()
+	ui.controls.choose_x.pressed.emit(); ui._confirm_hero("vesper_vale","You"); ui.cinematic.advance(2.81); ui.thinking = false; await frames()
 	ok(ui.mode == "computer" and ui.human_mark == 1 and ui.turn_label == "Turn: X","X first")
 	ui.start_game("local")
 	# Simulated pointer input travels through the board's real hit-test API.
@@ -51,7 +51,7 @@ func run():
 	ui.debug_load_position(F.big_tactic(1).serialize()); ui._debug_capture = false
 	ok(ui.play_cell(2,2) and not ui.board.win_fx.is_empty(),"win animation starts")
 	ok(ui.display_player() == 1,"winning player keeps the crown through victory")
-	ui.board.advance(4); ui._process(.01); ui.cinematic.age = .25; ui.cinematic.skip(); await frames()
+	ui.board.advance(4); ui._process(.01); ui.cinematic.age = .85; ui.cinematic.skip(); await frames()
 	ok(ui.game.winner() == 1 and ui.overlay == "result" and ui.controls.has("again"),"win finishes in victory panel")
 	ok(ui._result_t >= .99 and ui.controls.again.visible and ui.controls.again.modulate.a > .95,"win panel fully visible at end of win animation")
 	ok(ui.info_lines()[0] == "Victory! X wins the game" and ui.active_label == "Victory! X wins the game","info pill shows the result after game over")
@@ -151,7 +151,7 @@ func run():
 	var ga = Rules.new(); var gb = Rules.new()
 	var events = {"created":"","joined":false,"opponent":false,"errors":0,"left":false}
 	a.room_created.connect(func(code): events.created = code)
-	b.joined.connect(func(_code,seat): events.joined = seat == 2)
+	b.joined.connect(func(_code,seat): events.joined = seat == 3-a.seat)
 	a.opponent_joined.connect(func(): events.opponent = true)
 	a.error.connect(func(_msg): events.errors += 1)
 	a.opponent_left.connect(func(): events.left = true)
@@ -164,7 +164,7 @@ func run():
 	var random = RandomNumberGenerator.new(); random.seed = 848
 	while ga.status == 0:
 		var moves = ga.legal_moves(); var m = moves[random.randi_range(0,moves.size()-1)]
-		(a if ga.turn == 1 else b).send_move(m.x,m.y,ga.history.size()+1)
+		(a if ga.turn == a.seat else b).send_move(m.x,m.y,ga.history.size()+1)
 		ok(ga.compact() == gb.compact(),"two-way state sync")
 	ok(ga.status != 0 and received_a == received_b,"online reaches terminal result")
 	b.leave(); ok(events.left,"opponent left signal")
@@ -181,9 +181,12 @@ func run():
 	ok(ui.online_state == "waiting" and ui.room_code.length() == 5,"room code screen")
 	ui.invite_demo_rival(); await frames()
 	ok(ui.page == "game" and ui.mode == "online" and ui.remote_ready,"demo enters same game screen")
-	ui._debug_capture = false; ui.play_cell(0,4)
+	ui.cinematic.advance(2.81); ui._debug_capture = false
+	if ui.human_mark == 1: ui.play_cell(0,4)
 	for i in range(220):
 		ui._process(.02)
+		if ui.game.history.size() == 1 and ui.game.turn == ui.human_mark and not ui.thinking:
+			var legal_move = ui.game.legal_moves()[0]; ui.play_cell(legal_move.x,legal_move.y)
 		if ui.game.history.size() >= 2: break
 	ok(ui.game.history.size() == 2 and ui.online_sequence == 2,"demo simulated remote reply")
 	ok(not ui.undo_move(),"online undo disabled")

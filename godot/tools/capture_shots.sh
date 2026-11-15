@@ -12,6 +12,7 @@ mkdir -p "$OUT" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
 shot() { # size scenario progress name
   "$GODOT" --path "$ROOT" --rendering-method gl_compatibility --resolution "$1" --script res://tools/capture_shots.gd -- --scenario "$2" --progress "$3" --out "$OUT/$1-$4.png"
 }
+if [ "${ROUND4_ONLY:-0}" != 1 ]; then
 for size in 390x844 844x390 867x553 2601x1659 669x787 1366x1024 1024x768 1280x720; do
   for scenario in title midgame claim win; do
     shot "$size" "$scenario" 0.45 "$scenario"
@@ -42,6 +43,14 @@ done
 for size in 390x844 844x390 867x553 669x787 1366x1024; do
   for scenario in character_select lock_in claim_pop win_spotlight duo_panel last_move reaction; do
     shot "$size" "$scenario" 0.5 "$scenario"
+  done
+done
+
+fi
+# Round 4: approved illustrated roster, transitions and all result identities.
+for size in 390x844 390x664 867x553 1366x1024; do
+  for scenario in select_p1 select_p2 versus midgame_heads winner winner_cpu draw; do
+    shot "$size" "$scenario" 0.6 "r4-$scenario"
   done
 done
 

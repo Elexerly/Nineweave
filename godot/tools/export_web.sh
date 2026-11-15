@@ -18,6 +18,8 @@ if [ ! -f "$XDG_DATA_HOME/godot/export_templates/4.7.2.stable/web_nothreads_rele
   printf 'WEB EXPORT: FAIL (4.7.2.stable web_nothreads_release.zip template is missing)\n'; exit 2
 fi
 (cd "$ROOT" && tar cf - --exclude=./.godot --exclude='*.log' --exclude='*.import' .) | (cd "$STAGE/project" && tar xf -)
+# Hero-specific lossy import settings must survive the isolated re-import.
+(cd "$ROOT" && find assets/heroes -name '*.import' -print | tar cf - -T -) | (cd "$STAGE/project" && tar xf -)
 # Disable editor-only network listeners in the isolated import/export process.
 mkdir -p "$XDG_CONFIG_HOME/godot"
 cat > "$XDG_CONFIG_HOME/godot/editor_settings-4.7.tres" <<'SETTINGS'
@@ -35,12 +37,11 @@ MODE=--export-release
 cp "$ROOT/THIRD_PARTY_NOTICES.md" "$OUT/THIRD_PARTY_NOTICES.md"
 mkdir -p "$OUT/LICENSES"
 cp "$ROOT/assets/fonts/"*OFL.txt "$OUT/LICENSES/"
-SHA=$(cd "$ROOT/.." && git rev-parse HEAD 2>/dev/null || printf unknown)
-BRANCH=$(cd "$ROOT/.." && git branch --show-current 2>/dev/null || printf unknown)
-TREE='clean committed tree'
-[ -z "$(cd "$ROOT/.." && git status --porcelain 2>/dev/null)" ] || TREE='UNCOMMITTED CHANGES PRESENT (not a pure commit build)'
+SHA=unqueried
+BRANCH=unqueried
+TREE="Owner requested no git commands"
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 3e
+Nineweave Round 4
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE

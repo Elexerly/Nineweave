@@ -11,7 +11,7 @@ const Cinema = preload("res://characters/cinematic.gd")
 const Callout = preload("res://fx/comic_callout.gd")
 const A = preload("res://fx/announcer.gd")
 const P = preload("res://ui/paint.gd")
-const Rig = preload("res://characters/rig.gd")
+const Rig = preload("res://characters/art.gd")
 const R = preload("res://characters/roster.gd")
 const Select = preload("res://characters/select.gd")
 const ButtonArt = preload("res://ui/ornate_button.gd")
@@ -107,7 +107,7 @@ func live_pops(ui):
 			ok(not region.intersects(Rect2(rig.position,rig.size)),"%s pop clear of live hero %s" % [s,key])
 		for id in ["home","settings","undo","hint"]:
 			if ui.controls.has(id): ok(not region.intersects(Rect2(ui.controls[id].position,ui.controls[id].size)),"%s pop clear of button %s" % [s,id])
-		ok(c.hero.bust == c.banner and Rect2(region.position,region.size).encloses(Rect2(c.hero_rect.position,c.hero_rect.size)),"%s pop hero inside its panel (bust in banner)" % s)
+		ok(c.hero.bust and Rect2(region.position,region.size).encloses(Rect2(c.hero_rect.position,c.hero_rect.size)),"%s illustrated reaction head inside its panel" % s)
 		ok(c.mouse_filter == Control.MOUSE_FILTER_IGNORE and c.hero.mouse_filter == Control.MOUSE_FILTER_IGNORE,"%s pop non-modal" % s)
 		# The board keeps taking moves while the pop plays.
 		var target = ui.game.active_board
@@ -127,7 +127,7 @@ func live_pops(ui):
 	# Relayout (round 3b #7) still re-places, and can switch card <-> banner.
 	ui.set_view_size(Vector2(1366,1024)); ui.start_game("local")
 	ui.debug_load_position(F.position(q,1,0).serialize(),"local"); ui._debug_capture = false; ui._input_beat = 0; ui.play_cell(0,2)
-	ok(not ui.cinematic.banner and not ui.cinematic.hero.bust,"1366x1024 card pop, full figure")
+	ok(not ui.cinematic.banner and ui.cinematic.hero.bust,"1366x1024 card pop uses illustrated reaction head")
 	ui.set_view_size(Vector2(568,320))
 	ok(ui.cinematic.active and ui.cinematic.banner and ui.cinematic.hero.bust and ui.cinematic.region == Cinema.pop_region(ui.layout,0),"resize to 568x320 re-places as a banner")
 	ui.go_home()
@@ -212,29 +212,13 @@ func spotlight_inset():
 		ok(safe.encloses(frame.grow(3)) and frame.position.y >= safe.position.y+50,id+" inset inside the panel, below the title")
 		ok(not frame.grow(3).intersects(plaque.grow(6)),id+" inset clear of the plaque")
 		ok(not cap.intersects(plaque.grow(6)) and cap.position.y > frame.end.y+3,id+" caption clear of plaque frame")
-	# Head/crown fully inside the inset clip for all 12 heroes through the defeat clip;
-	# Auric's sceptre (the stray "1") sits entirely outside the clip.
+	# Illustrated replacements preserve each full 256px canvas, with no per-face crops.
 	for h in R.DATA:
-		var rig = Rig.new(); rig.bust_view = Cinema.LOSER_VIEW; rig.bust_lift = Cinema.LOSER_LIFT
-		rig.size = Vector2(157,178); root.add_child(rig); rig.configure(h.id,true); rig.set_clip("defeat")
-		for age in [0.0,.3,3.0]:
-			rig.clip_age = age; rig.pose(1.4)
-			var head = part_bounds(rig,"head")
-			ok(head.position.y >= 1 and rig.size.x*.2 < head.get_center().x and head.get_center().x < rig.size.x*.8,"%s head inside inset at %.1f s %s" % [h.id,age,head])
-		if h.id == "auric_rex":
-			ok(part_bounds(rig,"prop").position.x >= rig.size.x,"sceptre fully clipped, no edge sliver")
+		var rig = Rig.new(); rig.size = Vector2(157,178); root.add_child(rig); rig.configure(h.id,true); rig.set_clip("defeat")
+		for face in ["neutral","pout","panic"]:
+			rig.expression = face; rig.refresh_texture()
+			ok(rig.clip_contents and rig.texture.get_size() == Vector2(256,256),"%s complete illustrated head canvas %s" % [h.id,face])
 		rig.free()
-func part_bounds(rig, name: String) -> Rect2:
-	var out = Rect2(); var first = true
-	for n in rig.actor.find_children("*","Node2D",true,false):
-		if not (n.name == name or rig.bones[name].is_ancestor_of(n)) or n.mesh == null or not n.visible: continue
-		var xf = Transform2D.IDENTITY; var c = n
-		while c != rig: xf = c.get_transform()*xf; c = c.get_parent()
-		for v in n.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]:
-			var p = xf*Vector2(v.x,v.y)
-			if first: out = Rect2(p,Vector2.ZERO); first = false
-			else: out = out.expand(p)
-	return out
 
 # ------------------------------------------------------------ 10. select plaque
 func select_plaque():
@@ -279,14 +263,14 @@ func controls_and_scorecards(ui):
 			for n in [0,1,9]:
 				var c = MainScript.claimed_line(n,g.line.size.x,card.size.y)
 				ok(c.width <= g.line.size.x-4 and c.fs >= 11,"%s '%s' fits beside the medallion" % [s,c.text])
-	# Live spotlight: the real cinematic uses the bust-aspect inset and caption lane.
-	var aspect = Cinema.LOSER_VIEW.x/Cinema.LOSER_VIEW.y
+	# The approved Round 4 winner card replaces the old loser inset completely.
 	for size in SIZES:
 		ui.set_view_size(Vector2(size[0],size[1])); ui.debug_scenario("win_spotlight",.5)
-		var c = ui.cinematic; var lr: Rect2 = c.loser_rect
-		ok(c.active and c.kind == "spotlight" and absf(lr.size.x/lr.size.y-aspect) < .01 and c.loser.size.is_equal_approx(lr.size),"%s live inset uses the bust aspect %s rig %s" % [str(size),lr,c.loser.size])
-		ok(not Cinema.loser_caption(lr).intersects(Cinema.spotlight_plaque(c.region).grow(6)) and c.loser.bust_lift == Cinema.LOSER_LIFT,"%s live caption clear of plaque" % str(size))
+		var c = ui.cinematic; var g = Cinema.card_geometry(ui.layout.size,"spotlight")
+		ok(c.active and c.kind == "spotlight" and c.hero_rect == g.hero and c.hero.art_key == "victory" and not c.loser.visible,"%s live winner card uses only the winner's illustrated victory pose" % str(size))
+		ok(Rect2(Vector2.ZERO,ui.layout.size).encloses(c.hero_rect) and not g.again.intersects(g.menu),"%s winner art inside viewport, actions apart" % str(size))
 		c.clear()
+
 	ui.start_game("computer",1); ui._debug_capture = true; ui.thinking = false
 	var tight = MainScript.scorecard_geometry(Rect2(454-128,62,100.3,48),true)
 	ok(tight.name.end.x <= tight.center.x-tight.radius,"568x320 Rival AI ends before the medallion")

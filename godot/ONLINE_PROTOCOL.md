@@ -89,3 +89,49 @@ payload and consumes the same seat map. Moves/acknowledgements and rules snapsho
 are unchanged. No new endpoint or network request is introduced. Local selection
 changes take effect in the next room. Theme changes never change a move, a rules
 snapshot, or either player's selected character.
+
+## Round 4 — side assignment and rematch agreement (v3 flow extension)
+
+Player identity stays attached to the transport, not the X/O seat. The room authority
+randomly assigns X/O for the first match (both choices tested with seeded RNG).
+Every accepted rematch swaps the seats. X always moves first. Character IDs and
+screen names stay with their players; the seat-keyed character map swaps with them.
+Loopback's host/guest references remain stable even when the host is O.
+
+New transport interface:
+
+- `request_rematch()` requests agreement for the current, finished round.
+- `rematch_changed(local_agreed, remote_agreed)` updates the result UI.
+- `match_started(assigned_seat, round_number)` is the only restart authority.
+- `local_rematch`, `remote_rematch`, `match_round`, `rematch_status()` expose state.
+
+One agreement displays `WAITING FOR OPPONENT…` on that client and
+`OPPONENT WANTS A REMATCH` plus ACCEPT on the other. Duplicate requests are
+idempotent. Requests during a live game are ignored. Both agreements atomically
+clear the rules state, sequence and agreements, increment the round, swap seats,
+exchange the new character map, and emit `match_started` to both clients. The
+controller then runs the 2.8-second versus screen. Leaving a room cancels it.
+The explicitly labelled local demo peer agrees after a one-second simulated delay;
+real HTTP peers never auto-agree.
+
+Future HTTP backend extension (client implemented; no backend is shipped):
+
+`POST /api/nineweave/rooms/<CODE>/rematch`
+
+```json
+{"round":1,"token":"opaque-seat-secret"}
+```
+
+Authenticated responses and normal polls can carry:
+
+```json
+{"match":{"round":1,"seat":2,"local":false,"remote":true}}
+```
+
+When both agree, return the new round, swapped seat, reset sequence/state, and
+updated character map in the same response/poll envelope. The client rejects old
+round metadata, resets its sequence on a round increment, and starts presentation
+only from the authoritative `match` event. A click alone cannot restart HTTP.
+The backend must bind tokens to stable players, derive their current seats, require
+both agreements under its room transaction, and reject stale round requests.
+The base transport reports unsupported rematch clearly for a legacy backend.

@@ -19,7 +19,7 @@ func capture():
 		elif arg.begins_with("--out="): out = arg.trim_prefix("--out=")
 		elif arg.begins_with("--progress="): progress = float(arg.trim_prefix("--progress="))
 		i += 1
-	if not scenario in ["title","midgame","thinking","claim","claim_end","win","win_end","duo","duo_hinge","hinge","settings","online","character_select","lock_in","claim_pop","win_spotlight","duo_panel","last_move","reaction"]:
+	if not scenario in ["select_p1","select_p2","versus","midgame_heads","winner","winner_cpu","draw","title","midgame","thinking","claim","claim_end","win","win_end","duo","duo_hinge","hinge","settings","online","character_select","lock_in","claim_pop","win_spotlight","duo_panel","last_move","reaction"]:
 		print("CAPTURE FAIL: unknown scenario ",scenario); quit(2); return
 	var main = Main.instantiate(); root.add_child(main)
 	main.set_view_size(Vector2(root.size)); main.settings.values.sound = false; main.sound.enabled = false

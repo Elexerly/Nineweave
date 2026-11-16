@@ -9,6 +9,8 @@ export XDG_DATA_HOME=${XDG_DATA_HOME:-/tmp/nineweave-export-xdg/data}
 export XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/nineweave-export-xdg/config}
 export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/nineweave-export-xdg/cache}
 mkdir -p "$STAGE/project" "$OUT" "$XDG_DATA_HOME/godot/export_templates" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+# Godot resolves export paths from the staged project, so anchor caller-relative output.
+OUT=$(CDPATH= cd -- "$OUT" && pwd)
 # XDG stays under /tmp. Read existing templates via a symlink; never installs.
 TEMPLATES=${TEMPLATES:-/home/box/.local/share/godot/export_templates/4.7.2.stable}
 if [ -d "$TEMPLATES" ] && [ ! -e "$XDG_DATA_HOME/godot/export_templates/4.7.2.stable" ]; then
@@ -49,7 +51,7 @@ if git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   TAG=$(git -C "$REPO" describe --tags --exact-match 2>/dev/null || true)
 fi
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 5v (all hero videos, Beth maskless)
+Nineweave Round 5b (tournament bracket, all hero videos)
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE

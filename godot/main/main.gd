@@ -30,6 +30,7 @@ const Social = preload("res://net/social.gd")
 const ChatPanel = preload("res://ui/chat_panel.gd")
 ## Round 5a: "<Name> joined" beat before the versus intro (protocol 2 only).
 const JOINED_BEAT = 1.6
+const Tournament = preload("res://tournament/flow.gd")
 ## Result panel appears at this fraction of the game-win animation (real flow and debug poses).
 const RESULT_AT = .75
 const FIREWORK_BURSTS = 7
@@ -49,6 +50,7 @@ class Layer extends Control:
 var game = Rules.new()
 var settings = Store.new()
 var profile = Profile.new()
+var tournament = Tournament.new()
 var account = DeviceAccount.new()
 var online_api = JsonAPI.new()
 ## Explicit harness/capture opt-out; never derived from character-select onboarding.
@@ -204,6 +206,7 @@ func _ready():
 			if not account.store.data.email_prompt_done:
 				page = "email"; _email_draft = account.store.data.email
 		account.refresh()
+	tournament.setup(self)
 	_apply_preferences(); _relayout(); _rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
 	call_deferred("_clip_preview")
@@ -382,7 +385,8 @@ func _confirm_hero(id: String, display_name: String):
 			_hero_focus = "aurelia" if id != "aurelia" else "cryon"; _name_draft = "PLAYER 2"
 			_rebuild(); return
 		var pending = _pending_game; _pending_game = {}; _select_player = 0
-		if pending.mode == "resume": resume_game()
+		if pending.mode == "tournament": tournament.create(id)
+		elif pending.mode == "resume": resume_game()
 		else: start_game(pending.mode,pending.mark,false,true)
 	else:
 		sound.stinger(Roster.audio_index(id),"tag",-.35)
@@ -446,6 +450,7 @@ func _result_controls_refresh():
 ## re-rolls. Round 3c product default, reversible: pass rematch=false to always re-roll.
 func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false, present: bool = false):
 	if _require_screen_name(): return
+	if not tournament.starting: tournament.match_active = false
 	if new_mode == "online" and not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
 	_leave_online()
 	cinematic.clear(); callout.callout = ""; _spotlight_done = false
@@ -470,7 +475,7 @@ func _schedule_ai():
 	should = should or (mode == "online" and demo_rival != null and remote_ready and game.turn != human_mark)
 	if should:
 		thinking = true; thinking_age = 0
-		ai.begin(game,str(settings.values.difficulty),ai_seed+game.history.size()*17)
+		ai.begin(game,tournament.match_level if tournament.match_active else str(settings.values.difficulty),ai_seed+game.history.size()*17)
 func play_cell(b: int, c: int) -> bool:
 	if _require_screen_name(): return false
 	if cinematic.active and cinematic.kind == "versus": return false
@@ -572,6 +577,7 @@ func info_lines() -> Array:
 	return ["Active Board: "+board_name,"Play your "+("X" if game.turn == 1 else "O")+" "+tail]
 func undo_move() -> bool:
 	# Round 3e: Undo exists only against the computer (spec item 1).
+	if tournament.match_active and tournament.recorded: return false
 	if mode == "online": message = "Online moves are final. Start another room to play again."; return false
 	if mode != "computer": return false
 	thinking = false; hint_busy = false; sound.clear_announcer(); callout.callout = ""
@@ -586,11 +592,14 @@ func request_hint():
 	if mode != "computer": return
 	hint_ai.begin(game,"Hard",444+game.history.size()); hint_busy = true; _hint_ply = game.history.size()
 func _save_match():
+	if tournament.match_active:
+		tournament.capture_result(game.status); return
 	if mode == "computer" and page == "game" and not _debug_capture:
 		settings.saved_game = {"state":game.serialize(),"human":human_mark,"seconds":match_seconds,"character":profile.data.character_id,"rival_character":rival_character} if game.status == 0 else {}
 		settings.save()
 func resume_game():
 	if _require_screen_name(): return
+	tournament.match_active = false
 	if settings.saved_game.is_empty(): return
 	if not game.deserialize(settings.saved_game.state): settings.saved_game = {}; return
 	mode = "computer"; _debug_capture = false; human_mark = int(settings.saved_game.human)
@@ -609,7 +618,8 @@ func go_home():
 	if tutorial.active: tutorial.skip()
 	_pending_game = {}; _select_player = 0
 	sound.clear_announcer()
-	_save_match(); _leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
+	_save_match(); tournament.match_active = false
+	_leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
 func show_settings():
 	if _require_screen_name(): return
 	if tutorial.active: return
@@ -1198,6 +1208,7 @@ func _rebuild():
 		hero_select.selected_id = _hero_focus if not _hero_focus.is_empty() else str(profile.data.character_id)
 		hero_select.display_name = _name_draft if not _name_draft.is_empty() else str(profile.data.display_name)
 		hero_select.reduced_motion = board.reduced_motion
+		hero_select.trophy_counts = tournament.session.wins
 		hero_select.heading = "PLAYER %d · CHOOSE HERO" % _select_player if _select_player > 0 else "CHOOSE YOUR HERO"
 		hero_select.blocked_id = str(profile.data.character_id) if _select_player == 2 else ""
 		if _select_player > 0: hero_select.display_name = "PLAYER %d" % _select_player
@@ -1208,6 +1219,7 @@ func _rebuild():
 		hero_video.prefetch_hero(hero_select.selected_id)
 		add_child(hero_select); ui_nodes.append(hero_select)
 		if _select_player > 0: hero_select.field.editable = false
+	elif page == "tournament": tournament.build(s)
 	elif page == "game":
 		var hdr: Rect2 = layout.header
 		var big = layout.mode == "landscape"
@@ -1301,6 +1313,8 @@ func _update_hero_states():
 func _title_controls(s: Vector2):
 	_button("hero","Hero",Rect2(s.x-100,12,84,44),open_character_select)
 	var items = [["computer","Play vs Computer",func(): overlay = "setup"; _rebuild(),true],["online","Play Online",request_online,false],["local","Pass & Play",func(): request_game("local"),false]]
+	items.insert(1,["tournament","Tournament" if tournament.session.active.is_empty() else "Resume Tournament",func():
+		if not _require_screen_name(): tournament.request(),false])
 	if not settings.saved_game.is_empty(): items.append(["resume","Resume Journey",request_resume,false])
 	var bh = clampf(s.y*.064,44,58)
 	if _title.hinge:
@@ -1313,14 +1327,15 @@ func _title_controls(s: Vector2):
 		_button("how","How to Play",Rect2(menu_x+bw*.52,y,bw*.48,44),func(): start_tutorial(true))
 	elif _title.landscape:
 		bh = clampf(s.y*.12,44,58)
-		var bw = minf(310,(s.x-40)*.36); var gap = bh+(8 if s.y < 420 else 14)
+		var columns = 3 if s.y < 420 else 2
+		var bw = minf(310,(s.x-40-(columns-1)*12)/columns); var gap = bh+(8 if s.y < 420 else 14)
 		items.append(["settings","Settings",show_settings,false])
 		items.append(["how","How to Play",func(): start_tutorial(true),false])
 		var y = maxf(_title.tagline.end.y+(8 if s.y < 420 else 12),s.y*.4 if s.y >= 420 else 0)
 		for i in range(items.size()):
 			var item = items[i]
-			var x = s.x*.5-bw-6 if i%2 == 0 else s.x*.5+6
-			_button(item[0],item[1],Rect2(x,y+int(i/2)*gap,bw,bh),item[2],item[3])
+			var x = (s.x-(bw*columns+(columns-1)*12))*.5+(i%columns)*(bw+12)
+			_button(item[0],item[1],Rect2(x,y+int(i/columns)*gap,bw,bh),item[2],item[3])
 	else:
 		var bw = minf(330,s.x-64); var gap = bh+10
 		var y = maxf(s.y*.47,_title.tagline.end.y+s.y*.14)
@@ -2140,6 +2155,9 @@ func _result_chat():
 func _winner_controls(s: Vector2):
 	var g = Cinematic.card_geometry(s,"draw" if game.status == 3 else "spotlight")
 	for item in [["again","REMATCH",g.again,rematch,true],["menu","MAIN MENU",g.menu,go_home,false]]:
+		if item[0] == "again" and tournament.match_active:
+			item[1] = "REPLAY MATCH" if game.status == 3 else ("THE CROWN" if tournament.session.active.get("status","") == "champion" else "VIEW BRACKET")
+			item[3] = tournament.after_match
 		var button = preload("res://characters/match_button.gd").new()
 		button.caption = item[1]; button.position = item[2].position; button.size = item[2].size; button.accent = item[4]
 		button.z_index = 31; button.pressed.connect(item[3]); button.pressed.connect(func(): sound.cue("ui"))

@@ -11,6 +11,7 @@ signal name_changed(value: String)
 class Portrait extends Button:
 	var index: int = 0
 	var selected: bool = false
+	var trophies: int = 0
 	var rig
 	func _ready():
 		for state in ["normal","hover","pressed","focus","disabled"]: add_theme_stylebox_override(state,StyleBoxEmpty.new())
@@ -31,6 +32,10 @@ class Portrait extends Button:
 			P.text(self,lines[0],Rect2(3,size.y-band,size.x-6,half),fs,P.PALE,P.SANS)
 			P.text(self,lines[1],Rect2(3,size.y-band+half,size.x-6,half),fs,P.PALE,P.SANS)
 		if selected: P.outline(self,r.grow(-1),P.BLUE,2)
+		if trophies > 0:
+			draw_rect(Rect2(size.x-27,3,24,17),Color("091224"))
+			preload("res://tournament/bracket_view.gd").trophy(self,Rect2(size.x-26,5,12,12),P.GOLD)
+			P.text(self,str(trophies),Rect2(size.x-14,3,12,17),11,P.GOLD)
 	func _frame() -> StyleBoxFlat:
 		var style = StyleBoxFlat.new(); style.bg_color = Color("14243a") if not selected else Color("25425c")
 		style.border_color = P.GOLD if selected else Color("35445a"); style.set_border_width_all(2)
@@ -40,6 +45,7 @@ var display_name: String = "You"
 var heading: String = "CHOOSE YOUR HERO"
 var blocked_id: String = ""
 var reduced_motion: bool = false
+var trophy_counts: Dictionary = {}
 var hinge: Rect2
 var geo: Dictionary
 var hero
@@ -57,6 +63,7 @@ func _ready():
 	hero.position = geo.hero.position; hero.size = geo.hero.size; hero.reduced_motion = reduced_motion; add_child(hero)
 	for i in range(R.DATA.size()):
 		var tile = Portrait.new(); tile.index = i; tile.selected = R.DATA[i].id == selected_id
+		tile.trophies = int(trophy_counts.get(R.DATA[i].id,0))
 		tile.position = geo.tiles[i%geo.per_page].position; tile.size = geo.tiles[i%geo.per_page].size
 		tile.disabled = R.DATA[i].id == blocked_id; tile.modulate.a = .28 if tile.disabled else 1.0
 		tile.pressed.connect(func(): focus_hero(R.DATA[i].id))

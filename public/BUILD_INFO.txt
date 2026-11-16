@@ -1,10 +1,11 @@
-Nineweave Round 4c (online)
+Nineweave Round 5c (dual versus videos, victory screen, online tournaments, readable online lobby)
 engine: 4.7.2.stable.official.ed1daf0bf
 preset: Web / Compatibility / variant/thread_support=false
 mode: --export-release
-built: 2026-11-15T20:13:05Z
-source SHA: unqueried
-branch: unqueried
-tree: Owner requested no git commands
-staging: /tmp/nineweave-export.D6JGmp/project
+built: 2026-11-16T03:56:18Z
+source SHA: 93aad5ddb2a8a80bead9595ab51658cc5971b1c0
+branch: godot-game
+tag: round5c
+tree: 
+staging: /tmp/nineweave-export.RgWLMV/project
 notices: THIRD_PARTY_NOTICES.md and LICENSES/*OFL.txt

@@ -1,6 +1,8 @@
 extends Node
 ## Verified Ogg files only. Readiness is an O(1) lookup; prefetch never awaits HTTP.
 const Roster = preload("res://characters/roster.gd")
+# Bump when approved media replaces clips at the same sidecar URLs.
+const CONTENT_VERSION = "r5v"
 const MAX_BYTES = 64 * 1024 * 1024 # 64 MiB, with an additional eight-clip ceiling.
 const MAX_CLIPS = 8
 const MAX_ATTEMPTS = 3
@@ -31,7 +33,7 @@ func _ready():
 			if name.ends_with(".part") or (name.ends_with(".ogv") and (folder != Roster.canonical_id(folder) or not allowed(folder,name.trim_suffix(".ogv")))):
 				_remove(root_path.path_join(folder).path_join(name))
 	# Validate persisted files once. Never infer a clip from an uncatalogued file.
-	# A size-matching .ok sidecar means this file was already verified, so mark it
+	# A current-version, size-matching .ok sidecar means this file was verified, so mark it
 	# ready immediately instead of re-walking every Ogg page on each web start.
 	for id in catalog:
 		for kind in catalog[id]:
@@ -40,6 +42,9 @@ func _ready():
 			_remove(path+".part")
 			if not FileAccess.file_exists(path):
 				_remove(path+".ok"); continue
+			# Legacy pilot stamps must not preserve the replaced Jack/Max clips.
+			if FileAccess.file_exists(path+".ok") and not FileAccess.get_file_as_string(path+".ok").begins_with(CONTENT_VERSION+":"):
+				_remove(path); continue
 			var stamped = _stamped_bytes(path)
 			if stamped > 0:
 				_remember(key(id,kind),path,stamped); continue
@@ -150,11 +155,13 @@ func _evict():
 		bytes -= int(entries[victim].bytes); _remove(entries[victim].path); entries.erase(victim)
 func _stamp(path: String, bytes: int):
 	var file = FileAccess.open(path+".ok",FileAccess.WRITE)
-	if file != null: file.store_string(str(bytes)); file.close()
+	if file != null: file.store_string(CONTENT_VERSION+":"+str(bytes)); file.close()
 func _stamped_bytes(path: String) -> int:
 	var mark = path+".ok"
 	if not FileAccess.file_exists(path) or not FileAccess.file_exists(mark): return 0
-	var listed = FileAccess.get_file_as_string(mark).strip_edges()
+	var stamp = FileAccess.get_file_as_string(mark).strip_edges()
+	if not stamp.begins_with(CONTENT_VERSION+":"): return 0
+	var listed = stamp.trim_prefix(CONTENT_VERSION+":")
 	if not listed.is_valid_int(): return 0
 	var file = FileAccess.open(path,FileAccess.READ)
 	if file == null: return 0

@@ -72,7 +72,7 @@ func beth_screens():
 	ok(ui.cinematic.kind == "versus" and ui.cinematic.winner_id == "madame_solstice","versus stars Beth Solstice")
 	ok(Roster.get_hero(ui.cinematic.winner_id).name.to_upper() == "BETH SOLSTICE","versus hero caption is BETH SOLSTICE")
 	ok(not "BETH" in Roster.get_hero(ui.cinematic.loser_id).name.to_upper(),"rival caption is not Beth Solstice")
-	# Stage a Beth Solstice win and open the winner cutscene (no victory clip, so the code spotlight).
+	# Stage a Beth Solstice win and open her maskless victory clip.
 	var patterns: Array = []
 	for i in range(9): patterns.append(".........")
 	patterns[0] = "XXXOO...."; patterns[1] = patterns[0]; patterns[2] = "XX.OO...."
@@ -81,6 +81,7 @@ func beth_screens():
 	ui._refresh_labels(); ui._show_spotlight(); await frames()
 	ok(ui.cinematic.kind == "spotlight" and ui.cinematic.winner_id == "madame_solstice","winner cutscene is Beth Solstice")
 	ok(Roster.get_hero(ui.cinematic.winner_id).name.to_upper() == "BETH SOLSTICE","winner subtitle is BETH SOLSTICE")
+	ok(ui.cinematic.video_playing(),"Beth maskless victory clip plays")
 	ui.go_home(); ui.queue_free(); await frames(3)
 	await long_name_layout()
 func long_name_layout():
@@ -127,20 +128,26 @@ func long_name_layout():
 func catalog():
 	var v = Video.new(); v.bundled_override = 1; root.add_child(v)
 	ok(v.bundled() and not v.streaming(),"bundled source policy seam")
-	ok(v.has_clip("shard_jack","intro") and not v.has_clip("shard_jack","victory"),"Jack intro only")
-	ok(v.has_clip("max_granite","intro") and v.has_clip("max_granite","victory"),"Max intro and victory")
+	ok(Roster.DATA.size() == 32 and v.catalog.size() == 32,"manifest covers exactly 32 roster heroes")
+	var clips = 0
 	for hero in Roster.DATA:
-		if hero.id in ["shard_jack","max_granite"]: continue
-		ok(not v.has_clip(hero.id,"intro") and not v.has_clip(hero.id,"victory"),"uncatalogued hero "+hero.id)
+		ok(v.catalog.get(hero.id,[]) == ["intro","victory"],"both clip kinds catalogued for "+hero.id)
+		for kind in Video.KINDS:
+			var path = "res://assets/hero_video/%s/%s.ogv" % [hero.id,kind]
+			ok(v.has_clip(hero.id,kind) and v.is_ready(hero.id,kind) and v.local_path(hero.id,kind) == path,"native bundled clip "+hero.id+"/"+kind)
+			ok(not Cache.ogg_info(path).is_empty(),"complete Theora Ogg "+hero.id+"/"+kind)
+			clips += 1
+	ok(clips == 64,"64 complete roster clips")
 	for alias in Roster.ALIASES:
-		ok(not v.has_clip(alias,"intro") and not v.has_clip(alias,"victory"),"alias invents no clips "+alias)
+		for kind in Video.KINDS:
+			ok(v.has_clip(alias,kind) and v.local_path(alias,kind) == v.local_path(Roster.ALIASES[alias],kind),"alias resolves canonical clip "+alias+"/"+kind)
 	ok(Cache.key("derrick_torque","intro") == "devin_torque/intro","cache canonicalizes aliases")
 	ok(not v.has_clip("../bad","intro") and not v.has_clip("shard_jack","bad"),"unknown/kind rejected")
 	ok(v.local_path("shard_jack","intro") == "res://assets/hero_video/shard_jack/intro.ogv","native res path")
-	ok(v.local_path("shard_jack","victory").is_empty(),"missing native path is never ready")
+	ok(v.local_path("shard_jack","victory") == "res://assets/hero_video/shard_jack/victory.ogv","Jack victory is bundled")
 	ok(v.local_path("max_granite","intro") == "res://assets/hero_video/max_granite/intro.ogv","Max intro is bundled")
-	v.catalog["cryon"] = ["intro"]
-	ok(not v.is_ready("cryon","intro") and v.local_path("cryon","intro").is_empty(),"listed but absent native file is not ready")
+	v.catalog.erase("cryon")
+	ok(not v.is_ready("cryon","intro") and v.local_path("cryon","intro").is_empty(),"uncatalogued native file is not ready")
 	ok(Cache.key("shard_jack","intro") != Cache.key("shard_jack","victory"),"kind participates in cache key")
 	ok(v.cache.get_parent() == null and v.cache.pending.is_empty(),"native never activates HTTP/cache")
 	ok(Cache.ogg_info(v.local_path("shard_jack","intro")).get("audio",false),"pilot is complete Theora with Vorbis")
@@ -207,7 +214,7 @@ func cache_cases():
 	var partial = FileAccess.open(path+"/shard_jack/intro.ogv.part",FileAccess.WRITE); partial.store_buffer(jack.slice(0,30)); partial.close()
 	c = Cache.new(); c.root_path = path; c.catalog = {"shard_jack":["intro"]}; root.add_child(c)
 	ok(c.is_ready("shard_jack","intro"),"persistent complete cache rediscovered")
-	ok(FileAccess.file_exists(path+"/shard_jack/intro.ogv.ok"),"verified cache writes a size stamp")
+	ok(FileAccess.file_exists(path+"/shard_jack/intro.ogv.ok"),"verified cache writes a versioned size stamp")
 	ok(not FileAccess.file_exists(path+"/shard_jack/victory.ogv") and not FileAccess.file_exists(path+"/shard_jack/intro.ogv.part"),"restart drops uncatalogued clips and abandoned writes")
 	c.free(); await frames()
 	c = Cache.new(); c.root_path = path; c.catalog = {"shard_jack":["intro"]}; root.add_child(c)
@@ -219,13 +226,23 @@ func cache_cases():
 	c = Cache.new(); c.root_path = path; c.catalog = {"shard_jack":["intro"]}; root.add_child(c)
 	ok(not c.is_ready("shard_jack","intro") and not FileAccess.file_exists(intro),"stale stamp does not rescue a truncated file")
 	c.free(); await frames()
+	# A previous pilot's verified file must be downloaded again even if its size still matches.
+	var legacy = FileAccess.open(intro,FileAccess.WRITE); legacy.store_buffer(kept); legacy.close()
+	var old_stamp = FileAccess.open(intro+".ok",FileAccess.WRITE); old_stamp.store_string(str(kept.size())); old_stamp.close()
+	c = Cache.new(); c.root_path = path; c.catalog = {"shard_jack":["intro"]}; root.add_child(c)
+	ok(not c.is_ready("shard_jack","intro") and not FileAccess.file_exists(intro) and not FileAccess.file_exists(intro+".ok"),"legacy pilot stamp invalidates replaced clip despite matching size")
+	c.free(); await frames()
 	# Restore a complete file without a stamp so later cases can still copy from disk if needed.
 	var restore = FileAccess.open(intro,FileAccess.WRITE); restore.store_buffer(kept); restore.close()
 	var v = Video.new(); v.bundled_override = 0; v.cache.root_path = TEST_ROOT.path_join("stream")
-	var fake = Fake.new(); v.cache.request_factory = func(): return fake
+	var streaming_requests: Array = []
+	v.cache.request_factory = func():
+		var fake = Fake.new(); streaming_requests.append(fake); return fake
 	root.add_child(v)
 	ok(v.streaming() and not v.bundled() and not v.is_ready("shard_jack","intro"),"streaming never reads bundled pilot")
-	v.prefetch_hero("shard_jack"); fake.respond_bytes(200,jack)
+	v.prefetch_hero("shard_jack")
+	ok(streaming_requests.size() == 2,"web lazily requests both catalogued Jack clips")
+	streaming_requests[0].respond_bytes(200,jack)
 	ok(v.local_path("shard_jack","intro").begins_with("user://"),"streaming only returns verified user cache")
 	v.free(); await frames()
 func pair_requested(requests: Array, first: String, second: String) -> bool:
@@ -250,6 +267,7 @@ func late_download():
 			if req in delivered or req.requests.is_empty(): continue
 			var url = str(req.requests[0].url)
 			if "shard_jack/intro" in url: req.respond_bytes(200,pilot("shard_jack","intro")); delivered[req] = true
+			elif "shard_jack/victory" in url: req.respond_bytes(200,pilot("shard_jack","victory")); delivered[req] = true
 			elif "max_granite/intro" in url: req.respond_bytes(200,pilot("max_granite","intro")); delivered[req] = true
 			elif "max_granite/victory" in url: req.respond_bytes(200,pilot("max_granite","victory")); delivered[req] = true
 		ui.hero_video.cache._process(0)
@@ -327,12 +345,14 @@ func controller():
 	ok(not cinema.video_playing() and cinema.duration() == 1,"enabling reduced motion stops active video")
 	cinema.reduced_motion = false
 	ui.profile.data.character_id = "shard_jack"; ui.game.status = 1; ui._show_spotlight()
-	ok(not cinema.video_playing() and cinema.duration() == 5,"Jack missing victory preserves spotlight")
+	ok(cinema.video_playing(),"Jack full-motion victory now plays")
 	ui.game.status = 3; ui._show_spotlight(); ok(cinema.kind == "draw" and not cinema.video_playing(),"draw never uses victory")
 	ui.profile.data.character_id = "max_granite"; ui.game.status = 1; cinema.reduced_motion = true; ui._show_spotlight()
 	ok(not cinema.video_playing() and cinema.duration() == 1,"reduced winner uses short code animation")
 	ui.profile.data.character_id = "shard_jack"; ui._begin_versus()
 	ok(not cinema.video_playing() and cinema.duration() == .65,"reduced intro disables video")
+	var live_source = cinema.video_source
+	cinema.video_source = null # Explicitly exercise missing/download-pending fallback with a full roster.
 	cinema.reduced_motion = false; ui.profile.data.character_id = "vesper_vale"; ui.rival_character = "auric_rex"; ui._begin_versus()
 	ok(not cinema.video_playing() and cinema.duration() == Motion.VERSUS_SECONDS,"no intro original duration")
 	cinema.seek(1.4); var position_before = cinema.hero.position; cinema.seek(.1); cinema.seek(1.4)
@@ -341,7 +361,7 @@ func controller():
 		ui.debug_scenario(scene,0); ui.debug_seek_cinematic(.2); var position = cinema.hero.position
 		ui.debug_seek_cinematic(3.5); ui.debug_seek_cinematic(.2)
 		ok(not cinema.video_playing() and position == cinema.hero.position,"analytic debug capture "+scene)
-	var live_source = cinema.video_source; var both = TwoIntros.new(); cinema.video_source = both
+	var both = TwoIntros.new(); cinema.video_source = both
 	cinema.reduced_motion = false; ui._begin_versus()
 	ok(cinema.video_overlay.sides[0].video and cinema.video_overlay.sides[1].video and both.held == 2,"two ready intros play together")
 	cinema.advance(8.1); cinema.video_overlay.sides[0].node.finished.emit()

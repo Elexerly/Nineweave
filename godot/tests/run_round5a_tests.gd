@@ -116,7 +116,7 @@ func start_match(bundle, overrides: Dictionary = {}):
 	ui.create_online(); ui.transport.now_source = func(): return device_now
 	respond_end(bundle,"/rooms",201,waiting_env()); quiet(bundle)
 	ui.transport._poll(); respond(bundle,"/rooms/N9ABC?",200,env(3,0,overrides)); quiet(bundle)
-	ui._joined_beat_done(); ui.cinematic.advance(3.01)
+	ui._joined_beat_done(); ui.cinematic.advance(3.01); ui.cinematic.skip()
 
 func run():
 	T0 = Time.get_unix_time_from_datetime_string("2026-11-15T12:00:00")
@@ -180,7 +180,7 @@ func old_server():
 	respond(bundle,"/rooms/N9ABC?",200,old_env()); quiet(bundle)
 	ok(ui.page == "game" and ui.cinematic.kind == "versus","old server: joining goes straight into versus (round 4g)")
 	ok(ui.opponent_name == "OldFriend" and ui.side_name(2) == "OldFriend","old opponent string still names the rival")
-	ui.cinematic.advance(3.01)
+	ui.cinematic.advance(3.01); ui.cinematic.skip()
 	ok(not ui.controls.has("chat") and not ui.chat_capable(),"old server: no chat button in game")
 	ui.toggle_chat(); ok(not ui.chat_open and not is_instance_valid(ui.chat_view),"old server: chat cannot open")
 	ok(ui.online_lines()[0].begins_with("Turn time"),"old server: plain countdown from turn_expires_at")
@@ -235,7 +235,7 @@ func waiting_room():
 	ui._joined_beat_done()
 	ok(ui.page == "game" and ui.cinematic.kind == "versus","then the existing versus intro")
 	ok(ui.cinematic.loser_name == "NightNight" and ui.cinematic.winner_name == "Weaver","versus labels use server screen names")
-	ui.cinematic.advance(3.01)
+	ui.cinematic.advance(3.01); ui.cinematic.skip()
 	ok(ui.side_name(1) == "Weaver" and ui.side_name(2) == "NightNight","in-game plates use screen names")
 	ui.go_home(); ui.free(); await frames()
 	# Joiner whose room still reports waiting sees the same screen.

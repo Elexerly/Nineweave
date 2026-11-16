@@ -259,7 +259,7 @@ func hint_and_highlight(ui):
 		var saved_state = Loopback.assignment_rng.state
 		if Loopback.assignment_rng.randi_range(1,2) == 1:
 			Loopback.assignment_rng.state = saved_state; break
-	ui.create_online(true); ui.invite_demo_rival(); ui.cinematic.advance(3.01)
+	ui.create_online(true); ui.invite_demo_rival(); ui.cinematic.advance(3.01); ui.cinematic.skip()
 	ok(not ui._debug_capture,"online match leaves debug capture off")
 	ok(ui.mode == "online" and ui.page == "game" and ui.remote_ready,"loopback match started")
 	ok(ui.play_cell(4,4),"online local move sent")

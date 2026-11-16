@@ -1,9 +1,130 @@
 {
+  "aiden_vortex": [
+    "intro",
+    "victory"
+  ],
+  "alex_wilder": [
+    "intro",
+    "victory"
+  ],
+  "aurelia": [
+    "intro",
+    "victory"
+  ],
+  "auric_rex": [
+    "intro",
+    "victory"
+  ],
+  "bramble_ox": [
+    "intro",
+    "victory"
+  ],
+  "cobalt_bastion": [
+    "intro",
+    "victory"
+  ],
+  "cryon": [
+    "intro",
+    "victory"
+  ],
+  "daphne": [
+    "intro",
+    "victory"
+  ],
+  "devin_torque": [
+    "intro",
+    "victory"
+  ],
+  "dylan_volt": [
+    "intro",
+    "victory"
+  ],
+  "ember_quill": [
+    "intro",
+    "victory"
+  ],
+  "erick_comet": [
+    "intro",
+    "victory"
+  ],
+  "ethan_ricochet": [
+    "intro",
+    "victory"
+  ],
+  "grayson_quake": [
+    "intro",
+    "victory"
+  ],
+  "james_ii": [
+    "intro",
+    "victory"
+  ],
+  "jason_danger": [
+    "intro",
+    "victory"
+  ],
+  "kellen_byte": [
+    "intro",
+    "victory"
+  ],
+  "kite_hollow": [
+    "intro",
+    "victory"
+  ],
+  "lumen_pike": [
+    "intro",
+    "victory"
+  ],
+  "madame_solstice": [
+    "intro",
+    "victory"
+  ],
   "max_granite": [
     "intro",
     "victory"
   ],
+  "nyx_thread": [
+    "intro",
+    "victory"
+  ],
+  "pope_slam": [
+    "intro",
+    "victory"
+  ],
+  "professor_gilt": [
+    "intro",
+    "victory"
+  ],
+  "rose_valor": [
+    "intro",
+    "victory"
+  ],
+  "ryan_blaze": [
+    "intro",
+    "victory"
+  ],
+  "sara": [
+    "intro",
+    "victory"
+  ],
   "shard_jack": [
-    "intro"
+    "intro",
+    "victory"
+  ],
+  "simon_shade": [
+    "intro",
+    "victory"
+  ],
+  "siren_coil": [
+    "intro",
+    "victory"
+  ],
+  "tempest_vega": [
+    "intro",
+    "victory"
+  ],
+  "vesper_vale": [
+    "intro",
+    "victory"
   ]
 }

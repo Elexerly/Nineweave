@@ -22,7 +22,11 @@ session. Other non-transient 4xx responses are also terminal. Files download to
 `.part`; only complete Theora Ogg page sequences, EOS for every logical stream,
 and matching Content-Length (when supplied) are atomically renamed into place.
 Vorbis BOS identifies whether a clip has audio. Readiness uses an in-memory index;
-existing files are validated once when the web cache starts. LRU limits are the
+existing files are validated once when the web cache starts. A versioned `.ok`
+stamp records the verified length and `CONTENT_VERSION`; legacy pilot stamps
+are discarded with their clip so replaced Jack/Max media is fetched again.
+Current stamps avoid another Ogg page walk, and length changes still trigger
+validation. Bump `CONTENT_VERSION` whenever media at an existing URL changes. LRU limits are the
 named `MAX_BYTES` (64 MiB) and `MAX_CLIPS` (8) constants. Active playback pins files;
 release immediately reapplies the cap. A fully pinned cache may temporarily exceed
 its cap. LRU ordering is session-local; persisted files are reindexed at startup.
@@ -36,7 +40,7 @@ player without a finished signal is also released so it cannot trap the match.
 Existing guarded skip and `_cinematic_finished("spotlight")` show the normal
 results. Reduced motion uses the short code scenes. Analytic `seek()` clears video
 and poses the original code animation, preserving deterministic capture scenarios.
-For live pilot review, start an actual Jack/Max match and Max victory; analytic
+For live video review, start an actual match with any roster heroes; analytic
 capture tools intentionally show the code fallback.
 
 Video audio uses the existing Master bus. Sound off mutes it and releases ducking;
@@ -55,7 +59,15 @@ All HTTP tests use `tests/fake_http.gd` and isolated `user://hero-video-suite` d
 which the suite removes. The Round 4 legacy controller suite explicitly supplies
 no video source to retain its original three-second fallback timing assertions.
 
-## Local validation (2026-11-15)
+## Round 5v integration (2026-11-15)
+
+All 32 canonical roster IDs now have both intro and victory clips (64 total).
+The approved 540×720 Theora/Vorbis files are copied without re-encoding;
+`jack_fm/ogv/{intro,victory}_best.ogv` maps to `shard_jack`, Daphne maps to
+`daphne`, and Beth remains `madame_solstice`. Beth's ten maskless WebPs reuse
+the existing filenames and import sidecars. See `ROUND5V.md` for validation.
+
+## Earlier pilot validation (2026-11-15)
 
 - All 13 suites passed, including audio, Round 3e, Round 4b timing/capture, and
   120 hero-video checks. No script errors or warnings in the final suite run.

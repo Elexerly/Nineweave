@@ -41,6 +41,7 @@ func run():
 	await tutorial_skip_and_replay()
 	await tutorial_online_updates()
 	await tutorial_input()
+	await tutorial_manual_navigation()
 	await email_creation_paths()
 	await offline_first_play()
 	await email_editing_and_restart()
@@ -126,6 +127,33 @@ func tutorial_online_updates():
 	ui.tutorial.skip()
 	ok(ui.board.win_fx.player == 2,"online result presentation resumes after tutorial")
 	ui.free(); await frames()
+func tutorial_manual_navigation():
+	var bundle = make_ui("manual"); var ui = bundle.ui
+	ui.start_game("local")
+	var t = ui.tutorial
+	ok(not t.manual and t.controls.back.disabled,"first step starts automatic with Back disabled")
+	t._process(0); t._process(Tutorial.STEP_SECONDS+.1)
+	ok(t.step == 1 and not t.manual,"automatic progression remains available")
+	t.controls.back.pressed.emit()
+	ok(t.step == 0 and t.manual,"Back returns to first step and takes control")
+	t._process(0); t._process(30)
+	ok(t.step == 0 and t.active,"manual reader never auto advances")
+	t.controls.next.pressed.emit()
+	ok(t.step == 1 and not t.controls.back.disabled,"Next advances exactly one step")
+	ui.set_view_size(Vector2(844,390)); await frames()
+	t._process(30)
+	ok(t.step == 1 and t.manual,"resize preserves manual pause")
+	for i in range(4): t.controls.next.pressed.emit()
+	ok(t.step == 5 and t.controls.next.caption == "Done" and t.active,"last step waits with Done")
+	t._process(30)
+	ok(t.active and t.step == 5,"last manual step remains readable")
+	t.controls.back.pressed.emit(); t.controls.next.pressed.emit(); t.controls.next.pressed.emit()
+	ok(not t.active and ui.settings.values.tutorial_completed,"Done exits and persists completion")
+	ui.start_tutorial(true)
+	ok(not t.manual and t.step == 0,"explicit How to Play replay starts fresh")
+	t.controls.next.pressed.emit(); t.controls.skip.pressed.emit()
+	ok(not t.active and ui.settings.values.tutorial_completed,"Skip works after manual takeover")
+	ui.queue_free(); await frames()
 func tutorial_input():
 	var bundle = make_ui("input"); var ui = bundle.ui; ui.start_game("local")
 	var touch = InputEventScreenTouch.new(); touch.pressed = true
@@ -273,8 +301,8 @@ func responsive_forms():
 	for view_size in [Vector2(360,640),Vector2(390,620),Vector2(390,844),Vector2(568,320),Vector2(844,390),Vector2(867,553),Vector2(1366,1024)]:
 		ui.set_view_size(view_size); ui.go_home(); ui.start_tutorial(true); await frames()
 		var viewport = Rect2(Vector2.ZERO,ui.layout.size)
-		ok(not ui.tutorial.controls.has("next") or not ui.tutorial.controls.next.visible,"Next is not used; tutorial auto-advances")
-		for control in [ui.tutorial.controls.skip,ui.tutorial.caption,ui.tutorial.counter]:
+		ok(ui.tutorial.controls.next.visible and ui.tutorial.controls.back.visible,"manual navigation stays visible")
+		for control in [ui.tutorial.controls.skip,ui.tutorial.controls.back,ui.tutorial.controls.next,ui.tutorial.caption,ui.tutorial.counter]:
 			ok(viewport.encloses(control.get_rect()),"tutorial content fits "+str(view_size))
 			ok(not control.get_rect().intersects(ui.layout.board),"tutorial copy/buttons never cover board "+str(view_size))
 		ok(ui.tutorial.caption.get_line_count()*ui.tutorial.caption.get_line_height() <= ui.tutorial.caption.size.y,"tutorial first sentence fits at readable size")

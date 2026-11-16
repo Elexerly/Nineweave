@@ -257,7 +257,7 @@ func tutorial_auto_advance():
 	ui.start_game("computer",2,true,true)
 	ui.cinematic.advance(.81); ui.cinematic.skip()
 	ok(ui.tutorial.active and ui.overlay == "tutorial" and ui.tutorial.step == 0,"first match still auto-opens the tutorial")
-	ok(not ui.tutorial.controls.has("next"),"Next button is removed so a stuck web Next cannot block first play")
+	ok(ui.tutorial.controls.has_all(["back","next"]) and not ui.tutorial.manual,"Back/Next are available while first play starts automatic")
 	ok(ui.tutorial.controls.skip.visible and ui.tutorial.controls.skip.size.y >= 44,"Skip remains on the first step")
 	ok(Tutorial.STEP_SECONDS >= 3.0 and ui.tutorial.arrow_progress() < 1,"auto-advance waits until after the arrow would finish")
 	# Main process is off in this suite; drive the tutorial clock explicitly.

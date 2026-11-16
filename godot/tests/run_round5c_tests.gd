@@ -97,7 +97,20 @@ func streamed_pair():
 	overlay.clear(); ok(video.cache.pins.is_empty() and overlay.sides.is_empty(),"skip frees both streamed decoders and pins")
 	video.cache.entries.erase("james_ii/intro")
 	overlay.begin("versus","shard_jack","james_ii",1,Vector2(390,844))
-	ok(overlay.sides[0].video and not overlay.sides[1].video and overlay.sides[1].node.hero_id == "james_ii","unloaded opponent keeps its own still art beside the available clip")
+	ok(overlay._waiting_for_intros and not overlay.sides[0].video and not overlay.sides[1].video,"one ready intro waits for its partner before either starts")
+	overlay._process(overlay.INTRO_WAIT_SECONDS+.1)
+	ok(not overlay._waiting_for_intros and overlay.sides[0].video and not overlay.sides[1].video and overlay.sides[1].node.hero_id == "james_ii","timeout uses available clip with opponent still art")
+	overlay.clear()
+	video.cache.entries.clear()
+	var ended = [0]
+	overlay.finished.connect(func(): ended[0] += 1)
+	overlay.begin("versus","shard_jack","james_ii",1,Vector2(390,844))
+	ok(overlay._waiting_for_intros,"both cold clips enter bounded waiting")
+	overlay._process(overlay.INTRO_WAIT_SECONDS+.1)
+	ok(ended[0] == 1 and not overlay.active and not overlay.visible,"unavailable intros time out without trapping match")
+	overlay.begin("versus","shard_jack","james_ii",1,Vector2(390,844))
+	overlay.clear(); overlay._process(20)
+	ok(ended[0] == 1 and not overlay._waiting_for_intros,"skip during loading cancels deferred intro start")
 	overlay.clear(); overlay.free(); video.free(); await frames()
 func fallback_and_requests():
 	for failure in ["cap404","old_caps","list404","html404"]:

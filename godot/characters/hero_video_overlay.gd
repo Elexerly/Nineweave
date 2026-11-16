@@ -4,6 +4,9 @@ const Roster = preload("res://characters/roster.gd")
 const Rig = preload("res://characters/art.gd")
 const P = preload("res://ui/paint.gd")
 const PORTRAIT = Vector2(540,720)
+# Cold web caches need time to download both intros before either starts.
+# Skip remains available, and unavailable media cannot block a match forever.
+const INTRO_WAIT_SECONDS = 12.0
 signal finished
 signal audio_active(value: bool)
 var source
@@ -18,19 +21,26 @@ var _chrome: Control
 var _play_age: float = 0
 var _generation: int = 0
 var display_lane: Rect2 = Rect2()
+var _waiting_for_intros: bool = false
+var _wait_age: float = 0
+var _intro_request: Array = []
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE; visible = false
-func begin(kind: String, first: String, second: String, mark: int, extent: Vector2) -> bool:
+func begin(kind: String, first: String, second: String, mark: int, extent: Vector2, allow_wait: bool = true) -> bool:
 	clear()
 	if source == null or not kind in ["versus","spotlight"]: return false
 	var ids = [Roster.canonical_id(first),Roster.canonical_id(second)] if kind == "versus" else [Roster.canonical_id(first)]
 	var clip_kind = "intro" if kind == "versus" else "victory"
+	_waiting_for_intros = allow_wait and kind == "versus" and _intros_pending(ids)
+	if _waiting_for_intros:
+		source.prefetch_pair(ids[0],ids[1])
+		_intro_request = [kind,first,second,mark]
 	var paths: Array = []
 	for id in ids:
-		var path: String = source.acquire(id,clip_kind)
+		var path: String = "" if _waiting_for_intros else source.acquire(id,clip_kind)
 		paths.append(path)
 		if not path.is_empty(): _held.append([id,clip_kind])
-	if _held.is_empty(): return false
+	if _held.is_empty() and not _waiting_for_intros: return false
 	if kind == "versus": display_lane = Rect2()
 	scene_kind = kind; active = true; visible = true; size = extent
 	for i in range(ids.size()):
@@ -56,6 +66,12 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 	for side in sides:
 		if side.video and decode_enabled: side.node.play()
 	return true
+func _intros_pending(ids: Array) -> bool:
+	if source == null or not source.has_method("streaming") or not source.streaming(): return false
+	for id in ids:
+		if source.has_clip(id,"intro") and not source.is_ready(id,"intro") and not source.cache.missing.has(id+"/intro"):
+			return true
+	return false
 func relayout(extent: Vector2):
 	size = extent
 	for i in range(sides.size()):
@@ -88,6 +104,7 @@ func _side_finished(index: int, generation: int):
 	active = false; _set_audio(false); finished.emit()
 func clear():
 	_generation += 1
+	_waiting_for_intros = false; _wait_age = 0; _intro_request.clear()
 	active = false; visible = false; _set_audio(false)
 	for side in sides:
 		if side.video: side.node.stop(); side.node.stream = null
@@ -99,7 +116,18 @@ func clear():
 	if is_instance_valid(_chrome): _chrome.visible = false; _chrome.queue_free()
 	_chrome = null
 func _process(delta):
-	if not active or not decode_enabled: return
+	if not active: return
+	if _waiting_for_intros:
+		_wait_age += delta
+		var ids = [Roster.canonical_id(_intro_request[1]),Roster.canonical_id(_intro_request[2])]
+		if _intros_pending(ids) and _wait_age < INTRO_WAIT_SECONDS: return
+		var request = _intro_request.duplicate()
+		# Restart atomically so both ready players begin on the same frame.
+		# A timeout may use one ready clip plus the other hero's still art.
+		if not begin(request[0],request[1],request[2],request[3],size,false):
+			finished.emit()
+		return
+	if not decode_enabled: return
 	_play_age += delta
 	# A decoder/open failure must never strand a modal screen. Normal completion
 	# uses finished; this only catches a player that stopped without emitting it.
@@ -140,4 +168,4 @@ func _draw_chrome():
 		P.text(_chrome,"VS",Rect2(size.x*.5-25,size.y*.5-22,50,44),24,P.GOLD)
 	if scene_kind != "versus": return
 	_chrome.draw_rect(Rect2(size.x*.5-64,size.y-38,128,26),Color(.02,.04,.09,.8))
-	P.text(_chrome,"TAP TO SKIP",Rect2(12,size.y-38,size.x-24,26),14,P.MUTED)
+	P.text(_chrome,"LOADING INTROS · TAP TO SKIP" if _waiting_for_intros else "TAP TO SKIP",Rect2(12,size.y-38,size.x-24,26),14,P.MUTED)

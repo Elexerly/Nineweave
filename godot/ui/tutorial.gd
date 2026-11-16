@@ -1,7 +1,7 @@
 extends Control
 ## Guided examples on the actual board renderer, with a separate rules model.
 ## No demo move enters the real match, undo stack, transport or resume save.
-## Auto-advances about three seconds per step; Skip remains, and a tap can jump ahead.
+## Auto-advances until a player takes control. Back/Next pause auto-play; Skip remains.
 const Rules = preload("res://kernel/rules.gd")
 const P = preload("res://ui/paint.gd")
 const ButtonArt = preload("res://ui/ornate_button.gd")
@@ -17,6 +17,7 @@ const STEPS = [
 const STEP_SECONDS = 3.0
 signal finished(skipped: bool)
 var active: bool = false
+var manual: bool = false
 var step: int = 0
 var age: float = 0
 var reduced_motion: bool = false
@@ -37,13 +38,19 @@ func _ready():
 	var button = ButtonArt.new(); button.name = "skip"; button.font_size = 20
 	button.caption = "Skip"; button.pressed.connect(skip)
 	add_child(button); controls.skip = button
+	for id in ["back", "next"]:
+		var nav = ButtonArt.new(); nav.name = id; nav.font_size = 20
+		nav.caption = "Back" if id == "back" else "Next"
+		nav.pressed.connect(previous_step if id == "back" else manual_next)
+		add_child(nav); controls[id] = nav
 func _label(font_size: int, color: Color) -> Label:
 	var label = Label.new(); label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER; label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_override("font",P.SANS); label.add_theme_font_size_override("font_size",font_size)
 	label.add_theme_color_override("font_color",color); add_child(label); return label
 func begin(live_board, layout: Dictionary, is_replay: bool = false):
-	board = live_board; active = true; replay = is_replay; step = 0
+	board = live_board; active = true; replay = is_replay; step = 0; manual = false
+	_advance_guard_until = 0; _mouse_echo = false
 	reduced_motion = board.reduced_motion
 	board.clear_effects(); board.game = demo; board.frozen = true
 	show(); relayout(layout); _show_step()
@@ -54,8 +61,11 @@ func relayout(layout: Dictionary):
 	var w = size.x-x-16
 	counter.position = Vector2(x,12); counter.size = Vector2(w-100,44)
 	controls.skip.position = Vector2(x+w-90,12); controls.skip.size = Vector2(90,44)
-	# Next was removed; the caption can use the space that button used to occupy.
-	_caption_rect = Rect2(x,62,w,maxf(56,_board_rect.position.y-70)) if portrait else Rect2(x,76,w,size.y-100)
+	var nav_y = minf(size.y-60, _board_rect.end.y+16) if portrait else size.y-60
+	var nav_w = (w-12)/2
+	controls.back.position = Vector2(x,nav_y); controls.back.size = Vector2(nav_w,44)
+	controls.next.position = Vector2(x+nav_w+12,nav_y); controls.next.size = Vector2(nav_w,44)
+	_caption_rect = Rect2(x,62,w,maxf(56,_board_rect.position.y-70)) if portrait else Rect2(x,76,w,size.y-152)
 	caption.position = _caption_rect.position; caption.size = _caption_rect.size
 	queue_redraw()
 func _show_step():
@@ -76,7 +86,17 @@ func _show_step():
 	elif step == 2: board.notify_move(5,7)
 	counter.text = "HOW TO PLAY · %d / %d" % [step+1,STEPS.size()]
 	caption.text = STEPS[step]
+	controls.back.disabled = step == 0
+	controls.next.caption = "Done" if step == STEPS.size()-1 else "Next"
 	board._dirty = true; board.refresh(); queue_redraw()
+func previous_step():
+	if not active: return
+	manual = true
+	if step > 0: step -= 1; _show_step()
+func manual_next():
+	if not active: return
+	manual = true
+	next_step()
 func next_step():
 	if not active: return
 	if step == STEPS.size()-1: _finish(false)
@@ -93,11 +113,14 @@ func _process(delta: float):
 	age += delta
 	for key in board.mark_ages: board.mark_ages[key] = age
 	board.refresh(); queue_redraw()
-	if age >= STEP_SECONDS: next_step()
+	if not manual and age >= STEP_SECONDS: next_step()
 func arrow_progress() -> float:
 	return 1.0 if reduced_motion else smoothstep(0,.65,age)
 func _over_skip(point: Vector2) -> bool:
-	return is_instance_valid(controls.skip) and controls.skip.get_global_rect().grow(6).has_point(point)
+	# Let the buttons receive their own press/release; never advance behind them.
+	for button in controls.values():
+		if is_instance_valid(button) and button.get_global_rect().grow(6).has_point(point): return true
+	return false
 func _clear_mouse_echo(): _mouse_echo = false
 func _pointer_release(event) -> bool:
 	# Prefer _input so a sibling game-chrome button cannot swallow the gesture on web.
@@ -111,10 +134,10 @@ func _pointer_release(event) -> bool:
 	var now = Time.get_ticks_msec()
 	if is_touch:
 		if now >= _advance_guard_until:
-			next_step(); _advance_guard_until = now+350
+			manual_next(); _advance_guard_until = now+350
 		return true
 	if _mouse_echo or now < _advance_guard_until: return true
-	next_step(); _mouse_echo = true; _clear_mouse_echo.call_deferred()
+	manual_next(); _mouse_echo = true; _clear_mouse_echo.call_deferred()
 	return true
 func _input(event):
 	if not active or not visible: return
@@ -128,7 +151,8 @@ func _gui_input(event):
 func _unhandled_key_input(event):
 	if not active or not event is InputEventKey or not event.pressed or event.echo: return
 	if event.keycode == KEY_ESCAPE: skip()
-	elif event.keycode in [KEY_SPACE,KEY_ENTER]: next_step()
+	elif event.keycode in [KEY_SPACE,KEY_ENTER,KEY_RIGHT]: manual_next()
+	elif event.keycode == KEY_LEFT: previous_step()
 	else: return
 	get_viewport().set_input_as_handled()
 func _center(b: int, c: int) -> Vector2:

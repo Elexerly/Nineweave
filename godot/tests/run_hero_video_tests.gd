@@ -260,7 +260,9 @@ func late_download():
 		var fake = Fake.new(); requests.append(fake); return fake
 	root.add_child(ui); ui.set_process(false); ui.hero_video.cache.set_process(false); await frames()
 	ui.rival_character = "max_granite"; ui.start_game("computer",1,true,true)
-	ok(requests.size() == 2 and not ui.cinematic.video_playing() and ui.cinematic.duration() == 3,"pending web intros enter code versus immediately")
+	ok(requests.size() == 2 and ui.cinematic.video_playing() and ui.cinematic.video_overlay._waiting_for_intros,"cold web intros keep versus open while loading")
+	ui.cinematic.advance(4.0)
+	ok(ui.cinematic.active and ui.board.frozen and ui.cinematic.duration() == INF,"loading intros hold versus beyond old three-second timeout")
 	var delivered = {}
 	for i in range(6):
 		for req in requests:
@@ -271,8 +273,9 @@ func late_download():
 			elif "max_granite/intro" in url: req.respond_bytes(200,pilot("max_granite","intro")); delivered[req] = true
 			elif "max_granite/victory" in url: req.respond_bytes(200,pilot("max_granite","victory")); delivered[req] = true
 		ui.hero_video.cache._process(0)
-	ok(ui.hero_video.is_ready("shard_jack","intro") and not ui.cinematic.video_playing(),"mid-scene completion never swaps fallback")
-	ui.cinematic.advance(3.01); ok(not ui.board.frozen and ui.play_cell(4,4),"first move never waits on downloads")
+	ui.cinematic.video_overlay._process(0)
+	ok(ui.hero_video.is_ready("shard_jack","intro") and not ui.cinematic.video_overlay._waiting_for_intros and ui.cinematic.video_overlay.sides[0].video and ui.cinematic.video_overlay.sides[1].video,"cold cache completion starts both intro videos")
+	ui.cinematic.advance(.7); ui.cinematic.skip(); ok(not ui.board.frozen and ui.play_cell(4,4),"skip exits loaded intros into playable match")
 	ui.rematch(); ok(ui.cinematic.video_playing(),"next versus uses completed cache")
 	ui.cinematic.advance(.7); ui.cinematic.skip()
 	ui.game.status = 2; ui._show_spotlight()

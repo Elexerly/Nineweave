@@ -11,6 +11,8 @@ const Store = preload("res://settings/store.gd")
 const Loopback = preload("res://net/loopback_transport.gd")
 const HTTP = preload("res://net/http_polling_transport.gd")
 const JsonAPI = preload("res://net/json_api.gd")
+const AccountDeletion = preload("res://net/account_deletion.gd")
+const DeletionScreen = preload("res://ui/deletion_screen.gd")
 const DeviceAccount = preload("res://net/device_account.gd")
 const OnlineScreen = preload("res://ui/online_screen.gd")
 const Recovery = preload("res://net/account_recovery.gd")
@@ -55,6 +57,7 @@ var profile = Profile.new()
 var tournament = Tournament.new()
 var online_tournament = preload("res://tournament/online_flow.gd").new()
 var account = DeviceAccount.new()
+var deletion = AccountDeletion.new()
 var online_api = JsonAPI.new()
 ## Explicit harness/capture opt-out; never derived from character-select onboarding.
 var test_online_bypass: bool = false
@@ -199,6 +202,10 @@ func _ready():
 	account.email_flow_changed.connect(_account_email_flow_changed)
 	account.email_verified.connect(_account_email_verified)
 	account.error.connect(_account_error); add_child(account)
+	deletion.changed.connect(func():
+		if overlay in ["delete_account","local_reset"]: _rebuild())
+	deletion.store = account.store
+	deletion.deleted.connect(_account_deleted); add_child(deletion)
 	recovery.changed.connect(func():
 		if page == "recovery": _rebuild())
 	recovery.recovered.connect(_account_recovered); add_child(recovery)
@@ -221,7 +228,11 @@ func _ready():
 		account.refresh()
 	tournament.setup(self)
 	add_child(online_tournament); online_tournament.setup(self)
-	_apply_preferences(); _relayout(); _rebuild()
+	_apply_preferences(); _relayout()
+	if account.store.deletion_reset_required: _clear_local_account(account.store.deletion_reset_reason == "deleted")
+	if account.store.data.deletion_uncertain:
+		page = "title"; overlay = "account_options"
+	_rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
 	call_deferred("_clip_preview")
 func _on_viewport_resize():
@@ -414,6 +425,10 @@ func _cinematic_finished(kind: String):
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
 func _input(event):
+	if overlay in ["delete_account","local_reset"]:
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_deletion_action("cancel"); get_viewport().set_input_as_handled()
+		return
 	# Recovery is a legitimate pre-account screen. Let its controls receive real
 	# pointer/key events instead of routing every event back through registration.
 	if page == "recovery":
@@ -762,6 +777,7 @@ func _online_ready():
 func _joined_beat_done():
 	if page == "online" and online_state == "joined" and remote_ready and is_instance_valid(transport): _reset_online_match()
 func _capabilities_changed(_caps: Dictionary):
+	if _caps.has("account_deletion"): account.deletion_capable = _caps.account_deletion == true
 	if transport is HTTP:
 		transport.online2 = transport.online2 or social.online2(); transport.chat_enabled = social.chat()
 	if page in ["online","game"] or overlay == "settings": _rebuild()
@@ -1002,7 +1018,7 @@ func _online_room_update(data: Dictionary):
 		message = end_message if not end_message.is_empty() else "This room is closed. Return to the lobby to play again."; _online_status()
 	if page == "game" and overlay == "result" and not end_message.is_empty(): _result_controls_refresh()
 func _name_required() -> bool:
-	return not test_online_bypass and not _debug_capture and not account.store.complete()
+	return not test_online_bypass and not _debug_capture and not account.store.complete() and not account.store.data.deletion_uncertain
 func _require_screen_name(destination: String = "title") -> bool:
 	if not _name_required(): return false
 	if page != "onboarding" or not overlay.is_empty(): _show_onboarding(destination)
@@ -1034,7 +1050,7 @@ func _account_recovered(token: String, player: Dictionary):
 	account.store.keep_device(token,str(player.screen_name))
 	for key in ["tos_version","privacy_version","accepted_at","age_confirmed"]:
 		account.store.data[key] = player[key] if typeof(player.get(key)) == typeof(account.store.data[key]) else (false if key == "age_confirmed" else "")
-	account.store.data.pending_sync = false; account.store.data.registration_rejected = false
+	account.store.data.pending_sync = false; account.store.data.registration_rejected = false; account.store.set_deletion_uncertain(false)
 	account.store.data.email = ""; account.store.data.email_prompt_done = true
 	account._accept_email_player(player,true); account.store.save()
 	_hero_changed = false
@@ -1045,6 +1061,78 @@ func _account_recovered(token: String, player: Dictionary):
 		message = "Welcome back. Confirm your screen name to accept the current terms."; _rebuild(); return
 	if _onboarding_destination == "online": open_online()
 	else: go_home()
+func _deletion_action(kind: String):
+	if overlay == "local_reset":
+		match kind:
+			"review": deletion.proceed()
+			"cancel": deletion.cancel(); overlay = "account_options"; _rebuild()
+			"submit":
+				if deletion.stage == 2 and not deletion.busy and deletion.phrase == "CLEAR THIS DEVICE":
+					deletion.cancel(); _clear_local_account(false)
+		return
+	match kind:
+		"review": deletion.proceed()
+		"submit":
+			if account.busy or account.email_busy or account.rename_pending() or not account.api._current.is_empty():
+				deletion.message = "Wait for your account changes to finish, then try again."; deletion.changed.emit(); return
+			deletion.submit(str(account.store.data.device_token),(account.deletion_capable or account.store.data.deletion_uncertain) and account.store.has_device_token())
+		"cancel":
+			if deletion.busy: return
+			deletion.cancel(); overlay = "settings"; _rebuild()
+func _retire_account_client(node: Node):
+	node.set_block_signals(true); node.set_process(false)
+	for child in node.get_children(): _retire_account_client(child)
+func _account_deleted():
+	_clear_local_account(true)
+func _clear_local_account(deletion_confirmed: bool):
+	# Reached after precise server deletion success OR explicit typed local reset.
+	# Retire request owners rather than letting late callbacks restore old identity.
+	var account_path = account.store.path
+	var marker_io = account.store.deletion_marker_io
+	var account_factory = account.api.request_factory
+	account.api.cancel_all(); _retire_account_client(account); remove_child(account); account.queue_free()
+	account = DeviceAccount.new(); account.store = DeviceAccount.Store.new(account_path); account.store.deletion_marker_io = marker_io
+	for key in account.store.data:
+		account.store.data[key] = false if account.store.data[key] is bool else ""
+	var reset_persisted = account.store.mark_deletion_resolved(deletion_confirmed,"" if deletion_confirmed else "cleared")
+	deletion.store = account.store; account.api.request_factory = account_factory
+	account.onboarding_complete.connect(_account_completed); account.sync_finished.connect(_account_sync_finished)
+	account.name_updated.connect(_account_name); account.player_received.connect(_account_player)
+	account.rename_flow_changed.connect(_settings_name_status); account.email_flow_changed.connect(_account_email_flow_changed)
+	account.email_verified.connect(_account_email_verified); account.error.connect(_account_error); add_child(account)
+	recovery.cancel(); online_api.cancel_all(); lobby_timer.stop(); joined_timer.stop()
+	var lobby_factory = online_api.request_factory
+	_retire_account_client(online_api); remove_child(online_api); online_api.queue_free()
+	online_api = JsonAPI.new(); online_api.request_factory = lobby_factory; online_api.completed.connect(_online_response); add_child(online_api)
+	social.api.cancel_all(); _retire_account_client(social); remove_child(social); social.queue_free()
+	social = Social.new(); social.store = account.store
+	if http_request_factory.is_valid(): social.api.request_factory = http_request_factory
+	social.capabilities_changed.connect(_capabilities_changed)
+	social.blocks_changed.connect(func(_names): blocked_status = "" ; if overlay == "blocked": _rebuild())
+	social.finished.connect(_social_finished); add_child(social); account.player_received.connect(social.merge_player)
+	# No leave POST after deletion: the server has already finished the operation.
+	for client in [transport,demo_rival]:
+		if is_instance_valid(client): _retire_account_client(client); remove_child(client); client.queue_free()
+	transport = null; demo_rival = null; remote_ready = false
+	online_tournament.timer.stop(); online_tournament.api.cancel_all(); _retire_account_client(online_tournament)
+	remove_child(online_tournament); online_tournament.queue_free()
+	online_tournament = preload("res://tournament/online_flow.gd").new(); add_child(online_tournament); online_tournament.setup(self)
+	tournament.session.active = {}; tournament.session.wins = {}; tournament.session.last_events = []; tournament.session.save()
+	tournament.match_active = false; tournament.pending_events = []
+	profile.data = {"version":1,"identity":{},"display_name":"You","character_id":"vesper_vale","onboarded":false}; profile.save()
+	settings.values.player_name = "You"; settings.saved_game = {}; settings.save()
+	_onboarding_name = ""; _email_draft = ""; _email_code_draft = ""; _name_draft = ""; _you_name = ""
+	_room_entry = ""; _room_password = ""; room_code = ""; chat_open = false; _prompt_key = ""
+	leaderboard_me = {}; leaderboard_players = []; public_rooms = []
+	_chat_draft = ""; chat_status = ""; blocked_status = ""; end_message = ""; opponent_name = "Remote player"
+	chat_unread = 0; chat_muted = false; chat_blocked = false; _prompt_sent = ""; _moved_turn = ""; _lobby_pending = false
+	game = Rules.new(); board.game = game; board.clear_effects()
+	_pending_game = {}; thinking = false; hint_busy = false; cinematic.clear()
+	page = "onboarding"; overlay = ""; message = "Your account was deleted." if deletion_confirmed else "Local account details cleared. Earlier server deletion remains unconfirmed."
+	if not reset_persisted:
+		page = "title"; overlay = "account_options"
+		message = "Local reset could not be saved. Automatic account creation remains blocked. Retry clearing this device."
+	_rebuild()
 func _account_name(value: String):
 	settings.set_value("player_name",value); profile.data.display_name = value; profile.save()
 	if overlay == "settings" and controls.has("player_name") and not account.rename_pending():
@@ -1348,6 +1436,11 @@ func _rebuild():
 		# and exclusive for input. Home/Settings/Undo/Hint also overlapped Skip/Next.
 		move_child(tutorial,get_child_count()-1)
 		tutorial.relayout(layout)
+	elif overlay in ["delete_account","local_reset"]:
+		for item in controls.values():
+			item.release_focus(); item.focus_mode = Control.FOCUS_NONE; item.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var view = DeletionScreen.new(); view.size = s; view.flow = deletion; view.local_only = overlay == "local_reset"; view.z_index = 100
+		view.action.connect(_deletion_action); add_child(view); ui_nodes.append(view); controls.merge(view.controls)
 	elif overlay == "account": _build_email_screen(s)
 	elif overlay == "result": _winner_controls(s); _result_chat()
 	elif not overlay.is_empty(): _overlay_controls(s)
@@ -1509,7 +1602,9 @@ func _overlay_controls(s: Vector2):
 			name_field.text_changed.connect(func(value):
 				var clean = value.strip_edges().left(24)
 				settings.set_value("player_name",clean); profile.data.display_name = clean; profile.save())
-		_button("account_email","Account email",Rect2(lx,r.end.y-116,sw*.52-4,44),open_account_email)
+		_button("account_email","Account" if account.deletion_capable or account.store.data.deletion_uncertain else "Account email",Rect2(lx,r.end.y-116,sw*.52-4,44),func():
+			if account.deletion_capable or account.store.data.deletion_uncertain: overlay = "account_options"; _rebuild()
+			else: open_account_email())
 		_button("replay_tutorial","How to play",Rect2(lx+sw*.52+4,r.end.y-116,sw*.48-4,44),func(): start_tutorial(true))
 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
 		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
@@ -1526,6 +1621,19 @@ func _overlay_controls(s: Vector2):
 				else:
 					controls.account_email.size.x = (sw-8)*.5
 					controls.blocked_players.position = Vector2(name_x+(sw+8)*.5,r.position.y+120); controls.blocked_players.size = Vector2((sw-8)*.5,44)
+	elif overlay == "account_options":
+		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
+		_button("edit_account_email","Account email",Rect2(x,y,w,48),open_account_email)
+		if (account.deletion_capable or account.store.data.deletion_uncertain) and account.store.has_device_token():
+			_button("delete_account","Delete account",Rect2(x,y+62,w,48),func():
+				overlay = "delete_account"; deletion.begin())
+		if account.store.data.deletion_uncertain:
+			_modal_label("An earlier deletion may have completed. Automatic account creation is blocked.",Rect2(x,y+122,w,90),17,P.PALE)
+			_button("resolve_deletion","Sign in to resolve",Rect2(x,y+220,w,48),func():
+				recovery.begin(); page = "recovery"; overlay = ""; _rebuild())
+			_button("start_fresh","Start fresh on this device",Rect2(x,y+282,w,48),func():
+				overlay = "local_reset"; deletion.begin())
+		_button("account_options_back","Back",Rect2(x,y+(344 if account.store.data.deletion_uncertain else 130),w,48),func(): overlay = "settings"; _rebuild())
 	elif overlay == "cosmetics":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
 		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.BACKGROUNDS).name,Rect2(x,y,w,44),func():
@@ -1961,7 +2069,7 @@ func _draw_modal(node: Control):
 		_draw_result(node,r,short); return
 	node.draw_rect(Rect2(Vector2.ZERO,s),Color(.001,.005,.015,.88))
 	P.panel(node,r,false,1,true); P.outline(node,r.grow(-8),P.GOLD.darkened(.4),1)
-	var heading = {"settings":"SETTINGS","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
+	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
 	if overlay == "online_end": heading = Clock.cancelled_title(str(transport.room.get("end_reason","")) if transport is HTTP else "")
 	P.text(node,heading,Rect2(r.position+Vector2(20,23),Vector2(r.size.x-72,44)),25,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
 	if overlay == "setup":

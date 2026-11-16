@@ -23,6 +23,7 @@ var _refreshing: bool = false
 var _recovering_device: bool = false
 var _account_unavailable: bool = false
 ## Session-only capability: neither a saved address nor config can enable writes.
+var deletion_capable: bool = false
 var email_capable: bool = false
 var email_capability_known: bool = false
 var email_busy: bool = false
@@ -102,13 +103,22 @@ func continue_without_email():
 	store.skip_email()
 func _ready():
 	api.completed.connect(_completed); add_child(api)
+func _deletion_blocked() -> bool:
+	# Another open tab may have submitted deletion since this account loaded.
+	if OS.has_feature("web") or store.deletion_marker_io.is_valid(): store.merge_deletion_marker()
+	return store.data.deletion_uncertain or store.deletion_reset_required
 func refresh():
+	if _deletion_blocked():
+		if not busy and not _refreshing and store.has_device_token():
+			_refreshing = true; api.submit("/me",HTTPClient.METHOD_GET,{},"me",store.data.device_token)
+		return
 	if busy or _refreshing: return
 	if store.complete() and (store.data.pending_sync or not store.has_device_token()): sync_pending()
 	elif store.has_device_token():
 		_refreshing = true; _account_unavailable = false
 		api.submit("/me",HTTPClient.METHOD_GET,{},"me",store.data.device_token)
 func sync_pending():
+	if _deletion_blocked(): return
 	if busy or not store.complete() or store.online_ready(): return
 	store.data.pending_sync = true; store.save()
 	_name_draft = store.data.screen_name; _consent = {}
@@ -116,6 +126,8 @@ func sync_pending():
 	_syncing = true; busy = true; _account_unavailable = false
 	_submit_registration()
 func create_screen_name(value: String):
+	if _deletion_blocked():
+		error.emit("An earlier deletion may have completed. Sign in with your verified email to resolve this before creating an account."); return
 	if busy: return
 	var clean = value.strip_edges()
 	if not Store.valid_screen_name(clean):
@@ -123,6 +135,8 @@ func create_screen_name(value: String):
 	_name_draft = clean; _consent = Store.consent_payload(); busy = true; _syncing = false; _account_unavailable = false
 	_submit_registration()
 func _submit_registration():
+	if _deletion_blocked():
+		busy = false; _syncing = false; return
 	# Register with name only so current production (no consent columns yet) still works.
 	# Consent is recorded on the following PATCH /me, or kept locally if that API is older.
 	if not store.has_device_token():
@@ -174,6 +188,10 @@ func choose_hero(id: String):
 	if not Roster.valid(id) or not store.online_ready(): return
 	api.submit("/me",HTTPClient.METHOD_PATCH,{"last_hero_id":Roster.canonical_id(id)},"hero",store.data.device_token)
 func _recover_device(operation: String):
+	if _deletion_blocked():
+		api.cancel_all(); _refreshing = false; busy = false
+		error.emit("An earlier deletion may have completed. Your session was rejected. No replacement account was created. Use Account to sign in and resolve this."); return
+	deletion_capable = false
 	# Discard queued requests too: every one carries the invalid bearer token.
 	api.cancel_all(); _refreshing = false
 	store.data.device_token = ""; store.data.pending_sync = true
@@ -259,6 +277,7 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 func _accept_email_player(player: Dictionary, replace_email: bool = false):
 	email_capability_known = true; _account_unavailable = false
 	var capabilities = player.get("capabilities",{})
+	deletion_capable = capabilities is Dictionary and capabilities.get("account_deletion",false) == true
 	email_capable = capabilities is Dictionary and capabilities.get("email",false) == true
 	var server_email = player.get("email","")
 	if not server_email is String: server_email = ""

@@ -1041,6 +1041,7 @@ func _email_action(kind: String, value: String):
 	if _require_screen_name(): return
 	if kind == "save_email":
 		if not account.save_email(value): return
+		_email_draft = account.store.data.email
 		# Saving is not a navigation action during onboarding. Account setup may
 		# still be in flight; its completion will open the code-entry stage.
 		if page == "email" or account.email_busy or account.email_pending: return

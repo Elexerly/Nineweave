@@ -305,6 +305,14 @@ func controller():
 	var cinema = ui.cinematic
 	ok(cinema.video_playing() and cinema.video_overlay.sides.size() == 2,"versus uses split overlay")
 	ok(cinema.video_overlay.sides[0].video and cinema.video_overlay.sides[1].video,"Jack and Max intros both play")
+	var video = cinema.video_overlay
+	video.set_sound_enabled(true)
+	ok(video.sides[0].node.volume == 1 and video.sides[1].node.volume == 0,"only local left intro is audible")
+	video.set_sound_enabled(false)
+	ok(video.sides[0].node.volume == 0 and video.sides[1].node.volume == 0,"sound off fully silences both lanes")
+	video.set_sound_enabled(true); video.sides[0].done = true; video.set_sound_enabled(true)
+	ok(video.sides[0].node.volume == 0 and video.sides[1].node.volume == 0 and not video._audible,"opponent stays silent after local intro ends")
+	video.sides[0].done = false; video.set_sound_enabled(true)
 	for extent in [Vector2(390,844),Vector2(844,390),Vector2(1366,1024)]:
 		cinema.relayout(ui.layout)
 		ok(cinema.position == Vector2.ZERO and cinema.scale == Vector2.ONE,"video relayout keeps viewport transform")
@@ -335,7 +343,7 @@ func controller():
 	var announcer_db = AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Announcer"))
 	cinema.video_overlay.sides[0].node.finished.emit()
 	ui.sound.advance_mix(2)
-	ok(ui.overlay == "result" and ui.controls.has_all(["again","menu"]) and not cinema.video_playing(),"video finished follows spotlight results path")
+	ok(ui.overlay == "result" and ui.controls.has_all(["again","menu"]) and cinema.video_overlay.holds_completed_result() and not cinema.active,"video completion retains silent last frame on results")
 	ok(not ui.sound.hero_video_audio and ui.sound.duck_db > -.1 and is_equal_approx(announcer_db,AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Announcer"))),"duck clears; announcer never ducked")
 	ui.overlay = ""; ui._rebuild(); ui._show_spotlight(); cinema.advance(.81); cinema.skip()
 	ok(ui.controls.has_all(["again","menu"]) and not ui.sound.hero_video_audio,"winner skip shows results and releases audio")

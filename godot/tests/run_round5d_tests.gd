@@ -76,6 +76,7 @@ func run():
 	await pending_registration()
 	await pending_capabilities()
 	await honest_fallbacks()
+	await delivery_failures()
 	await bounded_recovery()
 	print("NINEWEAVE_ROUND5D ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)
@@ -208,3 +209,27 @@ func bounded_recovery():
 	ok(b.http.requests.size() == 5 and not b.ui.account.email_busy and b.ui.account.store.data.device_token.is_empty(),"repeated email 401 is bounded even when consent succeeds")
 	ok(b.ui.page == "onboarding","repeated email rejection offers mandatory name retry")
 	b.ui.free(); await frames()
+
+func delivery_failures():
+	for response in [502,503]:
+		var b = make_ui("delivery-"+str(response)); var ui = b.ui
+		b.http.respond(200,player()); save(b)
+		b.http.respond(200,player(true,ADDRESS))
+		var detail = "Could not send email. Try again shortly." if response == 502 else "Email verification is not available on this server yet"
+		b.http.respond(response,{"error":detail})
+		var message = ui.account.email_message
+		ui.set_view_size(Vector2(320,568)); await frames()
+		ok(ui.email_view.status_label.get_visible_line_count() == ui.email_view.status_label.get_line_count(),"delivery error fits narrow phone status box")
+		ok("could not send your code" in message if response == 502 else "not configured" in message,"delivery error distinguishes provider rejection from missing configuration")
+		ok(ui.account.email_challenge.is_empty() and not ui.controls.email_code.editable,"failed delivery never enables an unusable code field")
+		ok(ui.controls.resend_email.caption == "Send code" and not ui.controls.resend_email.disabled,"first failed delivery offers Send code rather than implying a code was sent")
+		ok(ui.account.store.data.email == ADDRESS and ui.account.email_pending,"delivery failure retains saved address and verification flow")
+		ui.account.refresh(); b.http.respond(200,player(true,ADDRESS))
+		ok(ui.email_view.status == message and ui.account.email_pending,"account refresh preserves delivery failure and verification stage")
+		ui.controls.resend_email.pressed.emit()
+		request_is(b,"/me/email/verification",HTTPClient.METHOD_POST,"nwd_stale",{})
+		b.http.respond(200,challenge("retried"))
+		ok(ui.controls.email_code.editable and ui.account.email_challenge.challenge_id == "retried","retry reaches usable code entry")
+		ui.controls.change_email.pressed.emit()
+		ok(ui.controls.email.text == ADDRESS and ui.controls.save_email.visible,"change email preserves address for editing")
+		ui.free(); await frames()

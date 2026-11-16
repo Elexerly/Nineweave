@@ -49,7 +49,10 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 			var player = VideoStreamPlayer.new()
 			player.mouse_filter = Control.MOUSE_FILTER_IGNORE; player.expand = true
 			# Master already exists; video must not go through Announcer or alter bus layout.
-			player.bus = &"Master"; player.buffering_msec = 100
+			player.bus = &"Master"
+			# Use Godot's normal audio buffer for the audible lane, not the old
+			# aggressive 100ms buffer shared by two competing soundtracks.
+			player.buffering_msec = 500 if i == 0 else 100
 			var stream = VideoStreamTheora.new(); stream.file = paths[i]
 			player.stream = stream; add_child(player); side.node = player
 			side.audio = source.has_audio(ids[i],clip_kind)
@@ -84,14 +87,18 @@ func relayout(extent: Vector2):
 	if is_instance_valid(_chrome): _chrome.queue_redraw()
 func set_sound_enabled(value: bool):
 	sound_enabled = value
-	var count = 0
-	for side in sides:
-		if side.video and side.audio and not side.done: count += 1
-	for side in sides:
+	var audible = false
+	for i in range(sides.size()):
+		var side = sides[i]
 		if side.video:
-			# Share headroom when two soundtracks play together.
-			side.node.volume_db = -6.0 if sound_enabled and count > 1 else (0.0 if sound_enabled else -80.0)
-	_set_audio(active and sound_enabled and count > 0)
+			# The first lane is local on versus, or the featured winner on results.
+			# Never promote opponent audio when the local clip ends or is absent.
+			var enabled = i == 0 and side.audio and not side.done and sound_enabled
+			side.node.volume = 1.0 if enabled else 0.0
+			audible = audible or enabled
+	_set_audio(active and audible)
+func holds_completed_result() -> bool:
+	return scene_kind == "spotlight" and visible and not active and sides.size() == 1 and sides[0].video and sides[0].done
 func _set_audio(value: bool):
 	if value == _audible: return
 	_audible = value; audio_active.emit(value)

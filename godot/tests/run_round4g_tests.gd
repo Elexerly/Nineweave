@@ -195,7 +195,8 @@ func error_flows():
 				ok(ui.page == "email" if onboarding else ui.overlay == "account","email error stays in its entry point")
 				ok(ui.account.store.data.email == "weaver@example.com" and ui.controls.verification_status.text == "Not verified","errors retain local address without marking verified")
 				if response in [400,409]: ok(ui.email_view.status == error_text,"400/409 display exact server error in "+failed_operation)
-				elif response in [502,503]: ok(ui.email_view.status == "Email isn't available right now","provider/unavailable error uses consistent sentence")
+				elif response == 502: ok("email service could not" in ui.email_view.status and "not verified" in ui.email_view.status.to_lower(),"provider failure explains retry without promising delivery")
+				elif response == 503: ok("temporarily unavailable" in ui.email_view.status and "not verified" in ui.email_view.status.to_lower(),"service failure explains saved unverified address")
 				else:
 					var wait = ui.account.email_retry_until-Time.get_unix_time_from_system()
 					ok(wait > 135 and wait <= 137 and "137" in ui.email_view.status,"429 reads body retry_after_seconds")

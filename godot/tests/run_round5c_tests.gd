@@ -59,7 +59,7 @@ func media():
 	ok(overlay.sides.size() == 2 and overlay.sides[0].id == "shard_jack" and overlay.sides[1].id == "james_ii","player left and opponent right")
 	ok(overlay.sides[0].video and overlay.sides[1].video,"two native intro streams prepared together")
 	ok(overlay.sides[0].frame.end.x < overlay.sides[1].frame.position.x,"simultaneous videos occupy separate lanes")
-	ok(overlay.sides[0].node.buffering_msec == 100 and overlay.sides[1].node.buffering_msec == 100,"bounded dual-stream buffering")
+	ok(overlay.sides[0].node.buffering_msec == 500 and overlay.sides[1].node.buffering_msec == 100,"normal audible-lane buffer and bounded silent-lane buffer")
 	cinema.advance(.9); cinema.skip()
 	for winner in [1,2]:
 		ui.game.status = winner; ui._show_spotlight()
@@ -71,6 +71,15 @@ func media():
 		var button_pos = ui.controls.again.position
 		overlay.sides[0].node.finished.emit()
 		ok(ui.overlay == "result" and ui.controls.again.position == button_pos and cinema.combined_result,"completion keeps the same combined screen")
+		ok(overlay.holds_completed_result() and not cinema.active and cinema.video_playing(),"completed victory holds its final video texture")
+		var held_player = overlay.sides[0].node
+		ui.set_view_size(Vector2(844,390)); cinema.advance(100)
+		ok(overlay.sides[0].node == held_player and held_player.stream != null and overlay.sides[0].node.volume == 0,"resize and time preserve silent final frame")
+		ui.set_view_size(Vector2(390,844))
+	var old_player = overlay.sides[0].node
+	ok(is_finite(cinema.duration()),"held result does not create infinite animation duration")
+	ui.controls.again.pressed.emit()
+	ok(not overlay.holds_completed_result() and old_player.stream == null,"Play Again releases held video before next match")
 	ui.cinematic.video_source = null; ui.game.status = 1; ui._show_spotlight()
 	ok(cinema.combined_result and cinema.hero.visible and ui.controls.has("again"),"missing victory retains still art plus result controls")
 	await clean(b)

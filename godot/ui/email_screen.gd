@@ -26,7 +26,7 @@ var _helper_size: Vector2 = Vector2.ZERO
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	var stage = pending and verification_status != "verified"
-	var height = 736.0 if stage else 584.0
+	var height = 800.0 if stage else 648.0
 	var width = minf(460,size.x-32)
 	var scroll = ScrollContainer.new(); scroll.position = Vector2((size.x-width)/2,maxf(12,(size.y-height)/2))
 	scroll.size = Vector2(width,minf(height,size.y-24)); scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -36,7 +36,8 @@ func _ready():
 	style.set_border_width_all(2); style.set_corner_radius_all(10); card.add_theme_stylebox_override("panel",style); card.clip_contents = true; scroll.add_child(card)
 	var x = 18.0; var w = width-50
 	_label(card,"ACCOUNT EMAIL" if not onboarding else "ONE OPTIONAL STEP",Rect2(x,16,w,32),19,P.GOLD)
-	_label(card,"Check your email" if stage else ("Add an email (optional)" if onboarding else "Add or change your email"),Rect2(x,56,w,80),26,P.PALE)
+	var title = "Check your email" if not challenge.is_empty() else "Verify your email"
+	_label(card,title if stage else ("Add an email (optional)" if onboarding else "Add or change your email"),Rect2(x,56,w,80),26,P.PALE)
 	var helper_rect = Rect2(x,140,w,104)
 	helper_label = _label(card,HELPER,helper_rect,18,P.WHITE)
 	helper_label.name = "EmailHelper"; helper_label.clip_text = false
@@ -67,7 +68,7 @@ func _ready():
 	if onboarding:
 		continue_text = "Continue without verifying" if pending else ("Continue" if verification_status == "verified" else "Continue without email")
 	_button(card,"continue_email",continue_text,Rect2(x,continue_y,w,48),func(): action.emit("continue_email",""))
-	status_label = _label(card,status,Rect2(x,continue_y+60,w,96 if not stage else 82),18,P.PALE)
+	status_label = _label(card,status,Rect2(x,continue_y+60,w,148 if not stage else 146),18,P.PALE)
 	_update_timers()
 func _field(id: String, value: String, placeholder: String, rect: Rect2, limit: int) -> LineEdit:
 	var field = LineEdit.new(); field.name = id; field.text = value; field.placeholder_text = placeholder
@@ -104,7 +105,7 @@ func _update_timers():
 	if not controls.has("resend_email"): return
 	var now = Time.get_unix_time_from_system()
 	var wait_seconds = maxi(0,int(ceil(maxf(retry_until,Store.email_timestamp(str(challenge.get("resend_available_at",""))))-now)))
-	controls.resend_email.caption = "Resend in %ds" % wait_seconds if wait_seconds > 0 else "Resend code"
+	controls.resend_email.caption = "Resend in %ds" % wait_seconds if wait_seconds > 0 else ("Send code" if challenge.is_empty() else "Resend code")
 	controls.resend_email.disabled = busy or wait_seconds > 0
 	var expires = Store.email_timestamp(str(challenge.get("expires_at","")))
 	var remaining = maxi(0,int(ceil(expires-now)))

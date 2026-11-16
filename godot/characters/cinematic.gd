@@ -49,11 +49,11 @@ func _ready():
 	loser = Rig.new(); loser.bust = true; loser.bust_view = LOSER_VIEW; loser.bust_lift = LOSER_LIFT; add_child(loser)
 	front = Control.new(); front.mouse_filter = Control.MOUSE_FILTER_IGNORE; front.draw.connect(_draw_front); add_child(front)
 	video_overlay = VideoOverlay.new(); video_overlay.source = video_source; front.add_child(video_overlay)
-	video_overlay.finished.connect(complete)
+	video_overlay.finished.connect(_video_finished)
 func video_playing() -> bool: return is_instance_valid(video_overlay) and video_overlay.visible
 func duration() -> float:
 	# Videos end on decoder signals (the longer intro wins), never the old 3s clock.
-	if video_playing(): return INF
+	if video_playing() and video_overlay.active: return INF
 	if kind in ["versus","spotlight","draw"]:
 		if reduced_motion: return .65 if kind == "versus" else 1.0
 		return Motion.VERSUS_SECONDS if kind == "versus" else Motion.RESULT_SECONDS
@@ -236,10 +236,14 @@ func advance(delta: float):
 func skip() -> bool:
 	if not active or age < (.6 if kind == "versus" else (.8 if kind in ["spotlight","draw"] else .2)): return false
 	complete(); return true
-func complete():
+func _video_finished():
+	# Godot retains the last decoded texture when a non-looping stream finishes.
+	# Keep that frame in the result lane until navigation, rather than swapping art.
+	complete(video_overlay.holds_completed_result())
+func complete(preserve_video: bool = false):
 	if not active: return
-	video_overlay.clear()
-	var was = kind; age = duration(); active = false
+	if not preserve_video: video_overlay.clear()
+	var was = kind; age = Motion.RESULT_SECONDS if preserve_video else duration(); active = false
 	visible = kind in ["spotlight","draw"]
 	if visible: buttons_shown = true; pose()
 	finished.emit(was)

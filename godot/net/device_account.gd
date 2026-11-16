@@ -250,7 +250,13 @@ func _email_completed(operation: String, response: int, data: Dictionary, proble
 	email_busy = false
 	if not problem.is_empty():
 		match response:
-			502,503: email_message = "Email isn't available right now"
+			502:
+				email_message = "The email service could not send your code. Try Send code again. Not verified." if operation == "email_request" else "The email service could not complete this step. Email saved on this device, not verified. Try again."
+			503:
+				if "not available on this server yet" in problem.to_lower():
+					email_message = "Email delivery is not configured. No code was sent. Email saved on this device, not verified."
+				else:
+					email_message = "Account service temporarily unavailable. Email saved on this device, not verified. Try again shortly."
 			429:
 				var seconds = maxi(0,int(data.get("retry_after_seconds",60)))
 				email_retry_until = Time.get_unix_time_from_system()+seconds

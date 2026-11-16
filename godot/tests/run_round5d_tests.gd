@@ -126,7 +126,11 @@ func other_me_writes():
 		var consent = Store.consent_payload(b.ui.account.store.data.accepted_at)
 		if operation == "rename": b.ui.account.rename("Other name")
 		else: b.ui.account.choose_hero("cryon")
-		b.http.respond(401,{"error":"Unknown token"}); recovered(b,consent)
+		b.http.respond(401,{"error":"Unknown token"})
+		if operation == "rename":
+			ok(b.http.requests.size() == 2 and b.ui.account.store.data.device_token == "nwd_stale","rename rejection preserves identity and never registers a replacement")
+			ok(b.ui.account.store.data.screen_name == "Weaver" and "session rejected" in b.ui.account.rename_message.to_lower(),"rename rejection leaves name unchanged with sign-in guidance")
+		else: recovered(b,consent)
 		b.ui.free(); await frames()
 func recovery_conflicts():
 	for pending in [false,true]:

@@ -96,7 +96,7 @@ func _onboarding():
 		content.busy = busy; content.size = Vector2(width-14,600); content.custom_minimum_size = Vector2(width-14,600)
 		content.action.connect(func(kind,value): action.emit(kind,value)); content.draft_changed.connect(func(kind,value): draft_changed.emit(kind,value))
 		scroll.add_child(content); controls = content.controls; agreement = content.agreement; status_label = content.status_label; return
-	_panel = Rect2(x-10,top,width+20,482)
+	_panel = Rect2(x-10,top,width+20,544)
 	_label("ENTER THE NINEWEAVE",Rect2(x+8,top+14,width-16,38),24,P.PALE,true)
 	_label("Choose the name your rivals will remember.",Rect2(x+8,top+58,width-16,48),18)
 	_name_rect = Rect2(x+8,top+118,width-16,64)
@@ -114,7 +114,8 @@ func _onboarding():
 	add_child(agreement)
 	var create = _button("create_name","Create Screen Name",Rect2(x+8,top+330,width-16,52),"register","",true)
 	create.disabled = busy
-	_status(Rect2(x+8,top+394,width-16,76))
+	_button("sign_in","Already a player? Sign in",Rect2(x+8,top+394,width-16,48),"sign_in").disabled = busy
+	_status(Rect2(x+8,top+452,width-16,76))
 func _lobby():
 	_header("THE CELESTIAL ARENA")
 	_button("leaderboard","Leaderboard",Rect2(size.x-164,12,148,44),"leaderboard")

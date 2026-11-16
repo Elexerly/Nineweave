@@ -13,6 +13,8 @@ const HTTP = preload("res://net/http_polling_transport.gd")
 const JsonAPI = preload("res://net/json_api.gd")
 const DeviceAccount = preload("res://net/device_account.gd")
 const OnlineScreen = preload("res://ui/online_screen.gd")
+const Recovery = preload("res://net/account_recovery.gd")
+const RecoveryScreen = preload("res://ui/recovery_screen.gd")
 const EmailScreen = preload("res://ui/email_screen.gd")
 const Tutorial = preload("res://ui/tutorial.gd")
 const Announcer = preload("res://fx/announcer.gd")
@@ -57,9 +59,11 @@ var online_api = JsonAPI.new()
 ## Explicit harness/capture opt-out; never derived from character-select onboarding.
 var test_online_bypass: bool = false
 var online_view
+var recovery = Recovery.new()
 var email_view
 var _email_draft: String = ""
 var _email_code_draft: String = ""
+var _onboarding_email_confirmation: bool = false
 var tutorial
 var _tutorial_return_overlay: String = ""
 var lobby_timer: Timer
@@ -186,10 +190,15 @@ func _ready():
 	if not profile.data.onboarded: profile.data.display_name = str(settings.values.player_name)
 	account.player_received.connect(_account_player)
 	account.name_updated.connect(_account_name)
+	account.rename_flow_changed.connect(_settings_name_status)
 	account.onboarding_complete.connect(_account_completed)
 	account.sync_finished.connect(_account_sync_finished)
 	account.email_flow_changed.connect(_account_email_flow_changed)
+	account.email_verified.connect(_account_email_verified)
 	account.error.connect(_account_error); add_child(account)
+	recovery.changed.connect(func():
+		if page == "recovery": _rebuild())
+	recovery.recovered.connect(_account_recovered); add_child(recovery)
 	online_api.completed.connect(_online_response); add_child(online_api)
 	social.store = account.store
 	if http_request_factory.is_valid(): social.api.request_factory = http_request_factory
@@ -289,7 +298,7 @@ func _apply_preferences():
 	if is_instance_valid(hero_select): hero_select.reduced_motion = board.reduced_motion
 	for rig in field_heroes.values(): rig.reduced_motion = board.reduced_motion
 func _process(delta):
-	if _name_required() and (page != "onboarding" or not overlay.is_empty()):
+	if _name_required() and (page not in ["onboarding","recovery"] or not overlay.is_empty()):
 		_require_screen_name(); return
 	if _resize_pending and not get_viewport().gui_get_focus_owner() is LineEdit:
 		_resize_pending = false; _relayout(); _rebuild()
@@ -1000,9 +1009,34 @@ func _show_onboarding(destination: String):
 	if tutorial.active:
 		tutorial.active = false; tutorial.hide(); board.game = game
 	_onboarding_name = account.store.data.screen_name; message = ""; cinematic.clear(); _rebuild()
+func _recovery_action(kind: String):
+	match kind:
+		"send": recovery.request_code()
+		"confirm": recovery.confirm()
+		"edit": recovery.begin(); _rebuild()
+		"cancel": recovery.cancel(); page = "onboarding"; _rebuild()
+func _account_recovered(token: String, player: Dictionary):
+	if page != "recovery": return
+	# Server-confirmed existing identity only. No /auth/device registration here.
+	account.api.cancel_all(); account.busy = false; account._refreshing = false
+	account.store.keep_device(token,str(player.screen_name))
+	for key in ["tos_version","privacy_version","accepted_at","age_confirmed"]:
+		account.store.data[key] = player[key] if typeof(player.get(key)) == typeof(account.store.data[key]) else (false if key == "age_confirmed" else "")
+	account.store.data.pending_sync = false; account.store.data.registration_rejected = false
+	account.store.data.email = ""; account.store.data.email_prompt_done = true
+	account._accept_email_player(player,true); account.store.save()
+	_hero_changed = false
+	_account_name(str(player.screen_name)); _account_player(player)
+	if not account.store.complete():
+		# Old consent must be renewed, but with this token, never a new identity.
+		page = "onboarding"; _onboarding_name = str(player.screen_name)
+		message = "Welcome back. Confirm your screen name to accept the current terms."; _rebuild(); return
+	if _onboarding_destination == "online": open_online()
+	else: go_home()
 func _account_name(value: String):
 	settings.set_value("player_name",value); profile.data.display_name = value; profile.save()
-	if overlay == "settings": message = "Screen name saved."; _settings_name_status()
+	if overlay == "settings" and controls.has("player_name") and not account.rename_pending():
+		controls.player_name.text = value
 func _account_player(player: Dictionary):
 	var id = str(player.get("last_hero_id",""))
 	if not _hero_changed and Roster.valid(id):
@@ -1037,6 +1071,13 @@ func _account_email_flow_changed():
 	if page != "email" and overlay != "account": return
 	message = account.email_message
 	_rebuild()
+func _account_email_verified():
+	# Only the explicit confirmation submitted from onboarding may navigate.
+	# A Settings confirmation or a late reply after leaving must not steal focus.
+	if not _onboarding_email_confirmation or page != "email": return
+	_onboarding_email_confirmation = false
+	if _onboarding_destination == "online": open_online()
+	else: go_home()
 func _email_action(kind: String, value: String):
 	if _require_screen_name(): return
 	if kind == "save_email":
@@ -1045,10 +1086,14 @@ func _email_action(kind: String, value: String):
 		# Saving is not a navigation action during onboarding. Account setup may
 		# still be in flight; its completion will open the code-entry stage.
 		if page == "email" or account.email_busy or account.email_pending: return
-	elif kind == "confirm_email": account.confirm_email(value); return
+	elif kind == "confirm_email":
+		account.confirm_email(value)
+		_onboarding_email_confirmation = page == "email" and account.email_busy
+		return
 	elif kind == "resend_email": _email_code_draft = ""; account.request_email_verification(); return
 	elif kind == "change_email": _email_code_draft = ""; account.edit_email(); return
 	elif kind == "continue_email":
+		_onboarding_email_confirmation = false
 		if page == "email": account.continue_without_email()
 	else: return
 	if page == "email":
@@ -1088,7 +1133,10 @@ func _tutorial_finished(_skipped: bool):
 		board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
 	elif page == "game" and overlay.is_empty(): _announce("ready")
 func _settings_name_status():
-	if controls.has("name_status"): controls.name_status.text = message
+	if overlay != "settings": return
+	if controls.has("name_status"): controls.name_status.text = account.rename_message
+	if controls.has("save_name"): controls.save_name.disabled = account.rename_pending()
+	if controls.has("player_name"): controls.player_name.editable = not account.rename_pending()
 func _online_status():
 	if is_instance_valid(online_view): online_view.set_status(message)
 func _refresh_lobby():
@@ -1128,6 +1176,9 @@ static func leaderboard_payload(data: Dictionary) -> Dictionary:
 		if me.rank != null: me.rank = int(me.rank)
 	return {"players":players,"me":me}
 func _online_action(kind: String, value: String):
+	if kind == "sign_in":
+		if account.busy: return
+		recovery.begin(); page = "recovery"; message = ""; _rebuild(); return
 	if kind != "register" and _require_screen_name("online" if kind != "home" else "title"): return
 	sound.cue("ui")
 	match kind:
@@ -1214,8 +1265,10 @@ func _u() -> float:
 	if layout.mode == "tablet_portrait": return 1.25
 	return 1.0
 func _rebuild():
+	if page != "recovery" and recovery.active: recovery.cancel()
+	if page != "email": _onboarding_email_confirmation = false
 	if not is_instance_valid(board): return
-	if _name_required() and (page != "onboarding" or not overlay.is_empty()):
+	if _name_required() and (page not in ["onboarding","recovery"] or not overlay.is_empty()):
 		_show_onboarding("title"); return
 	_clear_nodes()
 	board.visible = page == "game" or tutorial.active
@@ -1265,6 +1318,9 @@ func _rebuild():
 		if mode == "online" and overlay.is_empty(): _online_game_chrome()
 	elif page in ["online","onboarding","leaderboard"]: _build_online_screen(s)
 	elif page == "email": _build_email_screen(s)
+	elif page == "recovery":
+		var view = RecoveryScreen.new(); view.size = s; view.flow = recovery; view.action.connect(_recovery_action)
+		add_child(view); ui_nodes.append(view); controls.merge(view.controls)
 	if is_instance_valid(lobby_timer):
 		if page == "online" and online_state == "lobby" and not test_online_bypass and not _debug_capture and account.store.online_ready():
 			if lobby_timer.is_stopped(): lobby_timer.start()
@@ -1428,14 +1484,15 @@ func _overlay_controls(s: Vector2):
 		var name_field = _field("player_name","Screen name",Rect2(name_x,name_y,sw,44),str(settings.values.player_name))
 		name_field.max_length = 24
 		if not test_online_bypass and account.store.complete():
-			var save_width = 60 if short else 82
+			var save_width = 60 if short else 120
 			name_field.size.x = sw-save_width-8
-			_button("save_name","Save",Rect2(name_x+sw-save_width,name_y,save_width,44),func(): account.rename(str(controls.player_name.text)))
+			_button("save_name","Check" if short else "Check & save",Rect2(name_x+sw-save_width,name_y,save_width,44),func(): account.rename(str(controls.player_name.text)))
 			name_field.text_submitted.connect(account.rename)
 			var notice = Label.new(); notice.position = Vector2(lx,r.position.y+210) if short else Vector2(rx,y+46); notice.size = Vector2(pw-48,22) if short else Vector2(sw,34)
-			notice.text = message; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			notice.text = account.rename_message; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			notice.add_theme_font_override("font",P.SANS); notice.add_theme_font_size_override("font_size",16); notice.add_theme_color_override("font_color",P.PALE)
 			add_child(notice); ui_nodes.append(notice); controls["name_status"] = notice
+			_settings_name_status()
 		else:
 			name_field.text_changed.connect(func(value):
 				var clean = value.strip_edges().left(24)

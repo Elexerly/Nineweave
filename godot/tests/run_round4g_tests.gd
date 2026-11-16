@@ -62,6 +62,7 @@ func finish_name(bundle, register_player: Dictionary, consent_player: Dictionary
 func run():
 	await capability_off()
 	await onboarding_flow()
+	await confirmation_navigation()
 	await settings_and_restart()
 	await optional_continue()
 	await error_flows()
@@ -123,9 +124,8 @@ func onboarding_flow():
 	store_and_send(bundle)
 	ui.controls.email_code.text = "123456"; ui.controls.confirm_email.pressed.emit()
 	bundle.http.respond(200,{"player":player("verified","weaver@example.com")})
-	ok(ui.controls.verification_status.text == "Verified" and ui.account.store.data.email_verified_at == "2026-11-15T12:00:00Z","only returned player establishes Verified and verified_at")
-	ok(ui.page == "email" and ui.controls.continue_email.caption == "Continue","verified optional step still offers Continue")
-	ui.controls.continue_email.pressed.emit(); ok(ui.page == "title","verified player reaches menu")
+	ok(ui.account.store.data.email_status == "verified" and ui.account.store.data.email_verified_at == "2026-11-15T12:00:00Z","only returned player establishes Verified and verified_at")
+	ok(ui.page == "title" and not ui.controls.has("continue_email"),"verified onboarding automatically reaches menu without extra Continue")
 	ui.free(); await frames()
 func settings_and_restart():
 	var bundle = make_ui("settings"); var ui = bundle.ui
@@ -158,7 +158,7 @@ func settings_and_restart():
 		ui.email_view.set_verification_status(status); ok(ui.controls.verification_status.text == "Not verified","server "+status+" maps to Not verified")
 	# PATCH player objects can also enable the gate after an older/missing GET.
 	ui.account.refresh(); bundle.http.respond(200,{"screen_name":"Weaver"})
-	ui.account.rename("Weaver"); bundle.http.respond(200,player("unverified","changed@example.org"))
+	ui.account.choose_hero("cryon"); bundle.http.respond(200,player("unverified","changed@example.org"))
 	ok(ui.account.email_capable,"successful PATCH player may advertise capability")
 	ui.free(); await frames()
 func optional_continue():
@@ -232,8 +232,8 @@ func layouts():
 		var screen = ui.online_view
 		ok(screen.agreement.get_parsed_text() == CONSENT and NameScreen.AGREEMENT == CONSENT,"consent remains verbatim at "+str(dimensions))
 		ok(not ui.controls.has("offline") and not ui.controls.has("back") and not ui.controls.has("home"),"no Play Offline/Main Menu skip")
-		var gap = screen.status_label.position.y-ui.controls.create_name.get_rect().end.y
-		ok(gap >= 8 and gap <= 16 and screen._panel.size.y < 500,"status sits near Create and name panel is compact")
+		var gap = screen.status_label.position.y-ui.controls.sign_in.get_rect().end.y
+		ok(gap >= 8 and gap <= 16 and screen._panel.size.y < 560,"status sits near sign-in and name panel stays compact")
 		ok(screen._panel.encloses(screen.status_label.get_rect()),"status remains inside compact card")
 	finish_name(bundle,player(),player())
 	for dimensions in [Vector2(360,640),Vector2(390,844),Vector2(1366,1024)]:
@@ -297,3 +297,21 @@ func tutorial_auto_advance():
 	ui.tutorial.skip()
 	ok(not ui.tutorial.active and ui.settings.values.tutorial_completed,"Skip still ends a replay")
 	ui.free(); await frames()
+
+func confirmation_navigation():
+	for mode in ["online","skip","leave_reenter","refresh"]:
+		var bundle = make_ui("confirm-nav-"+mode,false); var ui = bundle.ui
+		finish_name(bundle,player(),player()); store_and_send(bundle)
+		if mode == "online": ui._onboarding_destination = "online"
+		if mode != "refresh":
+			ui.controls.email_code.text = "123456"; ui.controls.confirm_email.pressed.emit()
+		if mode == "skip": ui.controls.continue_email.pressed.emit()
+		elif mode == "leave_reenter":
+			ui.go_home(); ui.page = "email"; ui._rebuild()
+		elif mode == "refresh": ui.account.refresh()
+		bundle.http.respond(200,player("verified","weaver@example.com"))
+		if mode == "online": ok(ui.page == "online","verified onboarding respects requested online destination")
+		elif mode == "skip": ok(ui.page == "title","late confirmation after Continue does not steal navigation")
+		else: ok(ui.page == "email","background or interrupted confirmation cannot auto-dismiss a new email screen: "+mode)
+		ok(ui.account.store.data.email_status == "verified","server verification status retained: "+mode)
+		ui.free(); await frames()

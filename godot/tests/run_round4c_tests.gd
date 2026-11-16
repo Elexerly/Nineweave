@@ -211,7 +211,7 @@ func account_flow():
 	var accepted_at = a.store.data.accepted_at
 	a.sync_pending(); ok(fake.requests.back().url.ends_with("/me") and fake.requests.back().body.accepted_at == accepted_at,"sync PATCHes existing account with original consent")
 	fake.respond(200,{"screen_name":"Patrick"}); ok(a.store.online_ready() and not a.store.data.pending_sync and complete.count == 1 and DeviceStore.new(a.store.path).online_ready(),"successful sync persists and never repeats onboarding completion")
-	a.rename("Taken"); fake.respond(409,{"error":"Name taken"}); ok(a.store.data.screen_name == "Patrick" and errors.back() == "Name taken","rename rejection keeps last accepted name")
+	a.rename("Taken"); fake.respond(409,{"error":"Name taken"}); ok(a.store.data.screen_name == "Patrick" and "taken" in a.rename_message,"rename rejection keeps last accepted name")
 	# Current production rejects consent columns; local consent must still complete.
 	var legacy_bundle = make_account("legacy"); var legacy = legacy_bundle.account; var legacy_http = legacy_bundle.fake
 	var legacy_done = {"count":0}; legacy.onboarding_complete.connect(func(): legacy_done.count += 1)

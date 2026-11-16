@@ -31,7 +31,15 @@ var volumes: Dictionary = {"sfx_volume":.85,"announcer_volume":.9,"music_volume"
 var cache: Dictionary = {}
 var duck_db: float = 0.0
 var hero_video_audio: bool = false
-func set_hero_video_audio(value: bool): hero_video_audio = value
+func set_hero_video_audio(value: bool):
+	if hero_video_audio == value: return
+	hero_video_audio = value
+	if value:
+		# Cinematic dialogue replaces overlapping result/versus commentary. Do not
+		# replay stale lines when the clip ends, and duck before its first sample.
+		clear_announcer()
+		duck_db = -12.0
+		_apply_mix()
 var _announcer_left: float = 0.0
 var _players: Array = []
 var _voice: AudioStreamPlayer
@@ -124,7 +132,7 @@ func advance_mix(delta: float):
 		if _announcer_left == 0: voice_id = ""; _gap_left = VOICE_GAP
 	if _announcer_left == 0: _gap_left = maxf(0,_gap_left-remaining); _drain_voice()
 	# Lines waiting for the first gesture are silent; they must not hold music/SFX ducked.
-	var target = -4.5 if _announcer_left > 0 or (enabled and hero_video_audio) or (unlocked and enabled and not voice_queue.is_empty()) else 0.0
+	var target = -12.0 if enabled and hero_video_audio else (-4.5 if _announcer_left > 0 or (unlocked and enabled and not voice_queue.is_empty()) else 0.0)
 	duck_db = lerpf(duck_db,target,1.0-exp(-delta/(.035 if target < duck_db else .16)))
 	if absf(duck_db-target) < .01: duck_db = target
 	_apply_mix()
@@ -143,7 +151,7 @@ func clear_announcer():
 	if is_instance_valid(_voice): _voice.stop()
 	voice_queue.clear(); voice_id = ""; _announcer_left = 0; _gap_left = 0
 func announce(id: String, paired_sfx: String = ""):
-	if not id in VOICES or not enabled: return
+	if not id in VOICES or not enabled or hero_video_audio: return
 	voice_queue.append({"id":id,"sfx":paired_sfx})
 	if id == "ready": voice_queue.append({"id":"weave","sfx":""})
 	while voice_queue.size() > VOICE_QUEUE_MAX:
@@ -153,7 +161,7 @@ func announce(id: String, paired_sfx: String = ""):
 		voice_queue.remove_at(drop)
 	_drain_voice()
 func _drain_voice():
-	if not enabled or not unlocked or _announcer_left > 0 or _gap_left > 0 or voice_queue.is_empty(): return
+	if hero_video_audio or not enabled or not unlocked or _announcer_left > 0 or _gap_left > 0 or voice_queue.is_empty(): return
 	var entry = voice_queue.pop_front(); voice_id = entry.id
 	var stream = stream_for("ann_"+voice_id)
 	_voice.stop(); _voice.stream = stream

@@ -6,8 +6,10 @@ signal player_received(player: Dictionary)
 signal onboarding_complete
 signal sync_finished
 signal name_updated(screen_name: String)
+signal rename_flow_changed
 signal email_changed(email: String, verification_status: String)
 signal email_flow_changed
+signal email_verified
 signal error(message: String)
 var store = Store.new()
 var api = API.new()
@@ -15,6 +17,7 @@ var busy: bool = false
 var _name_draft: String = ""
 var _consent: Dictionary = {}
 var _rename: String = ""
+var rename_message: String = ""
 var _syncing: bool = false
 var _refreshing: bool = false
 var _recovering_device: bool = false
@@ -128,16 +131,45 @@ func _submit_registration():
 func _patch_consent():
 	var body = _consent.duplicate(); body.screen_name = _name_draft
 	api.submit("/me",HTTPClient.METHOD_PATCH,body,"consent",store.data.device_token)
+func rename_pending() -> bool:
+	return not _rename.is_empty()
+func _rename_status(value: String):
+	rename_message = value; rename_flow_changed.emit()
 func rename(value: String):
-	if busy or not _rename.is_empty(): return
-	var clean = value.strip_edges()
-	if not Store.valid_screen_name(clean): error.emit("Choose a screen name with 1–24 characters."); return
+	if rename_pending(): return
+	if busy:
+		_rename_status("Account setup is finishing. Please try again shortly."); return
+	var whitespace = RegEx.new(); whitespace.compile("\\s+")
+	var clean = whitespace.sub(value.strip_edges()," ",true)
+	if not Store.valid_screen_name(clean):
+		_rename_status("Choose a screen name with 1–24 characters."); return
 	if not store.online_ready():
-		if not store.complete(): return
-		store.data.screen_name = clean; store.data.pending_sync = true; store.save()
-		name_updated.emit(clean); return
+		_rename_status("Connect online to check a name. Your name has not changed."); return
+	if clean == store.data.screen_name:
+		_rename_status("This is already your screen name."); return
 	_rename = clean
+	_rename_status("Checking availability and saving…")
+	# The authenticated PATCH checks uniqueness and saves atomically. A separate
+	# availability promise could go stale before save; never rename offline.
 	api.submit("/me",HTTPClient.METHOD_PATCH,{"screen_name":clean},"rename",store.data.device_token)
+func _rename_completed(response: int, data: Dictionary, problem: String):
+	if not rename_pending(): return
+	var requested = _rename
+	_rename = ""
+	if response == 401:
+		# Renaming must never create a replacement identity or discard verified email.
+		_rename_status("Session rejected. Reconnect your account to rename."); return
+	if response == 409:
+		_rename_status("That screen name is taken. Please choose another."); return
+	if not problem.is_empty() or response < 200 or response >= 300:
+		_rename_status("Couldn't confirm the name change. Reconnect and try again."); return
+	var player = data.get("player",data)
+	if not player is Dictionary or not player.get("screen_name") is String or player.screen_name != requested:
+		_rename_status("Couldn't confirm the name change. Reconnect and try again."); return
+	# Only the name was edited: a sparse PATCH response must not erase verified email.
+	store.data.screen_name = player.screen_name; store.save()
+	name_updated.emit(store.data.screen_name)
+	_rename_status("Screen name available and saved.")
 func choose_hero(id: String):
 	if not Roster.valid(id) or not store.online_ready(): return
 	api.submit("/me",HTTPClient.METHOD_PATCH,{"last_hero_id":Roster.canonical_id(id)},"hero",store.data.device_token)
@@ -172,7 +204,9 @@ func _recover_device(operation: String):
 	_recovering_device = true; busy = true
 	_submit_registration()
 func _completed(operation: String, response: int, data: Dictionary, problem: String):
-	if response == 401 and operation in ["me","consent","rename","hero","email_store","email_request","email_confirm"]:
+	if operation == "rename":
+		_rename_completed(response,data,problem); return
+	if response == 401 and operation in ["me","consent","hero","email_store","email_request","email_confirm"]:
 		_recover_device(operation); return
 	if operation == "me": _refreshing = false
 	if operation in ["email_store","email_request","email_confirm"]:
@@ -194,7 +228,6 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 				# name screen, including after restart, without discarding consent.
 				store.data.registration_rejected = true; store.save(); _syncing = false
 				error.emit(problem); sync_finished.emit(); return
-		if operation == "rename": _rename = ""
 		if operation == "me":
 			_account_unavailable = _is_outage(response,problem)
 			if not _account_unavailable: _stop_email_setup(problem)
@@ -215,10 +248,6 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 		"consent":
 			_accept_email_player(player)
 			_finish_registration(false,str(player.get("screen_name",_name_draft)))
-		"rename":
-			_accept_email_player(player)
-			store.data.screen_name = str(player.get("screen_name",_rename)); store.save()
-			_rename = ""; name_updated.emit(store.data.screen_name)
 		"me":
 			_accept_email_player(player)
 			if player.get("screen_name") is String and Store.valid_screen_name(player.screen_name):
@@ -287,6 +316,7 @@ func _email_completed(operation: String, response: int, data: Dictionary, proble
 	email_pending = false
 	email_message = "Email verified." if store.data.email_status == "verified" else "Email saved. Not verified."
 	email_flow_changed.emit()
+	if operation == "email_confirm" and store.data.email_status == "verified": email_verified.emit()
 
 func _finish_registration(pending: bool, confirmed_name: String = ""):
 	store.data.pending_sync = pending; store.data.registration_rejected = false

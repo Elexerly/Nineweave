@@ -7,6 +7,8 @@ const PORTRAIT = Vector2(540,720)
 # Cold web caches need time to download both intros before either starts.
 # Skip remains available, and unavailable media cannot block a match forever.
 const INTRO_WAIT_SECONDS = 12.0
+# Leave summing headroom for other game audio; never amplify source clips.
+const VIDEO_GAIN_DB = -6.0
 signal finished
 signal audio_active(value: bool)
 var source
@@ -94,7 +96,7 @@ func set_sound_enabled(value: bool):
 			# The first lane is local on versus, or the featured winner on results.
 			# Never promote opponent audio when the local clip ends or is absent.
 			var enabled = i == 0 and side.audio and not side.done and sound_enabled
-			side.node.volume = 1.0 if enabled else 0.0
+			side.node.volume = db_to_linear(VIDEO_GAIN_DB) if enabled else 0.0
 			audible = audible or enabled
 	_set_audio(active and audible)
 func holds_completed_result() -> bool:

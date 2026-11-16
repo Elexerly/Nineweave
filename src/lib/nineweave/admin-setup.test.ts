@@ -189,3 +189,13 @@ describe('temporary admin setup', () => {
     const again = await (await call({action:'clear_test_accounts'})).json(); assert.equal(again.cleared.players,0);
   });
 });
+
+it('admin same-site check works behind a proxy with an internal request.url', async () => {
+  const { sameSiteRequest } = await import('./admin-api.ts');
+  const mk = (h: Record<string,string>) => new Request('http://127.0.0.1:3000/api/nineweave/admin/setup', { method: 'POST', headers: h });
+  assert.equal(sameSiteRequest(mk({ origin: 'https://nineweave.grok.me', 'sec-fetch-site': 'same-origin' })), true);
+  assert.equal(sameSiteRequest(mk({ origin: 'https://other.example', host: 'other.example.internal' })), false);
+  assert.equal(sameSiteRequest(mk({ origin: 'https://proxy.example', 'x-forwarded-host': 'proxy.example' })), true);
+  assert.equal(sameSiteRequest(mk({ origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' })), false);
+  assert.equal(sameSiteRequest(mk({})), true);
+});

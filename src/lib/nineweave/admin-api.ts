@@ -160,12 +160,32 @@ export async function clearTestAccounts(db: Db) {
   return Object.fromEntries([...steps.map(([name], index) => [name, result[index + 1].length]), ["tournaments", result.at(-2)!.length], ["players", result.at(-1)!.length]]);
 }
 
+const ADMIN_ALLOWED_HOSTS = new Set(["nineweave.grok.me"]);
+
+// Hosted behind a proxy, request.url can carry an internal origin, so compare
+// the browser Origin host against the forwarded/host headers and a fixed allowlist.
+export function sameSiteRequest(request: Request): boolean {
+  if (request.headers.get("sec-fetch-site") === "cross-site") return false;
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  let originHost: string;
+  try { originHost = new URL(origin).host.toLowerCase(); } catch { return false; }
+  const hosts = new Set<string>(ADMIN_ALLOWED_HOSTS);
+  try { hosts.add(new URL(request.url).host.toLowerCase()); } catch { /* ignore */ }
+  for (const header of ["x-forwarded-host", "host"]) {
+    for (const value of (request.headers.get(header) ?? "").split(",")) {
+      const host = value.trim().toLowerCase();
+      if (host) hosts.add(host);
+    }
+  }
+  return hosts.has(originHost);
+}
+
 export async function handleAdminSetup(request: Request, options: AdminOptions): Promise<Response> {
   if (!adminSetupAvailable(options.enabled, options.hash)) return json(404, { error: "Not found" });
   if (!['GET', 'POST'].includes(request.method)) return json(405, { error: "Method not allowed" });
   // Header/body credentials only: never URLs, cookies or cross-origin CORS.
-  const origin = request.headers.get("origin");
-  if ((origin && origin !== new URL(request.url).origin) || request.headers.get("sec-fetch-site") === "cross-site") return json(403, { error: "Forbidden" });
+  if (!sameSiteRequest(request)) return json(403, { error: "Forbidden" });
   try {
     let body: Record<string, unknown> = {};
     if (request.method === 'POST') body = await readBody(request);

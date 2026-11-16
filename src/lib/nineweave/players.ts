@@ -43,6 +43,7 @@ const PLAYER_COLUMNS =
 /** Feature flags the client checks before using newer endpoints. */
 export const CAPABILITIES = {
   email: true,
+  account_deletion: true,
   online2: true,
   chat: true,
   tournaments: true,

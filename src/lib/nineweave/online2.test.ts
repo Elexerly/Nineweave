@@ -456,6 +456,7 @@ describe("envelope additions", () => {
     const d = await device("Caps");
     const expected = {
       email: true,
+      account_deletion: true,
       online2: true,
       chat: true,
       tournaments: true,

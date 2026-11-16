@@ -362,6 +362,7 @@ export function capabilities() {
     chat: true,
     tournaments: true,
     email: true,
+    account_deletion: true,
     chat_presets: { ...CHAT_PRESETS },
     tournament_sizes: [...TOURNAMENT_CAPABILITIES.tournament_sizes],
     tournament_min_players: TOURNAMENT_CAPABILITIES.tournament_min_players,

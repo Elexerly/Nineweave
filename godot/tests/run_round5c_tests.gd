@@ -56,6 +56,7 @@ func media():
 	var b = make_ui("media"); var ui = b.ui; ui.rival_character = "james_ii"
 	ui.start_game("computer",1,true,true)
 	var cinema = ui.cinematic; var overlay = cinema.video_overlay
+	overlay._process(overlay.INTRO_LEAD_SECONDS)
 	ok(overlay.sides.size() == 2 and overlay.sides[0].id == "shard_jack" and overlay.sides[1].id == "james_ii","player left and opponent right")
 	ok(overlay.sides[0].video and overlay.sides[1].video,"two native intro streams prepared together")
 	ok(overlay.sides[0].frame.end.x < overlay.sides[1].frame.position.x,"simultaneous videos occupy separate lanes")
@@ -102,6 +103,7 @@ func streamed_pair():
 	var overlay = preload("res://characters/hero_video_overlay.gd").new(); overlay.source = video
 	root.add_child(overlay)
 	ok(overlay.begin("versus","shard_jack","james_ii",1,Vector2(390,844)),"verified web sidecars enter split versus")
+	overlay._process(overlay.INTRO_LEAD_SECONDS)
 	ok(overlay.sides.size() == 2 and overlay.sides[0].video and overlay.sides[1].video and video.cache.pins.size() == 2,"two sidecar streams pinned together")
 	overlay.clear(); ok(video.cache.pins.is_empty() and overlay.sides.is_empty(),"skip frees both streamed decoders and pins")
 	video.cache.entries.erase("james_ii/intro")
@@ -116,6 +118,8 @@ func streamed_pair():
 	overlay.begin("versus","shard_jack","james_ii",1,Vector2(390,844))
 	ok(overlay._waiting_for_intros,"both cold clips enter bounded waiting")
 	overlay._process(overlay.INTRO_WAIT_SECONDS+.1)
+	ok(overlay._still_only and overlay.active,"unavailable intros reveal still fallback")
+	overlay._process(overlay.STILL_SECONDS)
 	ok(ended[0] == 1 and not overlay.active and not overlay.visible,"unavailable intros time out without trapping match")
 	overlay.begin("versus","shard_jack","james_ii",1,Vector2(390,844))
 	overlay.clear(); overlay._process(20)

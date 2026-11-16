@@ -273,7 +273,7 @@ func late_download():
 			elif "max_granite/intro" in url: req.respond_bytes(200,pilot("max_granite","intro")); delivered[req] = true
 			elif "max_granite/victory" in url: req.respond_bytes(200,pilot("max_granite","victory")); delivered[req] = true
 		ui.hero_video.cache._process(0)
-	ui.cinematic.video_overlay._process(0)
+	ui.cinematic.video_overlay._process(ui.cinematic.video_overlay.minimum_lead)
 	ok(ui.hero_video.is_ready("shard_jack","intro") and not ui.cinematic.video_overlay._waiting_for_intros and ui.cinematic.video_overlay.sides[0].video and ui.cinematic.video_overlay.sides[1].video,"cold cache completion starts both intro videos")
 	ui.cinematic.advance(.7); ui.cinematic.skip(); ok(not ui.board.frozen and ui.play_cell(4,4),"skip exits loaded intros into playable match")
 	ui.rematch(); ok(ui.cinematic.video_playing(),"next versus uses completed cache")
@@ -303,6 +303,7 @@ func controller():
 	ui.hero_select.focus_hero("max_granite"); ui.hero_select._confirm()
 	ok(pair_requested(requested,"shard_jack","max_granite"),"second local selection and match pair prefetch")
 	var cinema = ui.cinematic
+	cinema.video_overlay._process(cinema.video_overlay.minimum_lead)
 	ok(cinema.video_playing() and cinema.video_overlay.sides.size() == 2,"versus uses split overlay")
 	ok(cinema.video_overlay.sides[0].video and cinema.video_overlay.sides[1].video,"Jack and Max intros both play")
 	var video = cinema.video_overlay
@@ -383,12 +384,13 @@ func controller():
 		ok(not cinema.video_playing() and position == cinema.hero.position,"analytic debug capture "+scene)
 	var both = TwoIntros.new(); cinema.video_source = both
 	cinema.reduced_motion = false; ui._begin_versus()
+	cinema.video_overlay._process(cinema.video_overlay.minimum_lead)
 	ok(cinema.video_overlay.sides[0].video and cinema.video_overlay.sides[1].video and both.held == 2,"two ready intros play together")
 	cinema.advance(8.1); cinema.video_overlay.sides[0].node.finished.emit()
 	ok(cinema.active and ui.board.frozen,"first intro finishing waits for longer intro")
 	cinema.video_overlay.sides[1].node.finished.emit()
 	ok(not cinema.active and not ui.board.frozen and both.held == 0,"longer intro finishes match entry and releases both")
-	ui._begin_versus(); cinema.video_overlay.decode_enabled = true
+	ui._begin_versus(); cinema.video_overlay._process(cinema.video_overlay.minimum_lead); cinema.video_overlay.decode_enabled = true
 	cinema.video_overlay._process(.6)
 	ok(not cinema.active and not ui.board.frozen,"decoder stop without finished cannot strand modal")
 	cinema.video_overlay.decode_enabled = false; cinema.video_source = live_source

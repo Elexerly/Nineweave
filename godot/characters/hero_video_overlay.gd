@@ -7,8 +7,14 @@ const PORTRAIT = Vector2(540,720)
 # Cold web caches need time to download both intros before either starts.
 # Skip remains available, and unavailable media cannot block a match forever.
 const INTRO_WAIT_SECONDS = 12.0
+const INTRO_LEAD_SECONDS = .85
+const PRELUDE_GRACE_SECONDS = 2.0
+const FLASH_SECONDS = .18
+const STILL_SECONDS = 3.0
 # Leave summing headroom for other game audio; never amplify source clips.
 const VIDEO_GAIN_DB = -6.0
+signal prelude_ended
+signal intro_revealed
 signal finished
 signal audio_active(value: bool)
 var source
@@ -24,8 +30,12 @@ var _play_age: float = 0
 var _generation: int = 0
 var display_lane: Rect2 = Rect2()
 var _waiting_for_intros: bool = false
+var prelude_active: Callable
+var minimum_lead: float = INTRO_LEAD_SECONDS
 var _wait_age: float = 0
 var _intro_request: Array = []
+var _reveal_age: float = 0
+var _still_only: bool = false
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE; visible = false
 func begin(kind: String, first: String, second: String, mark: int, extent: Vector2, allow_wait: bool = true) -> bool:
@@ -33,16 +43,17 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 	if source == null or not kind in ["versus","spotlight"]: return false
 	var ids = [Roster.canonical_id(first),Roster.canonical_id(second)] if kind == "versus" else [Roster.canonical_id(first)]
 	var clip_kind = "intro" if kind == "versus" else "victory"
-	_waiting_for_intros = allow_wait and kind == "versus" and _intros_pending(ids)
+	_waiting_for_intros = allow_wait and kind == "versus"
 	if _waiting_for_intros:
-		source.prefetch_pair(ids[0],ids[1])
+		if source.has_method("prefetch_pair"): source.prefetch_pair(ids[0],ids[1])
 		_intro_request = [kind,first,second,mark]
 	var paths: Array = []
 	for id in ids:
 		var path: String = "" if _waiting_for_intros else source.acquire(id,clip_kind)
 		paths.append(path)
 		if not path.is_empty(): _held.append([id,clip_kind])
-	if _held.is_empty() and not _waiting_for_intros: return false
+	if _held.is_empty() and not _waiting_for_intros and kind != "versus": return false
+	_still_only = kind == "versus" and not _waiting_for_intros and _held.is_empty()
 	if kind == "versus": display_lane = Rect2()
 	scene_kind = kind; active = true; visible = true; size = extent
 	for i in range(ids.size()):
@@ -63,6 +74,7 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 			var art = Rig.new(); art.art_key = "versus" if kind == "versus" else "victory"; art.fit_height = true
 			add_child(art); art.configure(ids[i],false); art.side = side.mark; art.set_clip("idle")
 			side.node = art
+		side.node.visible = not _waiting_for_intros
 		sides.append(side)
 	_chrome = Control.new(); _chrome.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_chrome.draw.connect(_draw_chrome); add_child(_chrome)
@@ -70,6 +82,7 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 	relayout(extent); set_sound_enabled(sound_enabled)
 	for side in sides:
 		if side.video and decode_enabled: side.node.play()
+	if kind == "versus" and not _waiting_for_intros: intro_revealed.emit()
 	return true
 func _intros_pending(ids: Array) -> bool:
 	if source == null or not source.has_method("streaming") or not source.streaming(): return false
@@ -112,8 +125,11 @@ func _side_finished(index: int, generation: int):
 		if side.video and not side.done: return
 	active = false; _set_audio(false); finished.emit()
 func clear():
+	if _waiting_for_intros: prelude_ended.emit()
+	minimum_lead = INTRO_LEAD_SECONDS
 	_generation += 1
 	_waiting_for_intros = false; _wait_age = 0; _intro_request.clear()
+	_reveal_age = 0; _still_only = false
 	active = false; visible = false; _set_audio(false)
 	for side in sides:
 		if side.video: side.node.stop(); side.node.stream = null
@@ -129,12 +145,21 @@ func _process(delta):
 	if _waiting_for_intros:
 		_wait_age += delta
 		var ids = [Roster.canonical_id(_intro_request[1]),Roster.canonical_id(_intro_request[2])]
-		if _intros_pending(ids) and _wait_age < INTRO_WAIT_SECONDS: return
+		var speech_pending = prelude_active.is_valid() and prelude_active.call() and _wait_age < minimum_lead+PRELUDE_GRACE_SECONDS
+		if _wait_age < minimum_lead or speech_pending or (_intros_pending(ids) and _wait_age < INTRO_WAIT_SECONDS):
+			if is_instance_valid(_chrome): _chrome.queue_redraw()
+			return
 		var request = _intro_request.duplicate()
 		# Restart atomically so both ready players begin on the same frame.
 		# A timeout may use one ready clip plus the other hero's still art.
 		if not begin(request[0],request[1],request[2],request[3],size,false):
 			finished.emit()
+		return
+	_reveal_age += delta
+	if is_instance_valid(_chrome): _chrome.queue_redraw()
+	if _still_only:
+		if _reveal_age >= STILL_SECONDS:
+			clear(); finished.emit()
 		return
 	if not decode_enabled: return
 	_play_age += delta
@@ -156,6 +181,15 @@ func _draw():
 	if scene_kind == "versus": draw_rect(Rect2(Vector2.ZERO,size),Color("050c1a"))
 func _draw_chrome():
 	if not visible: return
+	if _waiting_for_intros:
+		var center = size*.5
+		# One quiet anticipation screen, no intermediate portraits/scenes.
+		_chrome.draw_line(Vector2(size.x*.18,center.y-52),Vector2(size.x*.82,center.y-52),Color(.65,.5,.25,.45),1,true)
+		var title = "Two have stepped forward"
+		P.text(_chrome,title,Rect2(24,center.y-32,size.x-48,64),P.fit_size(title,size.x-48,38),P.GOLD)
+		P.text(_chrome,"THE CLASH AWAITS",Rect2(24,center.y+38,size.x-48,30),15,P.MUTED)
+		P.text(_chrome,"TAP TO SKIP",Rect2(12,size.y-38,size.x-24,26),14,P.MUTED)
+		return
 	if scene_kind == "versus":
 		P.text(_chrome,"NINEWEAVE  /  HERO CLASH",Rect2(12,12,size.x-24,32),P.fit_size("NINEWEAVE  /  HERO CLASH",size.x-24,24),P.GOLD)
 		for side in sides:
@@ -173,8 +207,15 @@ func _draw_chrome():
 				P.text(_chrome,second,Rect2(box.position+Vector2(0,box.size.y*.5),Vector2(box.size.x,box.size.y*.5)),fs,color)
 			else:
 				P.text(_chrome,caption,box,fs,color)
-		_chrome.draw_line(Vector2(size.x*.5,58),Vector2(size.x*.5,size.y-98),Color("776239"),1,true)
-		P.text(_chrome,"VS",Rect2(size.x*.5-25,size.y*.5-22,50,44),24,P.GOLD)
+		var x = size.x*.5
+		var top = 66.0; var bottom = maxf(top+20,size.y-106)
+		var bolt = PackedVector2Array([Vector2(x+5,top),Vector2(x-7,lerpf(top,bottom,.28)),Vector2(x+6,lerpf(top,bottom,.27)),Vector2(x-6,lerpf(top,bottom,.57)),Vector2(x+6,lerpf(top,bottom,.55)),Vector2(x-5,bottom)])
+		_chrome.draw_polyline(bolt,Color(.3,.65,1,.18),12,true)
+		_chrome.draw_polyline(bolt,Color(.55,.8,1,.65),5,true)
+		_chrome.draw_polyline(bolt,Color(.93,.98,1),2,true)
 	if scene_kind != "versus": return
 	_chrome.draw_rect(Rect2(size.x*.5-64,size.y-38,128,26),Color(.02,.04,.09,.8))
-	P.text(_chrome,"LOADING INTROS · TAP TO SKIP" if _waiting_for_intros else "TAP TO SKIP",Rect2(12,size.y-38,size.x-24,26),14,P.MUTED)
+	P.text(_chrome,"TAP TO SKIP",Rect2(12,size.y-38,size.x-24,26),14,P.MUTED)
+	# One bounded reveal flash. It fades once, never pulses or strobes.
+	if _reveal_age < FLASH_SECONDS:
+		_chrome.draw_rect(Rect2(Vector2.ZERO,size),Color(.8,.92,1,.85*(1.0-_reveal_age/FLASH_SECONDS)))

@@ -3,6 +3,7 @@ extends Node
 ## Fixed pool + cached mono streams. Five fixed pan sends avoid regenerating PCM.
 const Announcer = preload("res://fx/announcer.gd")
 const RATE = 22050
+const VERSUS_PRELUDE_PATH = "res://assets/audio/announcer/two_have_stepped_forward.ogg"
 const MOTIFS = [[0,7,12,14,7,12],[0,4,7,12,9,12],[12,7,3,10,5,0],[0,0,7,5,7,12],[0,3,8,7,10,15],[0,5,9,12,7,5],[0,9,7,14,12,19],[12,11,7,4,7,0],[0,2,7,5,9,7],[0,7,14,12,16,24],[0,4,1,7,3,12],[12,7,2,9,5,0]]
 const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11]
 const REAL_SFX = {"claim_x":"claim_crystal_shatter","claim_o":"claim_gold_clang","claim":"claim_crystal_shatter","victory":"victory_fanfare","defeat":"defeat_sting","route":"board_whoosh_chime","ui":"button_tick","invalid":"invalid_thunk"}
@@ -129,6 +130,7 @@ func advance_mix(delta: float):
 	if _announcer_left > 0:
 		remaining = maxf(0,delta-_announcer_left)
 		_announcer_left = maxf(0,_announcer_left-delta)
+		if versus_prelude_playing(): _announcer_left = maxf(.001,_announcer_left)
 		if _announcer_left == 0: voice_id = ""; _gap_left = VOICE_GAP
 	if _announcer_left == 0: _gap_left = maxf(0,_gap_left-remaining); _drain_voice()
 	# Lines waiting for the first gesture are silent; they must not hold music/SFX ducked.
@@ -136,7 +138,7 @@ func advance_mix(delta: float):
 	duck_db = lerpf(duck_db,target,1.0-exp(-delta/(.035 if target < duck_db else .16)))
 	if absf(duck_db-target) < .01: duck_db = target
 	_apply_mix()
-func cue(kind: String, pan: float = 0.0):
+func cue(kind: String, pan: float = 0.0, gain_db: float = -3.0):
 	if not enabled or not unlocked: return
 	kind = {"move":"place_x","win":"victory"}.get(kind,kind)
 	var stream = stream_for(kind)
@@ -145,8 +147,27 @@ func cue(kind: String, pan: float = 0.0):
 	for p in _players:
 		if not p.playing: player = p; break
 	player.stop(); player.stream = stream
-	player.bus = "CrystalPan"+str(clampi(roundi(pan/.35)+2,0,4)); player.volume_db = -3
+	player.bus = "CrystalPan"+str(clampi(roundi(pan/.35)+2,0,4)); player.volume_db = minf(gain_db,-3.0)
 	if DisplayServer.get_name() != "headless": player.play()
+func play_versus_prelude() -> float:
+	clear_announcer()
+	if not enabled or not unlocked or hero_video_audio or float(volumes.announcer_volume) <= 0: return 0.0
+	var stream = load_real(VERSUS_PRELUDE_PATH)
+	if stream == null: return 0.0
+	_voice.stream = stream; _voice.volume_db = -3.0
+	voice_id = "versus_prelude"; _announcer_left = stream.get_length()
+	# Duck before the first spoken sample, not on a later frame.
+	duck_db = minf(duck_db,-4.5); _apply_mix()
+	if DisplayServer.get_name() != "headless": _voice.play()
+	return _announcer_left
+func versus_prelude_playing() -> bool:
+	return enabled and voice_id == "versus_prelude" and is_instance_valid(_voice) and _voice.playing
+func stop_versus_prelude():
+	if voice_id == "versus_prelude": clear_announcer()
+func play_versus_clash():
+	stop_versus_prelude()
+	# Explicit -6dB below ordinary cues, even if a still fallback has no video duck.
+	cue("claim_o",0,-9.0)
 func clear_announcer():
 	if is_instance_valid(_voice): _voice.stop()
 	voice_queue.clear(); voice_id = ""; _announcer_left = 0; _gap_left = 0

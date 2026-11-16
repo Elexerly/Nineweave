@@ -172,6 +172,9 @@ func _ready():
 	add_child(hero_video)
 	cinematic = Cinematic.new(); cinematic.video_source = hero_video; cinematic.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(cinematic)
 	cinematic.video_overlay.audio_active.connect(sound.set_hero_video_audio)
+	cinematic.video_overlay.prelude_active = sound.versus_prelude_playing
+	cinematic.video_overlay.prelude_ended.connect(sound.stop_versus_prelude)
+	cinematic.video_overlay.intro_revealed.connect(sound.play_versus_clash)
 	cinematic.finished.connect(_cinematic_finished)
 	cinematic.buttons_ready.connect(func(): _result_shown = true; overlay = "result"; _rebuild())
 	sound.voice_started.connect(func(id): callout.show_callout(id))
@@ -453,6 +456,9 @@ func _begin_versus():
 	thinking = false; board.frozen = true
 	cinematic.winner_name = side_name(human_mark); cinematic.loser_name = side_name(3-human_mark)
 	cinematic.show_scene("versus",hero_for(human_mark),hero_for(3-human_mark),human_mark,layout)
+	if cinematic.video_overlay._waiting_for_intros:
+		var speech_length = sound.play_versus_prelude()
+		cinematic.video_overlay.minimum_lead = maxf(cinematic.video_overlay.INTRO_LEAD_SECONDS,speech_length+.12 if speech_length > 0 else 0)
 	if not cinematic.video_playing(): sound.cue("route"); sound.stinger(Roster.audio_index(hero_for(human_mark)),"tag",-.35)
 func rematch():
 	if online_tournament.match_active: online_tournament.return_to_bracket(); return

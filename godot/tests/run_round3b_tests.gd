@@ -171,7 +171,7 @@ func audio():
 		if not sound.voice_id.is_empty() and sound.voice_id != heard.back(): heard.append(sound.voice_id)
 	ok(not overlap and heard.back() == "defeat","voice lines play one at a time, ending on the result "+str(heard))
 	# Every owner .ogg is reachable from a cue; cues without a file synthesize.
-	var cue_paths = {}
+	var cue_paths = {Sound.VERSUS_PRELUDE_PATH:true}
 	for id in Sound.VOICES: cue_paths[Sound.real_path("ann_"+id)] = true
 	for id in Sound.REAL_SFX: cue_paths[Sound.real_path(id)] = true
 	for dir in ["res://assets/audio/announcer","res://assets/audio/sfx"]:

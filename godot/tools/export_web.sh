@@ -51,7 +51,7 @@ if git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   TAG=$(git -C "$REPO" describe --tags --exact-match 2>/dev/null || true)
 fi
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 5k (arena entrance + independent hero audio + account switching)
+Nineweave Round 5m (Beth-only ending fade + larger selector + account-bound hero preference)
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE

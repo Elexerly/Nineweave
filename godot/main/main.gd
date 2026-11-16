@@ -1047,6 +1047,7 @@ func _account_recovered(token: String, player: Dictionary):
 	if page != "recovery": return
 	# Server-confirmed existing identity only. No /auth/device registration here.
 	account.api.cancel_all(); account.busy = false; account._refreshing = false
+	account.store.data.pending_hero = ""; account.store.data.pending_hero_owner = ""; account._hero_inflight = ""
 	account.store.data.signed_out = false
 	account.store.keep_device(token,str(player.screen_name))
 	for key in ["tos_version","privacy_version","accepted_at","age_confirmed"]:
@@ -1055,6 +1056,7 @@ func _account_recovered(token: String, player: Dictionary):
 	account.store.data.email = ""; account.store.data.email_prompt_done = true
 	account._accept_email_player(player,true); account.store.save()
 	_hero_changed = false
+	profile.data.character_id = "vesper_vale"
 	_account_name(str(player.screen_name)); _account_player(player)
 	if not account.store.complete():
 		# Old consent must be renewed, but with this token, never a new identity.
@@ -1169,7 +1171,8 @@ func _account_name(value: String):
 	if overlay == "settings" and controls.has("player_name") and not account.rename_pending():
 		controls.player_name.text = value
 func _account_player(player: Dictionary):
-	var id = str(player.get("last_hero_id",""))
+	var pending = account.pending_hero()
+	var id = pending if not pending.is_empty() else str(player.get("last_hero_id",""))
 	if not _hero_changed and Roster.valid(id):
 		profile.data.character_id = Roster.canonical_id(id); profile.save()
 		if page == "character_select": _hero_focus = profile.data.character_id; _rebuild()

@@ -17,13 +17,13 @@ class Portrait extends Button:
 		for state in ["normal","hover","pressed","focus","disabled"]: add_theme_stylebox_override(state,StyleBoxEmpty.new())
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		rig = Rig.new(); rig.hero_id = R.DATA[index].id; rig.bust = true; rig.frozen = true
-		var band = 28 if R.tile_lines(R.DATA[index].id).size() > 1 else 18
+		var band = caption_height()
 		rig.position = Vector2(3,0); rig.size = Vector2(size.x-6,size.y-band); add_child(rig)
 	func _draw():
 		var r = Rect2(Vector2(2,2),size-Vector2(4,4))
 		draw_style_box(_frame(),r)
-		var lines = R.tile_lines(R.DATA[index].id)
-		var band = 28 if lines.size() > 1 else 18
+		var lines = caption_lines()
+		var band = caption_height()
 		if lines.size() == 1:
 			P.text(self,lines[0],Rect2(3,size.y-band,size.x-6,band),P.fit_size(lines[0],size.x-8,14),P.PALE,P.SANS)
 		else:
@@ -36,6 +36,12 @@ class Portrait extends Button:
 			draw_rect(Rect2(size.x-27,3,24,17),Color("091224"))
 			preload("res://tournament/bracket_view.gd").trophy(self,Rect2(size.x-26,5,12,12),P.GOLD)
 			P.text(self,str(trophies),Rect2(size.x-14,3,12,17),11,P.GOLD)
+	func caption_lines() -> PackedStringArray:
+		# Compact tiles use the familiar first name; the selected plaque keeps the full name.
+		if R.DATA[index].id == "madame_solstice": return PackedStringArray(["BETH"])
+		return R.tile_lines(R.DATA[index].id)
+	func caption_height() -> int:
+		return 28 if caption_lines().size() > 1 else 18
 	func _frame() -> StyleBoxFlat:
 		var style = StyleBoxFlat.new(); style.bg_color = Color("14243a") if not selected else Color("25425c")
 		style.border_color = P.GOLD if selected else Color("35445a"); style.set_border_width_all(2)
@@ -118,7 +124,7 @@ func _sync_page():
 		tile.position = geo.tiles[local_index].position; tile.size = geo.tiles[local_index].size
 		tile.visible = not geo.paged or int(tile.index/geo.per_page) == page
 		if is_instance_valid(tile.rig):
-			tile.rig.size = Vector2(tile.size.x-6,tile.size.y-18)
+			tile.rig.size = Vector2(tile.size.x-6,tile.size.y-tile.caption_height())
 			if tile.visible and tile.rig.texture == null: tile.rig.refresh_texture()
 	if geo.paged:
 		for dot in range(geo.pages): paging_controls[2+dot].add_theme_color_override("font_color",P.BLUE if page == dot else P.MUTED)
@@ -133,8 +139,9 @@ func focus_hero(id: String):
 	for tile in portraits: tile.selected = R.DATA[tile.index].id == id; tile.queue_redraw()
 	queue_redraw()
 static func geometry(s: Vector2, seam: Rect2 = Rect2()) -> Dictionary:
-	var phone = Layout.mode_for(s) == "phone_portrait" and seam.size.x <= 0
-	var g = {"tiles":[],"back":Rect2(12,12,44,44),"paged":phone,"pages":4 if phone else 1,"per_page":8 if phone else 32,"nav":Rect2(),"columns":4,"rows":2}
+	var mode = Layout.mode_for(s)
+	var phone = mode == "phone_portrait" and seam.size.x <= 0
+	var g = {"tiles":[],"back":Rect2(12,12,44,44),"paged":true,"pages":4 if phone else 2,"per_page":8 if phone else 16,"nav":Rect2(),"columns":4,"rows":2}
 	var grid: Rect2
 	if phone:
 		g.heading = Rect2(66,12,s.x-78,40)
@@ -145,22 +152,18 @@ static func geometry(s: Vector2, seam: Rect2 = Rect2()) -> Dictionary:
 		g.field = Rect2(24,s.y-112,s.x-48,44)
 		g.confirm = Rect2(24,s.y-60,s.x-48,48)
 	else:
-		# Eight columns when they read cleanly; compact landscape uses a 4x4 page.
+		# Split hero preview and four-column paginated roster.
 		var split = seam.end.x+12 if seam.size.x > 0 else s.x*(.46 if s.y < 360 else .42)
 		var left_end = seam.position.x-12 if seam.size.x > 0 else split-12
 		g.hero = Rect2(12,58,left_end-24,s.y-146)
 		g.plaque = Rect2(16,s.y-80,left_end-32,64)
 		g.heading = Rect2(split,12,s.x-split-16,38)
 		grid = Rect2(split,58,s.x-split-12,s.y-132)
-		g.columns = 8; g.rows = 4
-		# A 56px tile leaves a readable 50px head above its caption.
-		var fit = Vector2(grid.size.x/8-4,grid.size.y/4-3)
-		if fit.x < 56 or fit.y < 56:
-			g.paged = true; g.pages = 2; g.per_page = 16
-			g.columns = 8 if grid.size.x/8-4 >= 52 else 4
-			g.rows = 16/g.columns
-			grid.size.y -= 48
-			g.nav = Rect2(split, s.y-116,s.x-split-12,44)
+		# Sixteen larger portraits per wide page; narrow phones keep eight.
+		g.paged = true; g.pages = 2; g.per_page = 16
+		g.columns = 4; g.rows = 4
+		grid.size.y -= 48
+		g.nav = Rect2(split, s.y-116,s.x-split-12,44)
 		g.field = Rect2(split,s.y-62,(s.x-split-20)*.55,44)
 		g.confirm = Rect2(g.field.end.x+8,s.y-62,(s.x-split-20)*.45,44)
 		if s.y < 360:

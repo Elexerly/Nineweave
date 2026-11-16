@@ -14,6 +14,8 @@ signal error(message: String)
 var store = Store.new()
 var api = API.new()
 var busy: bool = false
+var _hero_inflight = ""
+var _hero_retry_elapsed = 0.0
 var _name_draft: String = ""
 var _consent: Dictionary = {}
 var _rename: String = ""
@@ -52,6 +54,9 @@ func save_email(value: String) -> bool:
 	if _email_waiting_for_account and not busy and not _refreshing: refresh()
 	return true
 func _process(delta: float):
+	_hero_retry_elapsed += delta
+	if _hero_retry_elapsed >= 30.0:
+		_hero_retry_elapsed = 0.0; _sync_hero()
 	if not _email_waiting_for_account: return
 	_email_setup_elapsed += delta
 	if _email_setup_elapsed >= EMAIL_SETUP_TIMEOUT:
@@ -184,9 +189,33 @@ func _rename_completed(response: int, data: Dictionary, problem: String):
 	store.data.screen_name = player.screen_name; store.save()
 	name_updated.emit(store.data.screen_name)
 	_rename_status("Screen name available and saved.")
+func pending_hero() -> String:
+	var owner = str(store.data.pending_hero_owner)
+	if not Roster.valid(str(store.data.pending_hero)): return ""
+	if owner != (str(store.data.device_token).sha256_text() if store.has_device_token() else ""): return ""
+	return Roster.canonical_id(store.data.pending_hero)
 func choose_hero(id: String):
-	if not Roster.valid(id) or not store.online_ready(): return
-	api.submit("/me",HTTPClient.METHOD_PATCH,{"last_hero_id":Roster.canonical_id(id)},"hero",store.data.device_token)
+	if not Roster.valid(id) or _deletion_blocked(): return
+	store.data.pending_hero = Roster.canonical_id(id)
+	store.data.pending_hero_owner = str(store.data.device_token).sha256_text() if store.has_device_token() else ""
+	store.save(); _sync_hero()
+func _sync_hero():
+	if _deletion_blocked() or busy or _refreshing or not _hero_inflight.is_empty() or not store.online_ready(): return
+	var id = pending_hero()
+	if id.is_empty(): return
+	_hero_inflight = id; _hero_retry_elapsed = 0.0
+	api.submit("/me",HTTPClient.METHOD_PATCH,{"last_hero_id":id},"hero",store.data.device_token)
+func _hero_completed(response: int, data: Dictionary, problem: String):
+	var sent = _hero_inflight; _hero_inflight = ""
+	var player = data.get("player",data)
+	if not problem.is_empty() or response < 200 or response >= 300 or not player is Dictionary: return
+	# Hero PATCH responses also carry authoritative account capabilities/email.
+	# Merge those independently of acknowledging this particular hero choice.
+	_accept_email_player(player)
+	if str(player.get("last_hero_id","")) != sent or sent.is_empty(): return
+	if pending_hero() == sent:
+		store.data.pending_hero = ""; store.data.pending_hero_owner = ""; store.save()
+	else: _sync_hero()
 func _recover_device(operation: String):
 	if _deletion_blocked():
 		api.cancel_all(); _refreshing = false; busy = false
@@ -194,6 +223,7 @@ func _recover_device(operation: String):
 	deletion_capable = false
 	# Discard queued requests too: every one carries the invalid bearer token.
 	api.cancel_all(); _refreshing = false
+	store.data.pending_hero = ""; store.data.pending_hero_owner = ""; _hero_inflight = ""
 	store.data.device_token = ""; store.data.pending_sync = true
 	store.data.email_status = "not_verified"; store.data.email_verified_at = ""; store.save()
 	email_capable = false; email_capability_known = false; _account_unavailable = false
@@ -230,6 +260,8 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 		_rename_completed(response,data,problem); return
 	if response == 401 and operation in ["me","consent","hero","email_store","email_request","email_confirm"]:
 		_recover_device(operation); return
+	if operation == "hero":
+		_hero_completed(response,data,problem); return
 	if operation == "me": _refreshing = false
 	if operation in ["email_store","email_request","email_confirm"]:
 		_email_completed(operation,response,data,problem); return
@@ -275,6 +307,7 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 			if player.get("screen_name") is String and Store.valid_screen_name(player.screen_name):
 				store.data.screen_name = player.screen_name; store.save(); name_updated.emit(player.screen_name)
 			player_received.emit(player)
+			_sync_hero()
 		"hero": _accept_email_player(player)
 	_resume_email_save()
 
@@ -351,6 +384,7 @@ func _finish_registration(pending: bool, confirmed_name: String = ""):
 	if was_syncing: sync_finished.emit()
 	else: onboarding_complete.emit()
 	_resume_email_save()
+	_sync_hero()
 
 func _is_outage(response: int, problem: String) -> bool:
 	# Never turn a reachable server's validation/name conflict into acceptance,

@@ -14,6 +14,10 @@ const FLASH_SECONDS = .18
 const STILL_SECONDS = 3.0
 # Leave summing headroom for other game audio; never amplify source clips.
 const VIDEO_GAIN_DB = -8.0
+const BETH_FADE_SECONDS = .30
+# Shipped Beth intro/victory are both 145 frames at24fps (ffprobe).
+# Used only when the video backend cannot report duration.
+const BETH_VIDEO_SECONDS = 145.0/24.0
 signal prelude_ended
 signal intro_revealed
 signal finished
@@ -119,9 +123,20 @@ func set_sound_enabled(value: bool):
 			# Never promote opponent audio when the local clip ends or is absent.
 			var enabled = i == 0 and side.audio and not side.done and sound_enabled
 			side.node.volume = 0.0
-			if side.sound != null: side.sound.volume_db = VIDEO_GAIN_DB if enabled else -80.0
+			if side.sound != null:
+				var gain = soundtrack_tail_gain(side.id,side.kind,side.sound.get_playback_position(),_soundtrack_end(side))
+				side.sound.volume_db = VIDEO_GAIN_DB+linear_to_db(gain) if enabled and gain > 0 else -80.0
 			audible = audible or enabled
 	_set_audio(active and audible)
+static func soundtrack_tail_gain(id: String, kind: String, position: float, duration: float) -> float:
+	if id != "madame_solstice" or not kind in ["intro","victory"] or duration <= 0: return 1.0
+	return clampf((duration-position)/BETH_FADE_SECONDS,0.0,1.0)
+func _soundtrack_end(side: Dictionary) -> float:
+	if side.id != "madame_solstice": return 0.0
+	var duration: float = side.node.get_stream_length()
+	if duration <= 0: duration = BETH_VIDEO_SECONDS
+	if side.sound.stream != null: duration = minf(duration,side.sound.stream.get_length())
+	return duration
 func holds_completed_result() -> bool:
 	return scene_kind == "spotlight" and visible and not active and sides.size() == 1 and sides[0].video and sides[0].done
 func _set_audio(value: bool):
@@ -175,6 +190,8 @@ func _process(delta):
 			clear(); finished.emit()
 		return
 	if not decode_enabled: return
+	# Beth-only ending envelope follows the audio clock, including mute/unmute.
+	if not sides.is_empty() and sides[0].id == "madame_solstice": set_sound_enabled(sound_enabled)
 	_play_age += delta
 	# A decoder/open failure must never strand a modal screen. Normal completion
 	# uses finished; this only catches a player that stopped without emitting it.

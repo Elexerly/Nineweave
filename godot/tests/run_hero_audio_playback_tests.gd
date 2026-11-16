@@ -29,7 +29,7 @@ func run():
 			check(Overlay.soundtrack_tail_gain(id,kind,end,end) == 1,"other heroes unchanged "+id+kind)
 	var overlay = Overlay.new(); overlay.source = Source.new(); root.add_child(overlay)
 	overlay.decode_enabled = true
-	for id in ["ryan_blaze","shard_jack","madame_solstice","kellen_byte"]:
+	for id in ["ryan_blaze","shard_jack","madame_solstice","kellen_byte","professor_gilt"]:
 		var rival = "shard_jack" if id == "ryan_blaze" else "ryan_blaze"
 		for kind in ["versus","spotlight"]:
 			overlay.begin(kind,id,rival,1,Vector2(800,600),false)
@@ -39,6 +39,8 @@ func run():
 			check(sound.playing,"separate soundtrack started "+label)
 			if id == "kellen_byte" and kind == "versus":
 				check(sound.stream.get_length() > 7.60 and sound.stream.get_length() < 7.70,"Kellen v4 trimmed audio length")
+			if id == "professor_gilt" and kind == "versus":
+				check(sound.stream.get_length() > 6.03 and sound.stream.get_length() < 6.10,"Professor trimmed audio length")
 			check(overlay.sides[0].node.is_playing(),"silent Theora video started "+label)
 			check(overlay.sides[0].node.volume == 0 and overlay.sides[0].node.audio_track == -1,"embedded track silent "+label)
 			if kind == "versus":

@@ -36,7 +36,7 @@ func sidecar_url(relative: String) -> String:
 	# HTTPRequest needs an absolute URL. Resolve the relative sidecar beside index.html,
 	# preserving project-pages subdirectories; never use the online API origin.
 	if OS.has_feature("web"):
-		return str(JavaScriptBridge.eval("new URL("+JSON.stringify(relative+("?v=60713ca" if relative == "hero_video/kellen_byte/intro.ogv" else ""))+", document.baseURI).href"))
+		return str(JavaScriptBridge.eval("new URL("+JSON.stringify(relative+("?v=60713ca" if relative == "hero_video/kellen_byte/intro.ogv" else "?v=fd1c7e0" if relative == "hero_video/professor_gilt/intro.ogv" else ""))+", document.baseURI).href"))
 	return relative # fake HTTP on native tests receives the portable relative URL.
 func prefetch_hero(hero_id: String):
 	var id = Roster.canonical_id(hero_id)

@@ -28,6 +28,7 @@ func run():
 	# This suite pins the pre-video fallback clock; hero_video covers ready clips.
 	root.add_child(ui); ui.cinematic.video_source = null; ui.set_process(false); ui.set_view_size(Vector2(390,844)); await frames()
 	await selection(ui)
+	computer_rematch_turns(ui)
 	versus_flow(ui)
 	winner_flow(ui)
 	await capture_scenarios(ui)
@@ -99,6 +100,20 @@ func selection(ui):
 	ok(ui.cinematic.active and ui.cinematic.kind == "versus","rematch plays versus again")
 	ui.cinematic.advance(3.01); ok(ui.play_cell(4,4) and ui.game.cells[40] == 1,"new X moves first")
 	ui.request_online(); ok(ui.page == "online" and ui.hero_select == null,"online bypasses select")
+func computer_rematch_turns(ui):
+	ui.settings.values.tutorial_completed = true
+	ui.start_game("computer",1)
+	var local_hero = str(ui.profile.data.character_id); var rival = ui.rival_character
+	for expected in [2,1,2,1]:
+		ui.game.status = 1; ui.overlay = "result"; ui._rebuild()
+		ui.controls.again.pressed.emit()
+		ok(ui.human_mark == expected and ui.game.turn == 1,"computer rematch alternates marks, X still starts")
+		ok(ui.hero_for(expected) == local_hero and ui.rival_character == rival,"rematch heroes remain with their players")
+		ok(ui.game.history.is_empty() and ui.cinematic.kind == "versus" and not ui.thinking,"AI waits through versus")
+		ui.cinematic.advance(3.01)
+		ok(ui.thinking == (expected == 2),"AI starts only when it owns X after reveal")
+		ok(ui.play_cell(4,4) == (expected == 1),"human can open only on their X round")
+	ui.thinking = false; ui.go_home()
 func versus_flow(ui):
 	for s in [Vector2(390,844),Vector2(867,553),Vector2(1366,1024)]:
 		ui.set_view_size(s); ui.request_game("computer",1); ui._confirm_hero("vesper_vale","Patrick")

@@ -67,7 +67,17 @@ func run():
 	ok("If this email" in generic and ui.controls.has("recovery_code"),"unknown email generic code UI")
 	ui.recovery.code = "123456"; ui.recovery.confirm(); http.respond(400,{"error":"Invalid code"})
 	ok(ui.account.store.data.device_token.is_empty() and not ui.account.store.complete(),"wrong code never creates identity")
-	ui._recovery_action("edit"); http = ui.recovery.api._request; ui.recovery.email = "known@example.com"; ui.recovery.request_code(); http.respond(200,challenge)
+	var edited_http = http
+	ui.controls.edit_recovery.pressed.emit(); http = ui.recovery.api._request
+	ok(ui.recovery.email == "unknown@example.com" and ui.controls.recovery_email.editable,"Edit email retains address for typo correction")
+	ok(ui.recovery.code.is_empty() and ui.recovery.challenge.is_empty() and not ui.controls.has("recovery_code"),"edit retires prior code step")
+	ok(http.requests.is_empty() and account_http.requests.is_empty(),"editing neither sends email nor registers account")
+	ok("does not change your account" in ui.recovery.message and ui.controls.cancel_recovery.caption == "Back","clear edit guidance and neutral Back")
+	edited_http.respond(200,{"challenge_id":"stale"})
+	ok(ui.recovery.challenge.is_empty(),"old response cannot revive edited challenge")
+	ui.recovery.email = "known@example.com"; ui.recovery.request_code(); http.respond(400,{"error":"Invalid request"})
+	ok("request a sign-in code" in ui.recovery.message and not "expired" in ui.recovery.message,"request failure does not claim invalid code")
+	ui.recovery.request_code(); http.respond(200,challenge)
 	ok(ui.recovery.message == generic,"known and unknown copy identical")
 	ui.recovery.code = "123456"; ui.recovery.confirm(); http.respond(401,{"error":"unauthorized"})
 	ok(account_http.requests.is_empty(),"401 never triggers auto registration")

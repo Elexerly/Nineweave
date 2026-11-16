@@ -294,7 +294,7 @@ func late_download():
 	ui.cinematic.advance(.7); ui.cinematic.skip(); ok(not ui.board.frozen and ui.play_cell(4,4),"skip exits loaded intros into playable match")
 	ui.rematch(); ok(ui.cinematic.video_playing(),"next versus uses completed cache")
 	ui.cinematic.advance(.7); ui.cinematic.skip()
-	ui.game.status = 2; ui._show_spotlight()
+	ui.game.status = 3-ui.human_mark; ui._show_spotlight()
 	ok(ui.cinematic.video_playing() and ui.hero_video.cache.pins.has("max_granite/victory"),"cached opponent victory plays and pins")
 	ui.hero_video.cache.max_bytes = 1; ui.hero_video.cache._evict()
 	ok(ui.hero_video.is_ready("max_granite","victory"),"active victory survives cache eviction")

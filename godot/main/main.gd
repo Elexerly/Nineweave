@@ -487,7 +487,7 @@ func rematch():
 					var other = peer.get_ref()
 					if is_instance_valid(other) and other.match_round == round_number: other.request_rematch())
 		_result_controls_refresh(); return
-	start_game(mode,3-human_mark if mode == "local" else human_mark,true,true)
+	start_game(mode,3-human_mark,true,true)
 func _result_controls_refresh():
 	if overlay == "result": _rebuild()
 
@@ -1041,7 +1041,7 @@ func _recovery_action(kind: String):
 	match kind:
 		"send": recovery.request_code()
 		"confirm": recovery.confirm()
-		"edit": recovery.begin(); _rebuild()
+		"edit": recovery.edit_email(); _rebuild()
 		"cancel": recovery.cancel(); page = "onboarding"; _rebuild()
 func _account_recovered(token: String, player: Dictionary):
 	if page != "recovery": return
@@ -1729,9 +1729,7 @@ func _overlay_controls(s: Vector2):
 		controls["blocked_status"] = _modal_label(blocked_status,Rect2(r.position.x+24,r.end.y-122,pw-48,48),16,P.GOLD)
 		_button("done","Settings",Rect2(r.position.x+24,r.end.y-66,pw-48,48),func(): overlay = "settings"; _rebuild(),true)
 	elif overlay == "result":
-		_button("again","Play Again",Rect2(r.position.x+26,r.end.y-122,pw-52,50),func():
-			if mode == "online": open_online()
-			else: start_game(mode,human_mark,true),true)
+		_button("again","Play Again",Rect2(r.position.x+26,r.end.y-122,pw-52,50),rematch,true)
 		_button("menu","Menu",Rect2(r.position.x+26,r.end.y-62,pw-52,44),go_home,false,"home")
 		for id in ["again","menu"]: _result_bases[id] = controls[id].position
 		_apply_result_anim()

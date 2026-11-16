@@ -124,10 +124,15 @@ func set_sound_enabled(value: bool):
 			var enabled = i == 0 and side.audio and not side.done and sound_enabled
 			side.node.volume = 0.0
 			if side.sound != null:
-				var gain = soundtrack_tail_gain(side.id,side.kind,side.sound.get_playback_position(),_soundtrack_end(side))
+				var gain = soundtrack_tail_gain(side.id,side.kind,soundtrack_tail_position(side.node.stream_position,side.sound.get_playback_position()),_soundtrack_end(side))
 				side.sound.volume_db = VIDEO_GAIN_DB+linear_to_db(gain) if enabled and gain > 0 else -80.0
 			audible = audible or enabled
 	_set_audio(active and audible)
+static func soundtrack_tail_position(video_position: float, audio_position: float) -> float:
+	# Godot4.7.2 web sample position can lag while its worklet reset is held.
+	# The video clock is the actual finish trigger, so never let a stale audio
+	# clock postpone Beth's fade past that trigger. No audio seek/rate changes.
+	return maxf(maxf(video_position,audio_position),0.0)
 static func soundtrack_tail_gain(id: String, kind: String, position: float, duration: float) -> float:
 	if id != "madame_solstice" or not kind in ["intro","victory"] or duration <= 0: return 1.0
 	return clampf((duration-position)/BETH_FADE_SECONDS,0.0,1.0)
@@ -190,7 +195,7 @@ func _process(delta):
 			clear(); finished.emit()
 		return
 	if not decode_enabled: return
-	# Beth-only ending envelope follows the audio clock, including mute/unmute.
+	# Beth-only envelope follows the finish clock, including mute/unmute.
 	if not sides.is_empty() and sides[0].id == "madame_solstice": set_sound_enabled(sound_enabled)
 	_play_age += delta
 	# A decoder/open failure must never strand a modal screen. Normal completion
@@ -213,13 +218,6 @@ func _draw_chrome():
 	if not visible: return
 	if _waiting_for_intros:
 		preload("res://characters/arena_backdrop.gd").draw_at(_chrome,size,_wait_age)
-		var center = size*.5
-		# One atmospheric entrance, no intermediate portraits/scenes.
-		_chrome.draw_line(Vector2(size.x*.18,center.y-52),Vector2(size.x*.82,center.y-52),Color(.65,.5,.25,.45),1,true)
-		var title = "Two have stepped forward"
-		P.text(_chrome,title,Rect2(24,center.y-32,size.x-48,64),P.fit_size(title,size.x-48,38),P.GOLD)
-		P.text(_chrome,"THE CLASH AWAITS",Rect2(24,center.y+38,size.x-48,30),15,P.MUTED)
-		P.text(_chrome,"TAP TO SKIP",Rect2(12,size.y-38,size.x-24,26),14,P.MUTED)
 		return
 	if scene_kind == "versus":
 		P.text(_chrome,"NINEWEAVE  /  HERO CLASH",Rect2(12,12,size.x-24,32),P.fit_size("NINEWEAVE  /  HERO CLASH",size.x-24,24),P.GOLD)

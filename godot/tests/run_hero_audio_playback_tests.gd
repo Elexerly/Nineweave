@@ -11,11 +11,18 @@ func check(value: bool, label: String):
 	if not value: failed += 1; print("FAIL ",label)
 func _initialize(): run.call_deferred()
 func run():
+	check(Overlay.soundtrack_tail_position(5.9,4.9) == 5.9,"lagging web audio clock cannot postpone fade")
+	check(Overlay.soundtrack_tail_position(5.8,5.9) == 5.9,"ahead audio clock still fades")
+	check(Overlay.soundtrack_tail_position(-1,0) == 0,"tail clock nonnegative")
 	for kind in ["intro","victory"]:
 		var end = Overlay.BETH_VIDEO_SECONDS
 		for elapsed in [0.0,end-.3]:
 			check(is_equal_approx(Overlay.soundtrack_tail_gain("madame_solstice",kind,elapsed,end),1.0),"Beth full gain before fade "+kind)
 		check(is_equal_approx(Overlay.soundtrack_tail_gain("madame_solstice",kind,end-.15,end),.5),"Beth half amplitude at fade midpoint "+kind)
+		var lagging_mid = Overlay.soundtrack_tail_position(end-.15,end-1.15)
+		check(is_equal_approx(Overlay.soundtrack_tail_gain("madame_solstice",kind,lagging_mid,end),.5),"web one-second lag still fades at midpoint "+kind)
+		var lagging_end = Overlay.soundtrack_tail_position(end,end-1)
+		check(Overlay.soundtrack_tail_gain("madame_solstice",kind,lagging_end,end) == 0,"web one-second lag silent at video end "+kind)
 		check(Overlay.soundtrack_tail_gain("madame_solstice",kind,end,end) == 0,"Beth silent at end "+kind)
 		check(Overlay.soundtrack_tail_gain("madame_solstice",kind,end+1,end) == 0,"Beth silent after end "+kind)
 		for id in ["ryan_blaze","shard_jack","aurelia"]:

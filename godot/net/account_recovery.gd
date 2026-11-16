@@ -16,6 +16,13 @@ func _ready():
 	api.completed.connect(_completed); add_child(api)
 func begin():
 	cancel(); active = true
+func edit_email():
+	if not active or busy: return
+	var draft = email
+	var cooldown = retry_until
+	cancel(); active = true; email = draft; retry_until = cooldown
+	message = "Correct the address, then send a new sign-in code. This does not change your account's email."
+	changed.emit()
 func cancel():
 	active = false; busy = false
 	# Retire the entire HTTP boundary so an old callback cannot target a new attempt.
@@ -51,7 +58,7 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 			message = "Too many attempts. Please wait a minute and try again."
 		elif response == 0 or response >= 500:
 			message = "Sign-in is unavailable right now. Please try again."
-		else: message = "Code invalid or expired. Check it or request a new code."
+		else: message = "Could not request a sign-in code. Check the address and try again." if operation == "recover" else "Code invalid or expired. Check it or request a new code."
 		changed.emit(); return
 	if operation == "recover":
 		if not data.get("challenge_id") is String or str(data.challenge_id).is_empty():

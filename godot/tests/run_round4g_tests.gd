@@ -88,7 +88,7 @@ func capability_off():
 		var profile = {"screen_name":"Weaver"}
 		if capability: profile.capabilities = {"email":false}
 		finish_name(bundle,profile,profile); var count = bundle.http.requests.size(); save(bundle)
-		ok(ui.page == "title" and bundle.http.requests.size() == count,"onboarding email save stays local against old API")
+		ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and bundle.http.requests.size() == count,"onboarding local save explains unavailable verification before continuing")
 		for request in bundle.http.requests: ok(not request.body.has("email"),"old registration and PATCH contain no email")
 		ui.free(); await frames()
 	# Even an advertised capability cannot invent a token for a pending local name.
@@ -96,7 +96,7 @@ func capability_off():
 	ui.controls.screen_name.text_changed.emit("Weaver"); ui.controls.create_name.pressed.emit()
 	local.http.respond(503,{"error":"Unavailable"}); ui.account.email_capable = true
 	var count = local.http.requests.size(); save(local)
-	ok(ui.page == "title" and ui.account.store.data.pending_sync and ui.account.store.data.device_token.is_empty(),"local-only name continues without a synthetic bearer")
+	ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and ui.account.store.data.pending_sync and ui.account.store.data.device_token.is_empty(),"local-only name explains unavailable verification without a synthetic bearer")
 	ok(local.http.requests.size() == count,"capability plus pending name still sends no address")
 	ui.free(); await frames()
 func onboarding_flow():

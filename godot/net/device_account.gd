@@ -16,14 +16,22 @@ var _name_draft: String = ""
 var _consent: Dictionary = {}
 var _rename: String = ""
 var _syncing: bool = false
+var _refreshing: bool = false
+var _recovering_device: bool = false
+var _account_unavailable: bool = false
 ## Session-only capability: neither a saved address nor config can enable writes.
 var email_capable: bool = false
+var email_capability_known: bool = false
 var email_busy: bool = false
 var email_pending: bool = false
 var email_challenge: Dictionary = {}
 var email_retry_until: float = 0.0
 var email_message: String = ""
 var _email_needs_store: bool = false
+const EMAIL_SETUP_TIMEOUT = 25.0
+var _email_waiting_for_account: bool = false
+var _email_setup_elapsed: float = 0.0
+var _email_recovery_attempted: bool = false
 func email_online_enabled() -> bool:
 	return email_capable and store.online_ready()
 func save_email(value: String) -> bool:
@@ -31,10 +39,37 @@ func save_email(value: String) -> bool:
 	if not store.keep_email(value):
 		error.emit("Enter a valid email, such as name@example.com."); return false
 	email_changed.emit(store.data.email,store.data.email_status)
-	if email_online_enabled():
-		email_challenge = {}; email_pending = true; _email_needs_store = true
-		_request_email_store()
+	email_challenge = {}; email_pending = false; _email_needs_store = true
+	_email_recovery_attempted = false
+	_email_waiting_for_account = true; _email_setup_elapsed = 0.0
+	email_busy = true; email_message = "Setting up your account…"
+	email_flow_changed.emit()
+	_resume_email_save()
+	if _email_waiting_for_account and not busy and not _refreshing: refresh()
 	return true
+func _process(delta: float):
+	if not _email_waiting_for_account: return
+	_email_setup_elapsed += delta
+	if _email_setup_elapsed >= EMAIL_SETUP_TIMEOUT:
+		_email_local_fallback("Account setup timed out.")
+func _email_local_fallback(reason: String):
+	_email_waiting_for_account = false; email_busy = false; email_pending = false
+	_email_needs_store = false
+	email_message = reason+" Email saved on this device only. Not verified. You can retry in Settings."
+	email_flow_changed.emit()
+func _resume_email_save():
+	if not _email_waiting_for_account or busy or _refreshing: return
+	if _account_unavailable:
+		_email_local_fallback("The account server is unavailable."); return
+	if not email_capability_known or not store.online_ready(): return
+	if not email_capable:
+		_email_local_fallback("Email verification isn't available on this server."); return
+	_email_waiting_for_account = false; email_pending = true
+	_request_email_store()
+func _stop_email_setup(message: String):
+	if not _email_waiting_for_account: return
+	_email_waiting_for_account = false; email_busy = false; email_pending = false
+	email_message = message; email_flow_changed.emit()
 func edit_email():
 	if email_busy: return
 	email_challenge = {}; email_pending = false; email_message = ""
@@ -60,25 +95,29 @@ func confirm_email(value: String):
 	api.submit("/me/email/verification/confirm",HTTPClient.METHOD_POST,{"challenge_id":email_challenge.challenge_id,"code":code},"email_confirm",store.data.device_token)
 	email_flow_changed.emit()
 func continue_without_email():
+	_stop_email_setup("")
 	store.skip_email()
 func _ready():
 	api.completed.connect(_completed); add_child(api)
 func refresh():
+	if busy or _refreshing: return
 	if store.complete() and (store.data.pending_sync or not store.has_device_token()): sync_pending()
-	elif store.has_device_token(): api.submit("/me",HTTPClient.METHOD_GET,{},"me",store.data.device_token)
+	elif store.has_device_token():
+		_refreshing = true; _account_unavailable = false
+		api.submit("/me",HTTPClient.METHOD_GET,{},"me",store.data.device_token)
 func sync_pending():
 	if busy or not store.complete() or store.online_ready(): return
 	store.data.pending_sync = true; store.save()
 	_name_draft = store.data.screen_name; _consent = {}
 	for key in ["tos_version","privacy_version","accepted_at","age_confirmed"]: _consent[key] = store.data[key]
-	_syncing = true; busy = true
+	_syncing = true; busy = true; _account_unavailable = false
 	_submit_registration()
 func create_screen_name(value: String):
 	if busy: return
 	var clean = value.strip_edges()
 	if not Store.valid_screen_name(clean):
 		error.emit("Choose a screen name with 1–24 characters."); return
-	_name_draft = clean; _consent = Store.consent_payload(); busy = true; _syncing = false
+	_name_draft = clean; _consent = Store.consent_payload(); busy = true; _syncing = false; _account_unavailable = false
 	_submit_registration()
 func _submit_registration():
 	# Register with name only so current production (no consent columns yet) still works.
@@ -102,7 +141,40 @@ func rename(value: String):
 func choose_hero(id: String):
 	if not Roster.valid(id) or not store.online_ready(): return
 	api.submit("/me",HTTPClient.METHOD_PATCH,{"last_hero_id":Roster.canonical_id(id)},"hero",store.data.device_token)
+func _recover_device(operation: String):
+	# Discard queued requests too: every one carries the invalid bearer token.
+	api.cancel_all(); _refreshing = false
+	store.data.device_token = ""; store.data.pending_sync = true
+	store.data.email_status = "not_verified"; store.data.email_verified_at = ""; store.save()
+	email_capable = false; email_capability_known = false; _account_unavailable = false
+	if not busy:
+		_name_draft = store.data.screen_name; _consent = {}
+		for key in ["tos_version","privacy_version","accepted_at","age_confirmed"]: _consent[key] = store.data[key]
+		_syncing = true
+	_rename = ""
+	# A challenge belongs to the old account. Restore the saved address and send
+	# a new code after registration, never replay an old confirmation.
+	var resume_email = operation in ["email_store","email_request","email_confirm"] or _email_waiting_for_account or email_pending
+	var repeated_email_recovery = resume_email and _email_recovery_attempted
+	email_challenge = {}; email_retry_until = 0.0
+	if resume_email:
+		if not _email_waiting_for_account: _email_setup_elapsed = 0.0
+		_email_waiting_for_account = true; _email_needs_store = true
+		_email_recovery_attempted = true
+		email_busy = true; email_pending = false
+		email_message = "Setting up your account…"; email_flow_changed.emit()
+	if _recovering_device or repeated_email_recovery or not Store.valid_screen_name(_name_draft) or str(_consent.get("accepted_at","")).is_empty():
+		# A broken/repeatedly rejected fresh credential must not loop forever.
+		busy = false; _syncing = false; _recovering_device = false
+		store.data.registration_rejected = true; store.save()
+		var message = "Couldn't set up your account. Please create your screen name again."
+		_stop_email_setup(message); error.emit(message); return
+	_recovering_device = true; busy = true
+	_submit_registration()
 func _completed(operation: String, response: int, data: Dictionary, problem: String):
+	if response == 401 and operation in ["me","consent","rename","hero","email_store","email_request","email_confirm"]:
+		_recover_device(operation); return
+	if operation == "me": _refreshing = false
 	if operation in ["email_store","email_request","email_confirm"]:
 		_email_completed(operation,response,data,problem); return
 	if not problem.is_empty():
@@ -114,17 +186,25 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 				# substitute credential is created; live rooms wait for registration.
 				_finish_registration(true); return
 			busy = false
-			if _syncing:
+			var recovering = _recovering_device; _recovering_device = false
+			if recovering and response == 409: problem = "That screen name is taken. Please choose another screen name."
+			_stop_email_setup(problem)
+			if _syncing or recovering:
 				# A reachable server rejected an offline name. Resolve it on the
 				# name screen, including after restart, without discarding consent.
 				store.data.registration_rejected = true; store.save(); _syncing = false
 				error.emit(problem); sync_finished.emit(); return
 		if operation == "rename": _rename = ""
-		error.emit(problem); return
+		if operation == "me":
+			_account_unavailable = _is_outage(response,problem)
+			if not _account_unavailable: _stop_email_setup(problem)
+		error.emit(problem); _resume_email_save(); return
 	var player = data.get("player",data)
 	if not player is Dictionary:
 		if operation in ["register","consent"]: _finish_registration(true)
-		else: error.emit("Online server not available. Invalid player response.")
+		else:
+			_account_unavailable = true
+			error.emit("Online server not available. Invalid player response."); _resume_email_save()
 		return
 	match operation:
 		"register":
@@ -145,8 +225,10 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 				store.data.screen_name = player.screen_name; store.save(); name_updated.emit(player.screen_name)
 			player_received.emit(player)
 		"hero": _accept_email_player(player)
+	_resume_email_save()
 
 func _accept_email_player(player: Dictionary, replace_email: bool = false):
+	email_capability_known = true; _account_unavailable = false
 	var capabilities = player.get("capabilities",{})
 	email_capable = capabilities is Dictionary and capabilities.get("email",false) == true
 	var server_email = player.get("email","")
@@ -183,6 +265,7 @@ func _email_completed(operation: String, response: int, data: Dictionary, proble
 			email_message = "Email isn't available right now"
 		else:
 			email_challenge = data.duplicate(true); email_retry_until = 0.0
+			_email_recovery_attempted = false
 			email_message = "Code sent. You can continue without verifying."
 		email_flow_changed.emit(); return
 	var player = data.get("player",data)
@@ -203,10 +286,12 @@ func _finish_registration(pending: bool, confirmed_name: String = ""):
 	store.data.pending_sync = pending; store.data.registration_rejected = false
 	store.accept_consent(confirmed_name if Store.valid_screen_name(confirmed_name) else _name_draft,_consent)
 	busy = false
+	_recovering_device = false; _account_unavailable = pending
 	var was_syncing = _syncing; _syncing = false
 	name_updated.emit(store.data.screen_name)
 	if was_syncing: sync_finished.emit()
 	else: onboarding_complete.emit()
+	_resume_email_save()
 
 func _is_outage(response: int, problem: String) -> bool:
 	# Never turn a reachable server's validation/name conflict into acceptance,

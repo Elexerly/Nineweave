@@ -1033,6 +1033,7 @@ func open_account_email():
 	if _require_screen_name(): return
 	_email_draft = account.store.data.email; message = ""; overlay = "account"; thinking = false; _rebuild()
 func _account_email_flow_changed():
+	if account.email_challenge.is_empty(): _email_code_draft = ""
 	if page != "email" and overlay != "account": return
 	message = account.email_message
 	_rebuild()
@@ -1040,7 +1041,9 @@ func _email_action(kind: String, value: String):
 	if _require_screen_name(): return
 	if kind == "save_email":
 		if not account.save_email(value): return
-		if account.email_online_enabled(): return
+		# Saving is not a navigation action during onboarding. Account setup may
+		# still be in flight; its completion will open the code-entry stage.
+		if page == "email" or account.email_busy or account.email_pending: return
 	elif kind == "confirm_email": account.confirm_email(value); return
 	elif kind == "resend_email": _email_code_draft = ""; account.request_email_verification(); return
 	elif kind == "change_email": _email_code_draft = ""; account.edit_email(); return
@@ -1051,7 +1054,7 @@ func _email_action(kind: String, value: String):
 		if _onboarding_destination == "online": open_online()
 		else: go_home()
 	else:
-		message = "Email saved on this device. Not verified." if kind == "save_email" else ""
+		message = account.email_message if kind == "save_email" else ""
 		overlay = "settings"; _rebuild()
 func _build_email_screen(s: Vector2):
 	# Block keyboard focus as well as pointer input on the screen underneath.

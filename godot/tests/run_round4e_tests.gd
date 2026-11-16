@@ -157,6 +157,8 @@ func email_creation_paths():
 			ok(ui.page == "email" and "valid email" in ui.email_view.status and ui.account.store.data.email.is_empty(),"invalid email stays on form with readable error")
 			ui.controls.email.text = " Weaver+backup@example.com "
 			ui.controls.save_email.pressed.emit()
+			ok(ui.page == "email" and "saved on this device only" in ui.email_view.status,"local-only Save explains unavailable verification before explicit continue")
+			ui.controls.continue_email.pressed.emit()
 		else: ui.controls.continue_email.pressed.emit()
 		ok(ui.page == "title" and ui.controls.has_all(["computer","local"]),"both optional paths reach playable menu")
 		var saved = DeviceStore.new(ui.account.store.path)
@@ -190,7 +192,8 @@ func offline_first_play():
 	bundle.http.respond(503,{"error":"Service unavailable"})
 	ok(ui.page == "email" and ui.account.store.complete() and not ui.account.busy,"repeated outage leaves optional email usable")
 	ui.controls.email.text = "offline@example.com"; ui.controls.save_email.pressed.emit()
-	ok(ui.page == "title" and ui.account.store.data.email == "offline@example.com","optional email still saves locally during outage")
+	ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and ui.account.store.data.email == "offline@example.com","optional email explains local-only save during outage")
+	ui.controls.continue_email.pressed.emit()
 	ui.start_game("computer",1,false,true)
 	ok(ui.cinematic.active and not ui.tutorial.active,"offline local account keeps hero intro")
 	ui.cinematic.advance(.81); ui.cinematic.skip()

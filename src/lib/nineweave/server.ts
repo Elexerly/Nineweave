@@ -11,22 +11,24 @@
  */
 import { resolveDatabaseUrl } from "../../../scripts/database-url.mjs";
 import { errorResponse, handleNineweaveRequest } from "./api.ts";
+import { adminConfig, resolveResendKey } from "./config.ts";
+import type { Db } from "./store.ts";
 import { resendMailer } from "./mailer.ts";
 import { createService, type Service } from "./service.ts";
 
-let servicePromise: Promise<Service> | null = null;
+let service: Service | undefined;
+let activeDb: Db | undefined;
+let activeKey: string | undefined;
 
-function getService(): Promise<Service> {
-  servicePromise ??= import("../db")
-    .then(({ getSql }) => getSql())
-    // The Resend key is read at runtime and never logged; unset -> no mailer
-    // (email endpoints answer 503).
-    .then((db) => createService({ db, mailer: resendMailer(process.env.NINEWEAVE_RESEND_API_KEY) }))
-    .catch((err) => {
-      servicePromise = null;
-      throw err;
-    });
-  return servicePromise;
+async function getService(): Promise<Service> {
+  const { getSql } = await import("../db");
+  const [db, key] = await Promise.all([getSql(), resolveResendKey(process.env, adminConfig)]);
+  if (!service || activeDb !== db || activeKey !== key) {
+    service = createService({ db, mailer: resendMailer(key) });
+    activeDb = db;
+    activeKey = key;
+  }
+  return service;
 }
 
 export async function handleNineweave(request: Request): Promise<Response> {

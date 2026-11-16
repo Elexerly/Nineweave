@@ -1,33 +1,25 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
-import { databaseUrlLooksMisconfigured, resolveDatabaseUrl } from "../../scripts/database-url.mjs";
+import { databaseUrlLooksMisconfigured, extractPostgresUrl } from "../../scripts/database-url.mjs";
+import { adminConfig, resolveNineweaveDatabaseUrl } from "./nineweave/config.ts";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
-// Connection string: `NINEWEAVE_DATABASE_URL` when a postgres URL can be
-// extracted (plain URL or pasted .env block), else `DATABASE_URL`. Empty or
-// whitespace values mean "unset". Never log the value.
-const databaseUrl = typeof process !== "undefined" ? resolveDatabaseUrl(process.env) : undefined;
-if (typeof process !== "undefined" && !databaseUrl && databaseUrlLooksMisconfigured(process.env)) {
-  console.warn(
-    "[db] a database env var is set but no postgres:// URL could be extracted — using the PGLite fallback.",
-  );
+// Bootstrap/auth always use the host database. Nineweave resolves its target
+// per request below, so a setup change takes effect without restarting.
+const databaseUrl = typeof process !== "undefined" ? extractPostgresUrl(process.env.DATABASE_URL) : undefined;
+if (typeof process !== "undefined" && !databaseUrl && databaseUrlLooksMisconfigured({ DATABASE_URL: process.env.DATABASE_URL })) {
+  console.warn("[db] built-in database URL is invalid");
 }
 
-/**
- * Active backend: real **Neon** (HTTP driver) when a database URL is set (deployed / configured
- * sandbox), otherwise a local embedded **PGLite** (Postgres compiled to WASM) so
- * the app has a working database even with nothing configured — the live preview
- * included. Prefer `NINEWEAVE_DATABASE_URL` for Nineweave data; `DATABASE_URL`
- * remains the fallback. No code changes to switch databases.
- */
+/** Bootstrap backend (auth/preview); the Nineweave target may differ. */
 export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
 
 /**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
  * tagged-template and `.query()` forms resolve to an array of row objects:
  *
- *   const sql = await getSql();
+ *   const sql = await getBuiltinSql();
  *   const rows = await sql`select * from todos where id = ${id}`; // parameterized
  *   const rows2 = await sql.query("select * from todos where id = $1", [id]);
  *
@@ -54,7 +46,7 @@ export interface Sql {
  * `getSql()`). A failed init clears its slot so the next call retries.
  */
 const globalRef = globalThis as typeof globalThis & {
-  __pgSqlPromise__?: Promise<Sql>;
+  __pgSqlClients__?: Map<string, Promise<Sql>>;
   __pgliteInstance__?: Promise<import("@electric-sql/pglite").PGlite>;
   __pgliteMigrateChain__?: Promise<void>;
 };
@@ -96,8 +88,11 @@ function toSql(run: Run, runTransaction: RunTransaction): Sql {
   return sql;
 }
 
-function createNeonSql(): Promise<Sql> {
-  globalRef.__pgSqlPromise__ ??= (async () => {
+export function createDatabaseSql(url: string): Promise<Sql> {
+  const clients = globalRef.__pgSqlClients__ ??= new Map();
+  const existing = clients.get(url);
+  if (existing) return existing;
+  const pending = (async () => {
     // Neon serverless driver over HTTPS (port 443): stateless, so it suits
     // serverless instances and build boxes where TCP 5432 is blocked.
     const { neon, types } = await import("@neondatabase/serverless");
@@ -106,7 +101,7 @@ function createNeonSql(): Promise<Sql> {
       [OID_DATE]: identity,
       [OID_INTERVAL]: identity,
     };
-    const neonSql = neon(databaseUrl!, {
+    const neonSql = neon(url, {
       types: {
         getTypeParser: ((id: number, format?: "text" | "binary") =>
           overrides[id] ?? types.getTypeParser(id, format)) as never,
@@ -120,10 +115,11 @@ function createNeonSql(): Promise<Sql> {
         )) as Record<string, unknown>[][],
     );
   })().catch((err) => {
-    globalRef.__pgSqlPromise__ = undefined;
+    clients.delete(url);
     throw err;
   });
-  return globalRef.__pgSqlPromise__;
+  clients.set(url, pending);
+  return pending;
 }
 
 async function createPgliteSql(): Promise<Sql> {
@@ -205,7 +201,7 @@ async function createSql(): Promise<Sql> {
         "or a server route loader, never from client code.",
     );
   }
-  return dbSource === "neon" ? createNeonSql() : createPgliteSql();
+  return databaseUrl ? createDatabaseSql(databaseUrl) : createPgliteSql();
 }
 
 /**
@@ -215,12 +211,19 @@ async function createSql(): Promise<Sql> {
  * Schema comes from `migrations/*.sql`, auto-applied before the first query on
  * both backends — define tables there, never inline in server functions.
  */
-export function getSql(): Promise<Sql> {
+export function getBuiltinSql(): Promise<Sql> {
   sqlPromise ??= createSql().catch((err) => {
     sqlPromise = null; // don't memoize failures — let the next call retry
     throw err;
   });
   return sqlPromise;
+}
+
+/** Nineweave: env override > cached bootstrap setting > host database. */
+export async function getSql(): Promise<Sql> {
+  if (typeof window !== "undefined") throw new Error("Database access is server-only");
+  const url = await resolveNineweaveDatabaseUrl(process.env, adminConfig);
+  return url ? createDatabaseSql(url) : getBuiltinSql();
 }
 
 /**
@@ -232,7 +235,7 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
   if (dbSource !== "pglite") {
     throw new Error("getPglite() is only available on the PGLite fallback (no database URL)");
   }
-  await getSql();
+  await getBuiltinSql();
   const pg = await globalRef.__pgliteInstance__;
   if (!pg) throw new Error("PGLite instance failed to initialize");
   return pg;
@@ -250,7 +253,7 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
  */
 export function ensureDbReady(): Promise<void> {
   if (dbSource !== "pglite") return Promise.resolve();
-  return getSql().then(() => undefined);
+  return getBuiltinSql().then(() => undefined);
 }
 
 // Server-only eager start: kick PGLite bootstrap as soon as this module loads in

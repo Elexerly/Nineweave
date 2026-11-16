@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as AdminSetupRouteImport } from './routes/admin/setup'
 import { Route as ApiNineweaveSplatRouteImport } from './routes/api/nineweave/$'
+import { Route as ApiNineweaveAdminSetupRouteImport } from './routes/api/nineweave/admin/setup'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -29,9 +31,19 @@ const TermsRoute = TermsRouteImport.update({
   path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminSetupRoute = AdminSetupRouteImport.update({
+  id: '/admin/setup',
+  path: '/admin/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiNineweaveSplatRoute = ApiNineweaveSplatRouteImport.update({
   id: '/api/nineweave/$',
   path: '/api/nineweave/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNineweaveAdminSetupRoute = ApiNineweaveAdminSetupRouteImport.update({
+  id: '/api/nineweave/admin/setup',
+  path: '/api/nineweave/admin/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -39,34 +51,61 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/admin/setup': typeof AdminSetupRoute
   '/api/nineweave/$': typeof ApiNineweaveSplatRoute
+  '/api/nineweave/admin/setup': typeof ApiNineweaveAdminSetupRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/admin/setup': typeof AdminSetupRoute
   '/api/nineweave/$': typeof ApiNineweaveSplatRoute
+  '/api/nineweave/admin/setup': typeof ApiNineweaveAdminSetupRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/admin/setup': typeof AdminSetupRoute
   '/api/nineweave/$': typeof ApiNineweaveSplatRoute
+  '/api/nineweave/admin/setup': typeof ApiNineweaveAdminSetupRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/privacy' | '/terms' | '/api/nineweave/$'
+  fullPaths:
+    | '/'
+    | '/privacy'
+    | '/terms'
+    | '/admin/setup'
+    | '/api/nineweave/$'
+    | '/api/nineweave/admin/setup'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/privacy' | '/terms' | '/api/nineweave/$'
-  id: '__root__' | '/' | '/privacy' | '/terms' | '/api/nineweave/$'
+  to:
+    | '/'
+    | '/privacy'
+    | '/terms'
+    | '/admin/setup'
+    | '/api/nineweave/$'
+    | '/api/nineweave/admin/setup'
+  id:
+    | '__root__'
+    | '/'
+    | '/privacy'
+    | '/terms'
+    | '/admin/setup'
+    | '/api/nineweave/$'
+    | '/api/nineweave/admin/setup'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
+  AdminSetupRoute: typeof AdminSetupRoute
   ApiNineweaveSplatRoute: typeof ApiNineweaveSplatRoute
+  ApiNineweaveAdminSetupRoute: typeof ApiNineweaveAdminSetupRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -92,11 +131,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/setup': {
+      id: '/admin/setup'
+      path: '/admin/setup'
+      fullPath: '/admin/setup'
+      preLoaderRoute: typeof AdminSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/nineweave/$': {
       id: '/api/nineweave/$'
       path: '/api/nineweave/$'
       fullPath: '/api/nineweave/$'
       preLoaderRoute: typeof ApiNineweaveSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/nineweave/admin/setup': {
+      id: '/api/nineweave/admin/setup'
+      path: '/api/nineweave/admin/setup'
+      fullPath: '/api/nineweave/admin/setup'
+      preLoaderRoute: typeof ApiNineweaveAdminSetupRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -106,7 +159,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
+  AdminSetupRoute: AdminSetupRoute,
   ApiNineweaveSplatRoute: ApiNineweaveSplatRoute,
+  ApiNineweaveAdminSetupRoute: ApiNineweaveAdminSetupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { neon } from "@neondatabase/serverless";
 import { pendingMigrations } from "./migration-plan.mjs";
-import { databaseUrlLooksMisconfigured, resolveDatabaseUrl } from "./database-url.mjs";
+import { databaseUrlLooksMisconfigured, extractPostgresUrl, resolveDatabaseUrl } from "./database-url.mjs";
 import { splitSqlStatements } from "./sql-split.mjs";
 
 const databaseUrl = resolveDatabaseUrl();
@@ -41,7 +41,7 @@ if (!databaseUrl) {
 
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
-async function main() {
+async function apply(url, onlyBootstrap = false) {
   let entries;
   try {
     entries = await readdir(migrationsDir);
@@ -55,7 +55,8 @@ async function main() {
     return;
   }
 
-  const sql = neon(databaseUrl);
+  if (onlyBootstrap) entries = entries.filter((name) => name === "0007_nineweave_admin_config.sql");
+  const sql = neon(url);
   await sql.query(
     "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
   );
@@ -82,11 +83,16 @@ async function main() {
   console.log(count ? `[migrate] done — ${count} migration(s) applied.` : "[migrate] up to date.");
 }
 
-main().catch((err) => {
-  console.error("[migrate] failed:", err?.message || err);
-  // Postgres errors carry the context needed to debug a bad SQL file.
-  for (const key of ["code", "detail", "hint", "position", "where"]) {
-    if (err?.[key] != null) console.error(`[migrate]   ${key}: ${err[key]}`);
-  }
+async function main() {
+  const builtinUrl = extractPostgresUrl(process.env.DATABASE_URL);
+  // Even when Nineweave uses a separate env override, the bootstrap settings
+  // table must exist in the host DB. Do not provision player/auth tables here.
+  if (builtinUrl && builtinUrl !== databaseUrl) await apply(builtinUrl, true);
+  await apply(databaseUrl);
+}
+
+main().catch(() => {
+  // Driver error messages/details can contain credentials or connection URLs.
+  console.error("[migrate] failed — check database connectivity and migration SQL");
   process.exit(1);
 });

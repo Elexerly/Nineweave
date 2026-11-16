@@ -2,7 +2,7 @@ extends Node
 ## Verified Ogg files only. Readiness is an O(1) lookup; prefetch never awaits HTTP.
 const Roster = preload("res://characters/roster.gd")
 # Bump when approved media replaces clips at the same sidecar URLs.
-const CONTENT_VERSION = "r5v"
+const CONTENT_VERSION = "r5p-kellen-v4"
 const MAX_BYTES = 64 * 1024 * 1024 # 64 MiB, with an additional eight-clip ceiling.
 const MAX_CLIPS = 8
 const MAX_ATTEMPTS = 3

@@ -146,6 +146,7 @@ describe("profile email fields", () => {
     const d = await device();
     assert.deepEqual(d.player.capabilities, {
       email: true,
+      account_deletion: true,
       online2: true,
       chat: true,
       tournaments: true,
@@ -158,6 +159,7 @@ describe("profile email fields", () => {
     assert.equal(d.player.email_verified_at, null);
     assert.deepEqual((await me(d.token)).capabilities, {
       email: true,
+      account_deletion: true,
       online2: true,
       chat: true,
       tournaments: true,
@@ -169,6 +171,7 @@ describe("profile email fields", () => {
     assert.equal(patched.status, 200);
     assert.deepEqual(patched.body.capabilities, {
       email: true,
+      account_deletion: true,
       online2: true,
       chat: true,
       tournaments: true,

@@ -1180,14 +1180,18 @@ export async function tournamentSeatToken(
 ): Promise<string> {
   const token = `nws_${createHmac("sha256", deviceToken).update(`nw-tournament-seat:${room.id}:${slot}`).digest("base64url")}`;
   const hash = hashToken(token);
-  if ((slot === "a" ? room.a_token_hash : room.b_token_hash) !== hash) {
-    // Not a versioned write: only the seat's token hash changes.
-    await svc.db.query(`update nw_rooms set ${slot}_token_hash = $2 where id = $1`, [
-      room.id,
-      hash,
-    ]);
-    if (slot === "a") room.a_token_hash = hash;
-    else room.b_token_hash = hash;
-  }
+  const playerId = slot === "a" ? room.a_player_id : room.b_player_id;
+  const valid = `id = $1 and ${slot}_player_id = $3 and status <> 'closed'
+    and exists(select 1 from nw_players p where p.id = $3 and p.token_hash = $4)`;
+  const params = [room.id, hash, playerId, hashToken(deviceToken)];
+  // An envelope may have been authorized before deletion/recovery. Recheck
+  // ownership and the live device credential at the write, not the snapshot.
+  const changed = (slot === "a" ? room.a_token_hash : room.b_token_hash) !== hash;
+  const rows = await svc.db.query(changed
+    ? `update nw_rooms set ${slot}_token_hash = $2 where ${valid} returning id`
+    : `select id from nw_rooms where ${valid} and ${slot}_token_hash = $2`, params);
+  if (rows.length === 0) throw new ApiError(403, "This tournament seat is no longer available");
+  if (slot === "a") room.a_token_hash = hash;
+  else room.b_token_hash = hash;
   return token;
 }

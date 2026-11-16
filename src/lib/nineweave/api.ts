@@ -13,6 +13,7 @@ import {
   reportPlayer,
   unblockPlayer,
 } from "./chat.ts";
+import { deleteOwnAccount } from "./account-deletion.ts";
 import { corsHeaders } from "./cors.ts";
 import {
   confirmRecovery,
@@ -190,6 +191,10 @@ async function route(
     }
   }
   if (head === "me" && segments.length === 1) {
+    if (method === "DELETE") {
+      limit(svc, "write", request);
+      return [200, await deleteOwnAccount(svc, bearer, await readJson(request))];
+    }
     if (method === "GET") return [200, await profile(svc, await requirePlayer(svc, bearer))];
     if (method === "PATCH") {
       limit(svc, "write", request);

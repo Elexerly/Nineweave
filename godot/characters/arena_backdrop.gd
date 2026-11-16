@@ -62,15 +62,33 @@ static func draw_at(canvas: CanvasItem, extent: Vector2, _age: float) -> void:
 	var title = Rect2(r.position.x+r.size.x*.05,r.position.y+r.size.y*.25,r.size.x*.90,r.size.y*.26)
 	var second = Rect2(title.position.x,r.position.y+r.size.y*.50,title.size.x,r.size.y*.26)
 	var tag = Rect2(r.position.x+r.size.x*.13,r.position.y+r.size.y*.81,r.size.x*.74,r.size.y*.12)
-	P.text(canvas,"TWO HAVE",top,P.fit_box("TWO HAVE",top,52,P.SANS),INK,P.SANS)
-	# Offset print registration shadows give the headline depth without fuzzy glow.
-	var fs = mini(P.fit_box("STEPPED",title,84,P.SANS),P.fit_box("FORWARD",second,84,P.SANS))
-	for item in [["STEPPED",title],["FORWARD",second]]:
-		var shadow = Rect2(item[1].position+Vector2(3,3),item[1].size)
-		P.text(canvas,item[0],shadow,fs,Color("d88c28"),P.SANS)
-		P.text(canvas,item[0],item[1],fs,INK,P.SANS)
+	comic_word(canvas,"TWO HAVE",top,Color("1678d2"))
+	comic_word(canvas,"STEPPED",title,Color("249fff"))
+	comic_word(canvas,"FORWARD",second,Color("1678d2"))
 	canvas.draw_rect(tag,INK)
 	P.text(canvas,"THE CLASH AWAITS",tag,P.fit_box("THE CLASH AWAITS",tag,20,P.SANS),PAPER,P.SANS)
 	# Always a solid dark reading surface behind the existing skip affordance.
 	canvas.draw_rect(Rect2(0,h-48,w,48),INK)
 	P.text(canvas,"TAP TO SKIP",g.skip,14,PAPER,P.SANS)
+
+## Wide, slanted, heavy comic lettering. Fit the complete ink envelope, not the
+## font line box, so the headline fills the burst without clipping at any ratio.
+static func comic_word(canvas: CanvasItem, value: String, box: Rect2, color: Color):
+	var fs = 100
+	var cap = 65.0
+	var width = P.SANS.get_string_size(value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs).x
+	var outline = 7.0
+	var depth = 7.0
+	var shear = .20
+	var envelope = Vector2(width+cap*shear+outline*2+depth,cap+outline*2+depth)
+	var scale = Vector2(box.size.x/envelope.x,box.size.y/envelope.y)*.92
+	var at = box.get_center()-envelope*scale*.5+Vector2(outline,cap+outline)*scale
+	canvas.draw_set_transform_matrix(Transform2D(Vector2(scale.x,0),Vector2(-shear*scale.x,scale.y),at))
+	# Solid ink extrusion, paper keyline, blue fill with a lighter offset face.
+	for step in range(7,0,-1):
+		canvas.draw_string_outline(P.SANS,Vector2(step,step),value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,7,INK)
+	canvas.draw_string_outline(P.SANS,Vector2.ZERO,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,7,INK)
+	canvas.draw_string_outline(P.SANS,Vector2.ZERO,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,4,Color("fffdf0"))
+	canvas.draw_string_outline(P.SANS,Vector2.ZERO,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,2,color)
+	canvas.draw_string(P.SANS,Vector2.ZERO,value,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,color)
+	canvas.draw_set_transform_matrix(Transform2D.IDENTITY)

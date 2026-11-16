@@ -68,13 +68,28 @@ func run():
 	ui.recovery.code = "123456"; ui.recovery.confirm(); http.respond(400,{"error":"Invalid code"})
 	ok(ui.account.store.data.device_token.is_empty() and not ui.account.store.complete(),"wrong code never creates identity")
 	var edited_http = http
-	ui.controls.edit_recovery.pressed.emit(); http = ui.recovery.api._request
-	ok(ui.recovery.email == "unknown@example.com" and ui.controls.recovery_email.editable,"Edit email retains address for typo correction")
-	ok(ui.recovery.code.is_empty() and ui.recovery.challenge.is_empty() and not ui.controls.has("recovery_code"),"edit retires prior code step")
+	var field = ui.controls.recovery_email
+	field.grab_focus(); field.text = "unknown2@example.com"; field.text_changed.emit(field.text)
+	http = ui.recovery.api._request
+	ok(ui.recovery.email == "unknown2@example.com" and field.editable,"email is directly editable after code request")
+	ok(ui.controls.recovery_email == field and field.has_focus(),"typing does not rebuild form or discard keyboard focus")
+	ok(ui.recovery.code.is_empty() and ui.recovery.challenge.is_empty() and not ui.controls.recovery_code.visible,"edit retires prior code step")
 	ok(http.requests.is_empty() and account_http.requests.is_empty(),"editing neither sends email nor registers account")
-	ok("does not change your account" in ui.recovery.message and ui.controls.cancel_recovery.caption == "Back","clear edit guidance and neutral Back")
+	ok("Send a new sign-in code" in ui.recovery.message and ui.controls.cancel_recovery.caption == "Back","clear edit guidance and neutral Back")
 	edited_http.respond(200,{"challenge_id":"stale"})
 	ok(ui.recovery.challenge.is_empty(),"old response cannot revive edited challenge")
+	# Changing an address while a request is pending must retire its callback too.
+	ui.recovery.request_code(); var pending_http = http
+	field = ui.controls.recovery_email; field.text = "pending@example.com"; field.text_changed.emit(field.text)
+	http = ui.recovery.api._request
+	pending_http.respond(200,{"challenge_id":"late_wrong_address"})
+	ok(not ui.recovery.busy and ui.recovery.challenge.is_empty(),"in-flight response cannot restore challenge for previous address")
+	ui.recovery.code = "123456"; ui.recovery.confirm()
+	ok(http.requests.is_empty(),"new address cannot submit old code before requesting a new challenge")
+	ui.recovery.challenge = {"challenge_id":"cooldown","resend_available_at":"2099-01-01T00:00:00Z"}
+	ui.recovery.update_email("cooldown@example.com"); ui.recovery.request_code()
+	ok(http.requests.is_empty() and ui.recovery.retry_until > Time.get_unix_time_from_system(),"editing does not bypass resend cooldown")
+	ui.recovery.retry_until = 0; http = ui.recovery.api._request
 	ui.recovery.email = "known@example.com"; ui.recovery.request_code(); http.respond(400,{"error":"Invalid request"})
 	ok("request a sign-in code" in ui.recovery.message and not "expired" in ui.recovery.message,"request failure does not claim invalid code")
 	ui.recovery.request_code(); http.respond(200,challenge)

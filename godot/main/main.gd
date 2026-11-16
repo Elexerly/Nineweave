@@ -1041,7 +1041,6 @@ func _recovery_action(kind: String):
 	match kind:
 		"send": recovery.request_code()
 		"confirm": recovery.confirm()
-		"edit": recovery.edit_email(); _rebuild()
 		"cancel": recovery.cancel(); page = "onboarding"; _rebuild()
 func _account_recovered(token: String, player: Dictionary):
 	if page != "recovery": return

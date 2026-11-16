@@ -19,7 +19,7 @@ func run():
 		var screen = Screen.new(); screen.size = extent; screen.flow = flow; root.add_child(screen); await frames()
 		var scroll = screen.get_child(0); var box = scroll.get_child(0)
 		ok(screen.panel_rect.size.x <= 620 and Rect2(Vector2.ZERO,extent).encloses(screen.panel_rect),"bounded pale form panel "+str(extent))
-		ok(screen.controls.edit_recovery.text == "Edit email" and screen.controls.edit_recovery.size.x < 160,"compact email edit, not competing fullwidth action")
+		ok(not screen.controls.has("edit_recovery") and screen.controls.recovery_email.editable,"directly editable address without redundant edit button")
 		ok(screen.controls.recovery_email.get_theme_color("font_uneditable_color") == screen.INK,"locked email retains readable dark ink")
 		ok(screen.controls.recovery_email.get_theme_stylebox("read_only").bg_color.a >= .95,"locked email has opaque backing")
 		for child in box.get_children():

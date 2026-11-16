@@ -21,17 +21,11 @@ func _ready():
 	var row = HBoxContainer.new(); box.add_child(row)
 	var address_title = Label.new(); address_title.text = "EMAIL ADDRESS"; address_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	address_title.add_theme_color_override("font_color",INK); row.add_child(address_title)
-	if not flow.challenge.is_empty():
-		var edit = Button.new(); edit.text = "Edit email"; edit.custom_minimum_size = Vector2(96,44); edit.disabled = flow.busy
-		var edit_style = StyleBoxFlat.new(); edit_style.bg_color = Color("e0e9f5"); edit_style.set_corner_radius_all(4)
-		for state in ["normal","hover","pressed","disabled"]: edit.add_theme_stylebox_override(state,edit_style)
-		for state in ["font_color","font_hover_color","font_pressed_color","font_focus_color","font_disabled_color"]: edit.add_theme_color_override(state,INK)
-		edit.pressed.connect(func(): action.emit("edit")); row.add_child(edit); controls.edit_recovery = edit
 	var address = LineEdit.new(); address.text = flow.email; address.placeholder_text = "Verified email address"; address.max_length = 254
 	style_field(address); address.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_EMAIL_ADDRESS
 	address.text_submitted.connect(func(_v): if flow.challenge.is_empty(): action.emit("send"))
-	address.custom_minimum_size.y = 52; address.editable = not flow.busy and flow.challenge.is_empty()
-	address.text_changed.connect(func(value): flow.email = value); box.add_child(address); controls.recovery_email = address
+	address.custom_minimum_size.y = 52; address.editable = true
+	address.text_changed.connect(_email_changed); box.add_child(address); controls.recovery_email = address
 	button(box,"send_recovery","Send sign-in code" if flow.challenge.is_empty() else "Send new code","send").disabled = flow.busy
 	if not flow.challenge.is_empty():
 		var code = LineEdit.new(); code.text = flow.code; code.placeholder_text = "6-digit email code"; code.max_length = 6; code.custom_minimum_size.y = 52
@@ -39,16 +33,26 @@ func _ready():
 		code.editable = not flow.busy; code.text_changed.connect(func(value): flow.code = value); code.text_submitted.connect(func(_v): action.emit("confirm"))
 		box.add_child(code); controls.recovery_code = code
 		button(box,"confirm_recovery","Continue · Sign in","confirm").disabled = flow.busy
-	label(box,flow.message,18)
+	controls.message = label(box,flow.message,18)
 	label(box,"No verified email on your old account? Email sign-in cannot recover it. Use the device where you still play.",16)
 	button(box,"cancel_recovery","Back","cancel")
 	set_process(true)
+func _email_changed(value: String):
+	if not flow.update_email(value): return
+	# Do not rebuild the form here: that would discard keyboard focus after the
+	# first changed character, especially on phone keyboards.
+	for key in ["recovery_code","confirm_recovery"]:
+		if controls.has(key):
+			controls[key].hide()
+			if key == "recovery_code": controls[key].text = ""
+	controls.send_recovery.caption = "Send sign-in code"
+	controls.message.text = flow.message
 func _process(_delta):
 	if controls.has("send_recovery"):
 		controls.send_recovery.disabled = flow.busy or Time.get_unix_time_from_system() < maxf(flow.retry_until,Store.email_timestamp(str(flow.challenge.get("resend_available_at",""))))
 func label(box, text: String, font_size: int):
 	var item = Label.new(); item.text = text; item.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; item.add_theme_font_override("font",P.SANS)
-	item.add_theme_font_size_override("font_size",font_size); item.add_theme_color_override("font_color",INK); box.add_child(item)
+	item.add_theme_font_size_override("font_size",font_size); item.add_theme_color_override("font_color",INK); box.add_child(item); return item
 func button(box,id: String,caption: String,kind: String):
 	var item = ButtonArt.new(); item.caption = caption; item.font_size = 18; item.custom_minimum_size.y = 56
 	item.pressed.connect(func(): action.emit(kind)); box.add_child(item); controls[id] = item; return item

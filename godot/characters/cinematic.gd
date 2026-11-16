@@ -700,36 +700,51 @@ static func combined_geometry(s: Vector2) -> Dictionary:
 	var gap = 12.0 if s.x < 700 else 32.0
 	var right = s.x*.50+gap*.5
 	var width = s.x-right-gap
-	var top = s.y*.19
+	var short = s.y < 500
 	var bh = 48.0 if s.x < 700 else 54.0
-	var g = {"hero":Rect2(gap,64,s.x*.50-gap*1.5,s.y-128),
-		"rival":Rect2(),"name":Rect2(right,top,width,s.y*.10),
-		"names":Rect2(right,top+(36 if s.x < 700 else 48),width,40),
-		"outcome":Rect2(right,top+s.y*.11,width,s.y*.25),
-		"score":Rect2(right,top+s.y*.39,width,60),
-		"again":Rect2(right,s.y-64-bh*2-12,width,bh),
-		"menu":Rect2(right,s.y-64-bh,width,bh)}
-	if s.y < 500:
-		g.name = Rect2(right,46,width,32)
-		g.names = Rect2(right,82,width,22)
-		g.outcome = Rect2(right,110,width,78)
-		g.score = Rect2(right,196,width,46)
-		g.again = Rect2(right,s.y-68,(width-10)*.5,48)
-		g.menu = Rect2(right+(width+10)*.5,s.y-68,(width-10)*.5,48)
-	g.detail = Rect2(right,g.score.end.y+8,width,maxf(0,g.again.position.y-g.score.end.y-16))
+	var again = Rect2(right,s.y-64-bh*2-12,width,bh)
+	var menu = Rect2(right,s.y-64-bh,width,bh)
+	if short:
+		again = Rect2(right,s.y-68,(width-10)*.5,48)
+		menu = Rect2(right+(width+10)*.5,s.y-68,(width-10)*.5,48)
+	# Allocate non-overlapping text lanes before the action buttons. Previous
+	# fixed offsets put the player name inside the hero outcome's first line.
+	var top = 46.0 if short else s.y*.19
+	var available = maxf(100,again.position.y-top-16)
+	var spacing = clampf(available*.035,5,16)
+	var usable = available-spacing*4
+	var title_h = usable*.19
+	var names_h = usable*.13
+	var outcome_h = usable*.38
+	var score_h = usable*.14
+	var y = top
+	var g = {"hero":Rect2(gap,64,s.x*.50-gap*1.5,s.y-128),"rival":Rect2(),"again":again,"menu":menu}
+	g.name = Rect2(right,y,width,title_h); y += title_h+spacing
+	g.names = Rect2(right,y,width,names_h); y += names_h+spacing
+	g.outcome = Rect2(right,y,width,outcome_h); y += outcome_h+spacing
+	g.score = Rect2(right,y,width,score_h); y += score_h+spacing
+	g.detail = Rect2(right,y,width,maxf(0,again.position.y-y-12))
 	return g
 func result_geometry(s: Vector2) -> Dictionary:
 	return combined_geometry(s) if combined_result else card_geometry(s,kind)
-func _wrapped(value: String, rect: Rect2, fs: int, color: Color):
+static func wrapped_lines(value: String, width: float, fs: int) -> Array:
 	var lines: Array = []; var line = ""
 	for word in value.split(" "):
 		var candidate = word if line.is_empty() else line+" "+word
-		if not line.is_empty() and P.text_width(candidate,fs) > rect.size.x:
+		if not line.is_empty() and P.text_width(candidate,fs) > width-6:
 			lines.append(line); line = word
 		else: line = candidate
 	if not line.is_empty(): lines.append(line)
+	return lines
+func _wrapped(value: String, rect: Rect2, fs: int, color: Color):
+	if value.is_empty() or rect.size.y < 1: return
+	var lines = wrapped_lines(value,rect.size.x,fs)
+	while fs > 9 and lines.size()*(P.SANS.get_height(fs)+2) > rect.size.y:
+		fs -= 1
+		lines = wrapped_lines(value,rect.size.x,fs)
+	var line_h = minf(P.SANS.get_height(fs)+2,rect.size.y/maxi(1,lines.size()))
 	for i in range(lines.size()):
-		P.text(front,lines[i],Rect2(rect.position+Vector2(0,i*(fs+5)),Vector2(rect.size.x,fs+5)),fs,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+		P.text(front,lines[i],Rect2(rect.position+Vector2(0,i*line_h),Vector2(rect.size.x,line_h)),fs,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 func _draw_combined():
 	var s = region.size; var g = combined_geometry(s)
 	P.text(front,"NINEWEAVE / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)

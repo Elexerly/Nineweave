@@ -16,13 +16,17 @@ func _ready():
 	api.completed.connect(_completed); add_child(api)
 func begin():
 	cancel(); active = true
-func edit_email():
-	if not active or busy: return
-	var draft = email
-	var cooldown = retry_until
-	cancel(); active = true; email = draft; retry_until = cooldown
-	message = "Correct the address, then send a new sign-in code. This does not change your account's email."
-	changed.emit()
+## Editing is local and never sends email. Keep the field alive so each keystroke
+## preserves focus/caret while retiring any code or in-flight HTTP callback.
+func update_email(value: String) -> bool:
+	if not active or value == email: return false
+	var invalidated = busy or not challenge.is_empty() or not code.is_empty()
+	if invalidated:
+		var cooldown = maxf(retry_until,Store.email_timestamp(str(challenge.get("resend_available_at",""))))
+		cancel(); active = true; retry_until = cooldown
+		message = "Email updated. Send a new sign-in code for this address."
+	email = value
+	return invalidated
 func cancel():
 	active = false; busy = false
 	# Retire the entire HTTP boundary so an old callback cannot target a new attempt.

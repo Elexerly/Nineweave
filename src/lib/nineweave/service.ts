@@ -34,6 +34,8 @@ export interface Service {
   /** Minimum gap between chat / report retention sweeps. */
   retentionIntervalMs: number;
   lastRetentionMs: number;
+  /** Last tournament sweep (due starts, purge); shares `cleanupIntervalMs`. */
+  lastTournamentSweepMs: number;
   /** Outgoing email; `null` when not configured (email endpoints answer 503). */
   mailer: Mailer | null;
 }
@@ -66,6 +68,7 @@ export function createService(opts: ServiceOptions): Service {
     lastCleanupMs: Number.NEGATIVE_INFINITY,
     retentionIntervalMs: opts.retentionIntervalMs ?? 60_000,
     lastRetentionMs: Number.NEGATIVE_INFINITY,
+    lastTournamentSweepMs: Number.NEGATIVE_INFINITY,
     mailer: opts.mailer ?? null,
   };
 }

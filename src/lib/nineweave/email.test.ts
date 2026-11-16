@@ -148,7 +148,10 @@ describe("profile email fields", () => {
       email: true,
       online2: true,
       chat: true,
-      tournaments: false,
+      tournaments: true,
+      tournament_sizes: [4, 8],
+      tournament_min_players: 3,
+      tournament_start_options: [2, 5, 10, 15, 30, 60],
     });
     assert.equal(d.player.email, null);
     assert.equal(d.player.email_status, "none");
@@ -157,7 +160,10 @@ describe("profile email fields", () => {
       email: true,
       online2: true,
       chat: true,
-      tournaments: false,
+      tournaments: true,
+      tournament_sizes: [4, 8],
+      tournament_min_players: 3,
+      tournament_start_options: [2, 5, 10, 15, 30, 60],
     });
     const patched = await call("PATCH", "/me", { token: d.token, body: { last_hero_id: "cryon" } });
     assert.equal(patched.status, 200);
@@ -165,7 +171,10 @@ describe("profile email fields", () => {
       email: true,
       online2: true,
       chat: true,
-      tournaments: false,
+      tournaments: true,
+      tournament_sizes: [4, 8],
+      tournament_min_players: 3,
+      tournament_start_options: [2, 5, 10, 15, 30, 60],
     });
   });
 

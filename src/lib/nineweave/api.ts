@@ -40,6 +40,15 @@ import {
   stillHere,
 } from "./rooms.ts";
 import { isRoomCode } from "./security.ts";
+import {
+  createTournament,
+  isTournamentCode,
+  joinTournament,
+  leaveTournament,
+  listTournaments,
+  pollTournament,
+  syncTournamentByCode,
+} from "./tournaments.ts";
 import { ApiError, type Service } from "./service.ts";
 import type { RateLimits } from "./rate-limit.ts";
 
@@ -203,56 +212,94 @@ async function route(
     }
     methodNotAllowed();
   }
-  if (head === "rooms" && code !== undefined && rest.length === 0) {
-    const roomCode = code.toUpperCase();
-    if (!isRoomCode(roomCode)) throw new ApiError(404, "Room not found or expired");
+  if (head === "tournaments" && segments.length === 1) {
+    if (method === "GET") return [200, await listTournaments(svc)];
+    if (method === "POST") {
+      limit(svc, "create", request);
+      return [201, await createTournament(svc, await readJson(request), bearer)];
+    }
+    methodNotAllowed();
+  }
+  if (head === "tournaments" && code !== undefined && rest.length === 0) {
+    const tournamentCode = code.toUpperCase();
+    if (!isTournamentCode(tournamentCode)) throw new ApiError(404, "Tournament not found");
     if (action === undefined) {
       if (method !== "GET") methodNotAllowed();
-      const since = intParam(url, "since");
-      const chatSince = intParam(url, "chat_since");
-      return [
-        200,
-        await pollRoom(svc, roomCode, since, [bearer], (room, slot) =>
-          chatFor(svc, room, slot, chatSince),
-        ),
-      ];
+      return [200, await pollTournament(svc, tournamentCode, bearer)];
     }
     if (method !== "POST") methodNotAllowed();
-    switch (action) {
-      case "join":
-        limit(svc, "join", request);
-        return [200, await joinRoom(svc, roomCode, await readJson(request), bearer)];
-      case "moves":
-        limit(svc, "move", request);
-        return [200, await playMove(svc, roomCode, await readJson(request), bearer)];
-      case "rematch":
-        limit(svc, "move", request);
-        return [200, await requestRematch(svc, roomCode, await readJson(request), bearer)];
-      case "still-here":
-        limit(svc, "move", request);
-        return [200, await stillHere(svc, roomCode, await readJson(request), bearer)];
-      case "chat":
-        limit(svc, "chat", request);
-        return [
-          200,
-          await postChat(
-            svc,
-            roomCode,
-            await readJson(request),
-            bearer,
-            intParam(url, "chat_since"),
-          ),
-        ];
-      case "leave":
-        limit(svc, "move", request);
-        return [200, await leaveRoom(svc, roomCode, await readJson(request), bearer)];
-      case "cancel":
-        limit(svc, "move", request);
-        return [
-          200,
-          await leaveRoom(svc, roomCode, await readJson(request), bearer, { hostCancelOnly: true }),
-        ];
+    if (action === "join") {
+      limit(svc, "join", request);
+      return [200, await joinTournament(svc, tournamentCode, await readJson(request), bearer)];
     }
+    if (action === "leave") {
+      limit(svc, "move", request);
+      return [200, await leaveTournament(svc, tournamentCode, bearer)];
+    }
+  }
+  if (head === "rooms" && code !== undefined && rest.length === 0) {
+    const [status, body] = await roomRoute(svc, request, code, action, url, bearer);
+    // A tournament match that just ended moves its bracket on right away.
+    const ended = body as { tournament?: { code: string } | null; status?: string };
+    if (ended.tournament && (ended.status === "finished" || ended.status === "closed"))
+      // Best effort: the room action already succeeded, and the next tournament poll retries.
+      await syncTournamentByCode(svc, ended.tournament.code).catch(() => {});
+    return [status, body];
+  }
+  throw new ApiError(404, "Not found");
+}
+
+async function roomRoute(
+  svc: Service,
+  request: Request,
+  code: string,
+  action: string | undefined,
+  url: URL,
+  bearer: string | null,
+): Promise<[number, unknown]> {
+  const method = request.method.toUpperCase();
+  const roomCode = code.toUpperCase();
+  if (!isRoomCode(roomCode)) throw new ApiError(404, "Room not found or expired");
+  if (action === undefined) {
+    if (method !== "GET") methodNotAllowed();
+    const since = intParam(url, "since");
+    const chatSince = intParam(url, "chat_since");
+    return [
+      200,
+      await pollRoom(svc, roomCode, since, [bearer], (room, slot) =>
+        chatFor(svc, room, slot, chatSince),
+      ),
+    ];
+  }
+  if (method !== "POST") methodNotAllowed();
+  switch (action) {
+    case "join":
+      limit(svc, "join", request);
+      return [200, await joinRoom(svc, roomCode, await readJson(request), bearer)];
+    case "moves":
+      limit(svc, "move", request);
+      return [200, await playMove(svc, roomCode, await readJson(request), bearer)];
+    case "rematch":
+      limit(svc, "move", request);
+      return [200, await requestRematch(svc, roomCode, await readJson(request), bearer)];
+    case "still-here":
+      limit(svc, "move", request);
+      return [200, await stillHere(svc, roomCode, await readJson(request), bearer)];
+    case "chat":
+      limit(svc, "chat", request);
+      return [
+        200,
+        await postChat(svc, roomCode, await readJson(request), bearer, intParam(url, "chat_since")),
+      ];
+    case "leave":
+      limit(svc, "move", request);
+      return [200, await leaveRoom(svc, roomCode, await readJson(request), bearer)];
+    case "cancel":
+      limit(svc, "move", request);
+      return [
+        200,
+        await leaveRoom(svc, roomCode, await readJson(request), bearer, { hostCancelOnly: true }),
+      ];
   }
   throw new ApiError(404, "Not found");
 }

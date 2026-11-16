@@ -9,7 +9,8 @@ moderation (block, report), screen names in the envelope and poll-rate hints;
 see [Match rules v2](#match-rules-v2) and [Chat](#chat). The existing
 `HttpPollingTransport` works against it unchanged. Everything new is
 additive and optional for the client to use. Summary of the round 5 changes:
-`ONLINE2.md`.
+`ONLINE2.md`. Round 5 phase 3 adds online [Tournaments](#tournaments)
+(summary: `ONLINE3.md`).
 
 - **Base path:** `/api/nineweave` (same origin on `https://nineweave.grok.me`).
 - **Format:** JSON request and response bodies (`Content-Type: application/json`).
@@ -370,12 +371,14 @@ Requires a device token. `200`: the `player` object above. `rank` is
 `401` if the token is missing or unknown.
 
 - `capabilities`: feature flags,
-  `{"email":true,"online2":true,"chat":true,"tournaments":false}` on this
-  server (also on `POST /auth/device` and `PATCH /me`). `email: true` means
+  `{"email":true,"online2":true,"chat":true,"tournaments":true,"tournament_sizes":[4,8],"tournament_min_players":3,"tournament_start_options":[2,5,10,15,30,60]}`
+  on this server (also on `POST /auth/device` and `PATCH /me`). `email: true` means
   this server supports the [Email](#email) fields and endpoints; clients must
   not send `email` anywhere until they see it. `online2: true` means protocol
   2 (turn clock, still-here, envelope additions); `chat: true` means
-  [Chat](#chat). `tournaments` is reserved (`false`).
+  [Chat](#chat). `tournaments: true` means [Tournaments](#tournaments).
+- `tournament_wins`: online tournaments won (champion). Also on the
+  leaderboard rows and `me`.
 - `email`: the stored address, lowercased, or `null`. Private to the player:
   it never appears on the leaderboard or in room envelopes.
 - `email_status`: server-owned, `"none"` | `"unverified"` | `"verified"`.
@@ -413,8 +416,8 @@ Requires a device token. Send any subset of these fields:
 uses competition ranking (ties share a rank).
 
 ```json
-{"players":[{"rank":1,"screen_name":"Patrick","matches_won":12,"matches_played":20}],
- "me":{"screen_name":"Patrick","matches_won":12,"matches_played":20,"boards_won":61,"last_hero_id":"vesper_vale","rank":1}}
+{"players":[{"rank":1,"screen_name":"Patrick","matches_won":12,"matches_played":20,"tournament_wins":1}],
+ "me":{"screen_name":"Patrick","matches_won":12,"matches_played":20,"boards_won":61,"tournament_wins":1,"last_hero_id":"vesper_vale","rank":1}}
 ```
 
 `me` is present only when the request carries a valid device token. It is
@@ -430,7 +433,7 @@ See [Chat](#chat) for `POST /rooms/<CODE>/chat`, `POST|DELETE /players/block`,
 ### Utility
 
 - `GET /capabilities` (public, `Cache-Control: public, max-age=60`) returns
-  `{"protocol":2,"online2":true,"chat":true,"tournaments":false,"email":true,"chat_presets":{"gg":"Good game!",…}}`
+  `{"protocol":2,"online2":true,"chat":true,"tournaments":true,"email":true,"chat_presets":{"gg":"Good game!",…},"tournament_sizes":[4,8],"tournament_min_players":3,"tournament_start_options":[2,5,10,15,30,60]}`
   so a client can detect the server version without a token.
 - `GET /health` returns `{"ok":true}`.
 - `GET /heroes` returns `{"heroes":[…32 canonical IDs…],"aliases":{…}}`.
@@ -564,11 +567,14 @@ always in the same transaction as the room's status change. Anonymous seats
 | Draw (no open boards, no big line) | none | none | `matches_played+1` only |
 | Forfeit (leave) / timeout / abandoned, after both moved | opponent `matches_won+1` | leaver `matches_lost+1` | `matches_played+1` |
 | Cancelled / no-show, before both moved | none | none | none (no match logged) |
+| Tournament draw decided by small boards (`boards`) | `matches_won+1` | `matches_lost+1` | `matches_played+1` |
+| Tournament draw with level boards | none | none | none (the game is replayed) |
 
 - `boards_won`: each player gets one point per small board they claimed
   (won, not drawn) in the match. This counts on forfeits too.
-- There is **no board-count tiebreak**. A draw is a draw even if one player
-  holds more boards.
+- There is **no board-count tiebreak** in regular rooms. A draw is a draw
+  even if one player holds more boards. Tournament rooms differ: see
+  [Tournaments](#tournaments).
 - The official score (the leaderboard) is `matches_won`.
 
 ## Rules (server kernel = `rules.gd`)
@@ -814,6 +820,153 @@ over 500 characters or an unknown field.
 Deletion runs opportunistically with the room sweep, at most once a minute
 per server instance. Message text is never logged.
 
+## Tournaments
+
+Single-elimination online tournaments for 3–8 players. Regular 1v1 rooms are
+unchanged; a tournament is an extra mode. Only device players with a screen
+name can create or join (`401` without a device token, `403` without a
+screen name). A player can be in one tournament at a time: registered, or
+still in the bracket of a running one (`409 "You're already in a
+tournament"`). Source: `src/lib/nineweave/tournaments.ts`.
+
+### Rules
+
+| Rule | Value |
+|---|---|
+| Sizes | 4 or 8 seats (`size`). |
+| Start time | `starts_in_minutes` ∈ 2, 5, 10, 15, 30, 60, or `starts_at` (ISO) 2 min–24 h ahead. |
+| Full bracket | Status `starting` with `starting_at` = now + 10 s; it starts then (or at `starts_at`, if sooner). A leave during the countdown goes back to `registering`. |
+| Minimum | 3 players. Fewer at the start time: `cancelled`, `cancel_reason: "Not enough players joined"`, nobody penalized. |
+| Players used | Everyone who joined: 6 of 8 is a 6-player tournament. |
+| Bracket | Next power of two ≥ players (3–4 → 4, 5–8 → 8). Rounds: 2 or 3. |
+| Seeding | Crypto-random shuffle at the start; seed 1 is the top seed. |
+| Byes | Bracket − players (3 → 1, 5 → 3, 6 → 2, 7 → 1). Round 1 pairs seed *s* with seed *bracket+1−s* (8: 1v8, 4v5, 2v7, 3v6; 4: 1v4, 2v3), so the missing seeds give byes to the top seeds. Seeding is random, so byes are too. At most one per player, round 1 only. A bye auto-advances (`end_reason: "bye"`). |
+| Matches | Each is a normal room (match rules v2: 25 s turn + 10 s Still there?, 60 s grace), opened as soon as both players are known. Normal W/L records. |
+| One game | No rematch (`409`). A draw goes to whoever claimed more small boards (`end_reason: "boards"`, a recorded win). Level boards: the game is replayed in the same room (`match.round` + 1, seats swap, `both_moved` resets, no record). |
+| Ready window | A match room opens `waiting` for 60 s (`ready_deadline`). Any request to the room with your seat or device token counts as showing up. When both have, the room turns `active` and the turn clock starts. |
+| No-show | Window over with one player present: they advance (`end_reason: "no_show"`, `result.winner` set, no record change). Neither present: the higher seed (lower number) advances. |
+| Leaving / stalling | Before both moved (including the ready window): the opponent advances on `no_show`, no records. After both moved: the normal v2 forfeit / timeout / abandoned loss (recorded); the loser is eliminated. |
+| Leave tournament | Before the start: frees the slot, no penalty; the host passes to the next joiner, and the tournament is cancelled when the last player leaves. After the start: forfeits your current match (by the rules above) or your next one (the opponent advances with `forfeit`, no record). |
+| Champion | Winner of the final. `tournament_wins + 1` on their profile (exactly once). |
+| Lifecycle | `registering` → `starting` → `running` → `finished`, or `cancelled`. |
+| Retention | Tournament rows (players, matches) are purged 7 days after their last update. Rooms follow the normal room sweeps. |
+
+There is no cron. The start, no-shows and bracket steps happen on whichever
+request touches the tournament first after the deadline: a tournament poll,
+the list, a join, or a request to an ended match room. Each step is one
+atomic batch guarded by the tournament row's version, so it happens exactly
+once under concurrent polls.
+
+### `POST /tournaments`: create
+
+Device token required.
+
+```json
+{"size":8,"starts_in_minutes":10,"private":false,"character_id":"vesper_vale"}
+```
+
+`password` (≤ 64 characters) is required when `private` is true. Send
+exactly one of `starts_in_minutes` and `starts_at`. `character_id` defaults
+to the player's `last_hero_id`. `201`: the tournament envelope (the creator
+has joined and is the host). Errors: `400`, `401`, `403`, `409`, `429`.
+
+### `GET /tournaments`: public lobby
+
+No token needed. Public tournaments in `registering` that aren't full, newest
+first, at most 50. Private ones are never listed.
+
+```json
+{"server_now":"…","tournaments":[{"code":"T7KQ2M","size":8,"joined":3,"min_players":3,"host":"Kai","starts_at":"…","created_at":"…"}],"poll_after_ms":5000}
+```
+
+### `POST /tournaments/<CODE>/join`
+
+Device token required. Body `{"password"?, "character_id"?}`. `200`: the
+envelope. Joining again is a no-op `200`. Errors: `403` (wrong password, no
+screen name), `404`, `409` (full, started, ended, or already in another
+tournament).
+
+### `POST /tournaments/<CODE>/leave`
+
+Device token required. `200`: `{"ok":true, …envelope}` (`you` is `null`
+after leaving before the start). `409` if you're not in it. See the rules
+above for what leaving does.
+
+### `GET /tournaments/<CODE>`: poll
+
+Device token required. Entrants and anyone (for a public tournament) can
+poll; private tournaments return `403` to non-entrants. The envelope:
+
+```json
+{
+  "code": "T7KQ2M", "status": "running", "size": 8, "joined": 6, "min_players": 3,
+  "bracket_size": 8, "starts_at": "…", "starting_at": null, "started_at": "…",
+  "finished_at": null, "server_now": "…", "private": false, "host": "Kai",
+  "is_host": false, "cancel_reason": null,
+  "you": {"seed": 3, "name": "Mo", "hero": "cryon", "state": "playing"},
+  "players": [{"seed": 1, "name": "Kai", "hero": "vesper_vale", "eliminated": false}],
+  "rounds": [
+    [{"slot": 0, "a": {"name": "Kai", "hero": "vesper_vale", "seed": 1}, "b": null,
+      "bye": true, "status": "done", "score": null, "winner": "a", "end_reason": "bye"},
+     {"slot": 1, "a": {"name": "Ana", "hero": "sara", "seed": 4},
+      "b": {"name": "Bo", "hero": "cryon", "seed": 5}, "bye": false, "status": "live",
+      "score": {"a": 3, "b": 2}, "winner": null, "end_reason": null}]
+  ],
+  "your_match": {"room_code": "QX7P2", "token": "nws_…", "seat": 1, "round": 1, "slot": 3,
+                 "status": "ready", "opponent": {"name": "Cy", "hero": "daphne"},
+                 "ready_deadline": "…"},
+  "champion": null,
+  "poll_after_ms": 1000
+}
+```
+
+- `players`: screen names, hero ids and seeds only (seeds are `null` before
+  the start; the list is in join order then). Never player ids, token hashes
+  or room ids.
+- `rounds`: empty before the start. `rounds[r][k]` is round `r+1`, slot `k`;
+  its winner plays in round `r+2`, slot `k>>1`, side `a` for even `k` and
+  `b` for odd. `a`/`b` are `null` until known (or for a bye). `status`:
+  `pending` (players not both known), `ready` (room open, ready window),
+  `live` (being played), `done`.
+- `score`: small boards won by each side, from the room's current game for
+  `live` matches (e.g. "Ana 3 – 2 Bo") and the final game for `done` ones.
+  `null` otherwise. Cells and moves of other matches are never included (no
+  spectating).
+- `you.state`: `registered` (before the start, or a cancelled tournament),
+  `playing` (your match room is open), `waiting` (still in, waiting for your
+  next opponent), `bye` (through on a round-1 bye, next opponent not decided
+  yet), `eliminated` (lost or left), `champion`.
+- `your_match`: only for you, only while your match is `ready`/`live`. `token`
+  is your seat token for that room. It's stable across polls and derived from
+  your device token, so it works only for you. Use it with the normal room
+  endpoints: poll, moves, still-here, chat, leave. `seat` is 1 (X, moves
+  first) or 2. Your device token also works on those endpoints.
+- `champion`: `{name, hero}` once finished.
+
+`poll_after_ms`:
+
+| Situation | ms |
+|---|---|
+| `registering` | 5000 |
+| last 15 s before `starts_at`, or `starting` (countdown) | 2000 |
+| running, your match open and you haven't entered the room yet | 1000 |
+| running, otherwise (waiting room, playing, eliminated) | 4000 |
+| `finished` / `cancelled` | 0 (stop) |
+
+### Tournament rooms
+
+Tournament match rooms are ordinary rooms with these differences:
+
+- The envelope has `tournament: {code, round, slot, ready_deadline,
+  ready: {you, opponent}, rematch: false}` (`null` in normal rooms).
+- They are private and pre-seated: `join` answers `403`/`409`, `cancel`
+  answers `409`, `rematch` answers `409 "Tournament matches are one game: no
+  rematch"`. They never show in `GET /rooms`.
+- `status` is `waiting` during the ready window (`poll_after_ms: 1000`), then
+  `active` once both players have opened the room.
+- New end reasons: `no_show` with a `result` (someone advances) and `boards`
+  (a draw decided by small boards won).
+
 ## Rate limits
 
 Limits are per client IP and per server instance, in a fixed one-minute
@@ -824,6 +977,9 @@ window, so treat them as best-effort. Exceeding one returns `429`.
 | `POST /auth/device` | 10 |
 | `POST /rooms` | 20 |
 | `POST /rooms/<CODE>/join` | 40 |
+| `POST /tournaments` | shares the `POST /rooms` limit (20) |
+| `POST /tournaments/<CODE>/join` | shares the room join limit (40) |
+| `POST /tournaments/<CODE>/leave` | shares the moves limit (180) |
 | moves, still-here, rematch, leave and cancel combined | 180 |
 | `POST /rooms/<CODE>/chat` | 60 (plus the per-player database caps in [Chat](#chat)) |
 | block, unblock and report combined | 30 |
@@ -866,17 +1022,17 @@ available yet".
 | 204 | CORS preflight |
 | 400 | Malformed JSON or invalid field |
 | 401 | Missing or unknown token where one is required |
-| 403 | Token not in this room, not your turn (moves, still-here), wrong room password, not the host (cancel), no screen name (chat), or not in that room (block/report) |
-| 404 | Unknown path or no such room |
+| 403 | Token not in this room, not your turn (moves, still-here), wrong room or tournament password, not the host (cancel), no screen name (chat, tournaments), not in that room (block/report), or a private tournament you haven't joined |
+| 404 | Unknown path, no such room or no such tournament |
 | 405 | Wrong method |
 | 404 | Email verification challenge not found for this player |
-| 409 | Room full or state conflict (stale/future seq, stale round, closed, waiting); still-here already used or not showing; chat in a waiting/closed room; anonymous player can't be blocked; name taken; email already verified elsewhere |
+| 409 | Room full or state conflict (stale/future seq, stale round, closed, waiting); still-here already used or not showing; chat in a waiting/closed room; anonymous player can't be blocked; name taken; email already verified elsewhere; rematch or cancel in a tournament room; tournament full, started or ended; already in another tournament; leaving a tournament you're not in |
 | 413 | Body over 8 KB |
 | 422 | Illegal move or game finished |
 | 429 | Rate limited (chat and report caps add `retry_after_seconds`) |
 | 500 | Unexpected server error (details are logged, not returned) |
 | 502 | Email provider didn't accept a code email |
-| 503 | Not configured (database, or email for code requests), or room contention (retry) |
+| 503 | Not configured (database, or email for code requests), or room / tournament contention (retry) |
 
 ## Godot client notes (additive changes)
 
@@ -923,3 +1079,23 @@ available yet".
     messages with `name`, align them by `mine` and dedupe by `id`. Mute is
     local. Block and report send the opponent's `seat` and the room code
     with the device token.
+- **Tournaments (Round 5, phase 3).** Detect them with
+  `capabilities.tournaments`. Then:
+  - Create: offer `tournament_sizes` and `tournament_start_options` from
+    capabilities, plus public / password. Lobby: `GET /tournaments`. Join by
+    code: `POST /tournaments/<CODE>/join`.
+  - Poll `GET /tournaments/<CODE>` at `poll_after_ms` with the device token.
+    Count down locally to `starting_at` / `starts_at` from `server_now`.
+  - Bracket / waiting room: draw `rounds` and show `score` for `live`
+    matches ("Kai 3 – 2 Mo"). Grey out `players[].eliminated`.
+  - When `your_match` appears, show the versus screen and open the room right
+    away with `your_match.room_code` + `your_match.token`, like a joined room
+    (seat from `your_match.seat`). Opening it within the 60 s
+    `ready_deadline` counts as ready; a "Ready" button can simply be that
+    first room poll. Use the normal room flow from there.
+  - On match end (`finished`, or `closed` with `result`), skip the rematch
+    UI and go back to the tournament poll. `you.state` tells you whether you
+    advance (`waiting` / `playing`), are out (`eliminated`) or won
+    (`champion`, with `champion` filled for everyone).
+  - Leave: confirm "Leave tournament?" after the start, because it forfeits
+    your match.

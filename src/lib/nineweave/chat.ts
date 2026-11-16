@@ -10,7 +10,7 @@
  * ids never leave the server.
  */
 import { CHAT_PRESETS, checkChatText, normalizeChatText } from "./chat-filter.ts";
-import { requirePlayer, type PlayerRow } from "./players.ts";
+import { requirePlayer, TOURNAMENT_CAPABILITIES, type PlayerRow } from "./players.ts";
 import {
   authorizeFresh,
   roomEnvelope,
@@ -360,8 +360,11 @@ export function capabilities() {
     protocol: 2,
     online2: true,
     chat: true,
-    tournaments: false,
+    tournaments: true,
     email: true,
     chat_presets: { ...CHAT_PRESETS },
+    tournament_sizes: [...TOURNAMENT_CAPABILITIES.tournament_sizes],
+    tournament_min_players: TOURNAMENT_CAPABILITIES.tournament_min_players,
+    tournament_start_options: [...TOURNAMENT_CAPABILITIES.tournament_start_options],
   };
 }

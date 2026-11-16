@@ -448,13 +448,21 @@ describe("envelope additions", () => {
     assert.equal(res.body.protocol, 2);
     assert.equal(res.body.online2, true);
     assert.equal(res.body.chat, true);
-    assert.equal(res.body.tournaments, false);
+    assert.equal(res.body.tournaments, true);
     assert.equal(res.body.email, true);
     assert.equal(res.body.chat_presets.gg, "Good game!");
     assert.equal((await call("POST", "/capabilities")).status, 405);
 
     const d = await device("Caps");
-    const expected = { email: true, online2: true, chat: true, tournaments: false };
+    const expected = {
+      email: true,
+      online2: true,
+      chat: true,
+      tournaments: true,
+      tournament_sizes: [4, 8],
+      tournament_min_players: 3,
+      tournament_start_options: [2, 5, 10, 15, 30, 60],
+    };
     assert.deepEqual((await me(d.token)).capabilities, expected);
     const patched = await call("PATCH", "/me", { token: d.token, body: { last_hero_id: "cryon" } });
     assert.deepEqual(patched.body.capabilities, expected);

@@ -28,6 +28,7 @@
  * "abandoned" and a leave is a "forfeit"; the opponent wins and records
  * update.
  */
+import { createHmac, randomInt } from "node:crypto";
 import { canonicalHero, DEFAULT_HERO } from "./heroes.ts";
 import { validateName } from "./names.ts";
 import { playerByToken, type PlayerRow } from "./players.ts";
@@ -74,6 +75,13 @@ export interface RoomRow {
   turn_started_at: Date | null;
   b_joined_at: Date | null;
   still_here_used: boolean;
+  tournament_id: string | null;
+  tournament_code: string | null;
+  tournament_round: number | null;
+  tournament_slot: number | null;
+  ready_deadline: Date | null;
+  a_ready_at: Date | null;
+  b_ready_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -91,9 +99,13 @@ export const POLL_AFTER_MS = {
   yourTurn: 3000,
   finished: 4000,
   closed: 0, // stop polling
+  readyWindow: 1000, // tournament room waiting for both players to show
 } as const;
 
-const MATCH_RESULT_REASONS = ["win", "draw", "forfeit", "timeout", "abandoned"];
+/** Tournament match rooms: both players must open the room within this window. */
+export const READY_WINDOW_MS = 60_000;
+
+const MATCH_RESULT_REASONS = ["win", "draw", "forfeit", "timeout", "abandoned", "boards"];
 
 export const other = (s: Slot): Slot => (s === "a" ? "b" : "a");
 export const seatOf = (room: RoomRow, slot: Slot): 1 | 2 => (room.x_slot === slot ? 1 : 2);
@@ -144,7 +156,7 @@ function turnClock(svc: Service, room: RoomRow) {
 function pollAfterMs(room: RoomRow, slot: Slot): number {
   switch (room.status) {
     case "waiting":
-      return POLL_AFTER_MS.waiting;
+      return room.tournament_id ? POLL_AFTER_MS.readyWindow : POLL_AFTER_MS.waiting;
     case "active":
       return dueSlot(room) === slot ? POLL_AFTER_MS.yourTurn : POLL_AFTER_MS.opponentTurn;
     case "finished":
@@ -162,7 +174,10 @@ export function roomEnvelope(svc: Service, room: RoomRow, slot: Slot) {
   const seat = seatOf(room, slot);
   const characters: Record<string, string> = { [String(seatOf(room, "a"))]: room.a_hero };
   if (room.b_hero) characters[String(seatOf(room, "b"))] = room.b_hero;
-  const isMatchResult = MATCH_RESULT_REASONS.includes(room.end_reason ?? "");
+  // Tournament no-shows still decide who advances, so they carry a result.
+  const isMatchResult =
+    MATCH_RESULT_REASONS.includes(room.end_reason ?? "") ||
+    (room.tournament_id !== null && room.end_reason === "no_show");
   const clock = turnClock(svc, room);
   const players: Record<string, { name: string; hero: string; connected: boolean }> = {};
   for (const s of ["a", "b"] as const) {
@@ -214,8 +229,22 @@ export function roomEnvelope(svc: Service, room: RoomRow, slot: Slot) {
       hero: (slot === "a" ? room.a_hero : room.b_hero) ?? DEFAULT_HERO,
     },
     players,
+    tournament: room.tournament_code
+      ? {
+          code: room.tournament_code,
+          round: room.tournament_round,
+          slot: room.tournament_slot,
+          ready_deadline: iso(room.ready_deadline),
+          ready: { you: readyAt(room, slot) !== null, opponent: readyAt(room, o) !== null },
+          rematch: false,
+        }
+      : null,
     poll_after_ms: pollAfterMs(room, slot),
   };
+}
+
+function readyAt(room: RoomRow, slot: Slot): Date | null {
+  return slot === "a" ? room.a_ready_at : room.b_ready_at;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +301,7 @@ function matchEndStatements(
   room: RoomRow,
   rules: Rules,
   winnerSlot: Slot | null,
-  reason: "win" | "draw" | "forfeit" | "timeout" | "abandoned",
+  reason: "win" | "draw" | "boards" | "forfeit" | "timeout" | "abandoned",
 ): Statement[] {
   const xSlot = room.x_slot;
   const oSlot = other(xSlot);
@@ -346,18 +375,23 @@ async function forfeit(
   );
 }
 
-/** Close an active match before both players moved: no result, no records. */
+/**
+ * Close a match before both players moved: no records. In a tournament room
+ * the other player advances (`no_show`, they win the bracket slot); otherwise
+ * there is no result.
+ */
 async function cancelMatch(
   svc: Service,
   room: RoomRow,
   leaver: Slot,
   reason: "cancelled" | "no_show",
 ): Promise<boolean> {
+  const tournament = room.tournament_id !== null;
   return commitRoom(svc, room, {
     status: "closed",
     left_slot: leaver,
-    winner_slot: null,
-    end_reason: reason,
+    winner_slot: tournament ? other(leaver) : null,
+    end_reason: tournament ? "no_show" : reason,
     a_rematch: false,
     b_rematch: false,
     turn_started_at: null,
@@ -371,6 +405,7 @@ async function cancelMatch(
  * player due to move) or the disconnect grace (the other player).
  */
 function pendingExpiry(svc: Service, room: RoomRow): { kind: "turn" | "grace"; slot: Slot } | null {
+  if (readyWindowOver(svc, room)) return { kind: "turn", slot: "a" };
   const clock = turnClock(svc, room);
   if (!clock) return null;
   const now = svc.now().getTime();
@@ -390,10 +425,77 @@ function pendingExpiry(svc: Service, room: RoomRow): { kind: "turn" | "grace"; s
 async function applyExpiry(svc: Service, room: RoomRow): Promise<boolean> {
   const due = pendingExpiry(svc, room);
   if (!due) return false;
+  if (room.status === "waiting") {
+    await closeReadyWindow(svc, room);
+    return true;
+  }
   // A lost race means someone else already resolved it.
   if (!bothMoved(room.state)) await cancelMatch(svc, room, due.slot, "no_show");
   else await forfeit(svc, room, due.slot, due.kind === "turn" ? "timeout" : "abandoned");
   return true;
+}
+
+/** A tournament room's ready window ran out before both players opened it. */
+function readyWindowOver(svc: Service, room: RoomRow): boolean {
+  return (
+    room.status === "waiting" &&
+    room.tournament_id !== null &&
+    room.ready_deadline !== null &&
+    svc.now().getTime() >= ms(room.ready_deadline)
+  );
+}
+
+/**
+ * Ready window over: the one player who opened the room advances
+ * (`no_show`, no records). If neither did, the room closes with no winner and
+ * the tournament advances the higher seed.
+ */
+async function closeReadyWindow(svc: Service, room: RoomRow): Promise<boolean> {
+  const aReady = room.a_ready_at !== null;
+  const bReady = room.b_ready_at !== null;
+  const winner: Slot | null = aReady && !bReady ? "a" : bReady && !aReady ? "b" : null;
+  return commitRoom(svc, room, {
+    status: "closed",
+    left_slot: winner ? other(winner) : null,
+    winner_slot: winner,
+    end_reason: "no_show",
+    updated_at: svc.now(),
+  });
+}
+
+/**
+ * A player opened their tournament room during the ready window. Once both
+ * have, the match starts (turn clock running, both seats seen now).
+ */
+async function markReady(svc: Service, room: RoomRow, slot: Slot): Promise<RoomRow> {
+  for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
+    if (room.status !== "waiting" || !room.tournament_id || readyAt(room, slot)) return room;
+    if (readyWindowOver(svc, room)) return room;
+    const now = svc.now();
+    const otherReady = readyAt(room, other(slot)) !== null;
+    const sets: Partial<Record<keyof RoomRow, unknown>> = {
+      [`${slot}_ready_at`]: now,
+      [`${slot}_seen_at`]: now,
+      updated_at: now,
+    };
+    if (otherReady)
+      Object.assign(sets, {
+        status: "active",
+        turn_started_at: now,
+        still_here_used: false,
+        a_seen_at: now,
+        b_seen_at: now,
+      });
+    await commitRoom(svc, room, sets);
+    room = await reloadRoom(svc, room.id);
+  }
+  return room;
+}
+
+/** Re-check a room's deadlines (turn, grace, ready window) and return it fresh. */
+export async function refreshRoom(svc: Service, room: RoomRow): Promise<RoomRow> {
+  if (await applyExpiry(svc, room)) return reloadRoom(svc, room.id);
+  return room;
 }
 
 /** Chat older than this is deleted. */
@@ -428,7 +530,7 @@ export async function runCleanup(svc: Service, force = false): Promise<void> {
   const lobbyCutoff = new Date(nowMs - svc.lobbyTimeoutMs);
   await svc.db.query(
     `update nw_rooms set status = 'closed', end_reason = 'expired', rev = $2, updated_at = $3
-      where status = 'waiting' and greatest(updated_at, a_seen_at) < $1`,
+      where status = 'waiting' and tournament_id is null and greatest(updated_at, a_seen_at) < $1`,
     [lobbyCutoff, newId("r"), now],
   );
   await svc.db.query(
@@ -438,9 +540,10 @@ export async function runCleanup(svc: Service, force = false): Promise<void> {
   );
   const stale = await svc.db.query<RoomRow>(
     `select * from nw_rooms
-      where status = 'active' and (turn_started_at <= $1 or least(a_seen_at, b_seen_at) <= $2)
+      where (status = 'active' and (turn_started_at <= $1 or least(a_seen_at, b_seen_at) <= $2))
+         or (status = 'waiting' and tournament_id is not null and ready_deadline <= $3)
       order by updated_at limit 25`,
-    [new Date(nowMs - svc.turnMs - svc.stillThereMs), new Date(nowMs - svc.graceMs)],
+    [new Date(nowMs - svc.turnMs - svc.stillThereMs), new Date(nowMs - svc.graceMs), now],
   );
   for (const room of stale) await applyExpiry(svc, room);
   await runRetention(svc, force);
@@ -492,15 +595,19 @@ async function authorize(svc: Service, code: string, tokens: (string | null | un
   throw new ApiError(403, "That token does not belong to this room");
 }
 
-/** Authorize, apply any due turn expiry / lost grace, and return the fresh room. */
+/**
+ * Authorize, apply any due turn expiry / lost grace / ready window, and
+ * return the fresh room. Any authorized request to a tournament room during
+ * its ready window counts as the caller showing up.
+ */
 export async function authorizeFresh(
   svc: Service,
   code: string,
   tokens: (string | null | undefined)[],
 ) {
-  const { room, slot } = await authorize(svc, code, tokens);
-  if (await applyExpiry(svc, room)) return { room: await reloadRoom(svc, room.id), slot };
-  return { room, slot };
+  const found = await authorize(svc, code, tokens);
+  const room = await refreshRoom(svc, found.room);
+  return { room: await markReady(svc, room, found.slot), slot: found.slot };
 }
 
 export async function touchSeen(svc: Service, room: RoomRow, slot: Slot): Promise<void> {
@@ -816,16 +923,36 @@ export async function playMove(
     let extra: Statement[] = [];
     if (rules.status !== OPEN) {
       const winnerSeat = rules.winner();
-      const winnerSlot = winnerSeat === 0 ? null : slotOfSeat(room, winnerSeat);
-      Object.assign(sets, {
-        status: "finished",
-        winner_slot: winnerSlot,
-        end_reason: winnerSlot ? "win" : "draw",
-        turn_started_at: null,
-        a_rematch: false,
-        b_rematch: false,
-      });
-      extra = matchEndStatements(svc, room, rules, winnerSlot, winnerSlot ? "win" : "draw");
+      let winnerSlot = winnerSeat === 0 ? null : slotOfSeat(room, winnerSeat);
+      let reason: "win" | "draw" | "boards" = winnerSlot ? "win" : "draw";
+      // Tournament draw: more small boards wins; level boards replay the game.
+      if (room.tournament_id && !winnerSlot) {
+        const xBoards = rules.boardsWon(X);
+        const oBoards = rules.boardsWon(O);
+        if (xBoards !== oBoards) {
+          winnerSlot = slotOfSeat(room, xBoards > oBoards ? X : O);
+          reason = "boards";
+        }
+      }
+      if (room.tournament_id && !winnerSlot) {
+        Object.assign(sets, {
+          round: room.round + 1,
+          x_slot: other(room.x_slot),
+          state: new Rules().serialize(),
+          winner_slot: null,
+          end_reason: null,
+        });
+      } else {
+        Object.assign(sets, {
+          status: "finished",
+          winner_slot: winnerSlot,
+          end_reason: reason,
+          turn_started_at: null,
+          a_rematch: false,
+          b_rematch: false,
+        });
+        extra = matchEndStatements(svc, room, rules, winnerSlot, reason);
+      }
     }
     if (!(await commitRoom(svc, room, sets, extra))) return CONFLICT;
     const fresh = await reloadRoom(svc, room.id);
@@ -850,6 +977,8 @@ export async function requestRematch(
   return withRetry(async () => {
     const { room, slot } = await authorizeFresh(svc, code, [bodyToken, bearer]);
     const envelope = () => roomEnvelope(svc, room, slot);
+    if (room.tournament_id)
+      throw new ApiError(409, "Tournament matches are one game: no rematch", envelope());
     if (room.status === "active") return { ...envelope(), ignored: true };
     if (room.status === "waiting")
       throw new ApiError(409, "No finished match to rematch", envelope());
@@ -942,13 +1071,17 @@ export async function leaveRoom(
   return withRetry(async () => {
     const { room, slot } = await authorizeFresh(svc, code, [bodyToken, bearer]);
     if (opts.hostCancelOnly) {
+      if (room.tournament_id)
+        throw new ApiError(409, "Tournament matches can't be cancelled; leave instead");
       if (slot !== "a") throw new ApiError(403, "Only the host can cancel a room");
       if (room.status !== "waiting")
         throw new ApiError(409, "Only a room that is still waiting can be cancelled");
     }
     const now = svc.now();
     let ok = true;
-    if (room.status === "waiting") {
+    if (room.status === "waiting" && room.tournament_id) {
+      ok = await cancelMatch(svc, room, slot, "no_show");
+    } else if (room.status === "waiting") {
       ok = await commitRoom(svc, room, {
         status: "closed",
         end_reason: "cancelled",
@@ -971,4 +1104,90 @@ export async function leaveRoom(
     if (!ok) return CONFLICT;
     return { ok: true, ...roomEnvelope(svc, await reloadRoom(svc, room.id), slot) };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Tournament match rooms (created by tournaments.ts inside its own batch)
+
+export interface TournamentSeat {
+  playerId: string;
+  name: string;
+  hero: string;
+}
+
+/**
+ * Insert statement for a tournament match room: private, both seats taken,
+ * `waiting` through the ready window. Seat tokens are minted later per
+ * player (see `tournamentSeatToken`); until then the device token works.
+ */
+export function tournamentRoomInsert(
+  svc: Service,
+  link: { tournamentId: string; code: string; round: number; slot: number },
+  a: TournamentSeat,
+  b: TournamentSeat,
+): { id: string; statement: Statement } {
+  const id = newId("room");
+  const now = svc.now();
+  const never = new Date(0); // nobody has opened the room yet
+  return {
+    id,
+    statement: {
+      text: `insert into nw_rooms
+        (id, code, status, is_private, password_hash, round, x_slot, state, rev,
+         a_player_id, a_name, a_hero, a_token_hash, a_seen_at,
+         b_player_id, b_name, b_hero, b_token_hash, b_seen_at, b_joined_at,
+         tournament_id, tournament_code, tournament_round, tournament_slot, ready_deadline,
+         created_at, updated_at)
+        values ($1, $2, 'waiting', true, null, 1, $3, $4::jsonb, $5,
+                $6, $7, $8, $9, $10, $11, $12, $13, $14, $10, $15,
+                $16, $17, $18, $19, $20, $15, $15)`,
+      params: [
+        id,
+        newRoomCode(),
+        randomInt(2) === 0 ? "a" : "b",
+        JSON.stringify(new Rules().serialize()),
+        newId("r"),
+        a.playerId,
+        a.name,
+        a.hero,
+        hashToken(newToken("nws")), // placeholder: never handed out
+        never,
+        b.playerId,
+        b.name,
+        b.hero,
+        hashToken(newToken("nws")),
+        now,
+        link.tournamentId,
+        link.code,
+        link.round,
+        link.slot,
+        new Date(now.getTime() + READY_WINDOW_MS),
+      ],
+    },
+  };
+}
+
+/**
+ * The seat token for a player's tournament room, derived from their device
+ * token (HMAC), so every poll returns the same token without storing it.
+ * The room keeps only its SHA-256, updated here on first use.
+ */
+export async function tournamentSeatToken(
+  svc: Service,
+  room: RoomRow,
+  slot: Slot,
+  deviceToken: string,
+): Promise<string> {
+  const token = `nws_${createHmac("sha256", deviceToken).update(`nw-tournament-seat:${room.id}:${slot}`).digest("base64url")}`;
+  const hash = hashToken(token);
+  if ((slot === "a" ? room.a_token_hash : room.b_token_hash) !== hash) {
+    // Not a versioned write: only the seat's token hash changes.
+    await svc.db.query(`update nw_rooms set ${slot}_token_hash = $2 where id = $1`, [
+      room.id,
+      hash,
+    ]);
+    if (slot === "a") room.a_token_hash = hash;
+    else room.b_token_hash = hash;
+  }
+  return token;
 }

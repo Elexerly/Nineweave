@@ -27,6 +27,7 @@ export interface PlayerRow {
   matches_lost: number;
   matches_played: number;
   boards_won: number;
+  tournament_wins: number;
   created_at: Date;
   tos_version: string | null;
   privacy_version: string | null;
@@ -37,14 +38,21 @@ export interface PlayerRow {
 }
 
 const PLAYER_COLUMNS =
-  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, created_at, tos_version, privacy_version, accepted_at, age_confirmed, email, email_verified_at";
+  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, tournament_wins, created_at, tos_version, privacy_version, accepted_at, age_confirmed, email, email_verified_at";
 
 /** Feature flags the client checks before using newer endpoints. */
 export const CAPABILITIES = {
   email: true,
   online2: true,
   chat: true,
-  tournaments: false,
+  tournaments: true,
+} as const;
+
+/** Tournament options advertised by GET /capabilities. */
+export const TOURNAMENT_CAPABILITIES = {
+  tournament_sizes: [4, 8],
+  tournament_min_players: 3,
+  tournament_start_options: [2, 5, 10, 15, 30, 60],
 } as const;
 
 export type EmailStatus = "none" | "unverified" | "verified";
@@ -132,6 +140,7 @@ export async function profile(svc: Service, p: PlayerRow) {
     matches_played: p.matches_played,
     matches_lost: p.matches_lost,
     boards_won: p.boards_won,
+    tournament_wins: p.tournament_wins,
     tos_version: p.tos_version,
     privacy_version: p.privacy_version,
     accepted_at: p.accepted_at ? new Date(p.accepted_at).toISOString() : null,
@@ -139,7 +148,12 @@ export async function profile(svc: Service, p: PlayerRow) {
     email: p.email,
     email_status: emailStatus(p),
     email_verified_at: p.email_verified_at ? new Date(p.email_verified_at).toISOString() : null,
-    capabilities: { ...CAPABILITIES },
+    capabilities: {
+      ...CAPABILITIES,
+      ...TOURNAMENT_CAPABILITIES,
+      tournament_sizes: [...TOURNAMENT_CAPABILITIES.tournament_sizes],
+      tournament_start_options: [...TOURNAMENT_CAPABILITIES.tournament_start_options],
+    },
     rank: await rankOf(svc, p.matches_won),
   };
 }
@@ -356,9 +370,10 @@ export async function leaderboard(
     screen_name: string;
     matches_won: number;
     matches_played: number;
+    tournament_wins: number;
     rank: number;
   }>(
-    `select screen_name, matches_won, matches_played,
+    `select screen_name, matches_won, matches_played, tournament_wins,
             rank() over (order by matches_won desc) as rank
        from nw_players
       where ${LEADERBOARD_WHERE}
@@ -372,6 +387,7 @@ export async function leaderboard(
       screen_name: r.screen_name,
       matches_won: r.matches_won,
       matches_played: r.matches_played,
+      tournament_wins: r.tournament_wins,
     })),
   };
   if (caller) {
@@ -380,6 +396,7 @@ export async function leaderboard(
       matches_won: caller.matches_won,
       matches_played: caller.matches_played,
       boards_won: caller.boards_won,
+      tournament_wins: caller.tournament_wins,
       last_hero_id: caller.last_hero_id,
       rank: await rankOf(svc, caller.matches_won),
     };

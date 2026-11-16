@@ -37,7 +37,7 @@ func run():
 	root.add_child(ui); ui.set_process(false); ui.set_view_size(Vector2(640,1100)); await frames()
 	account_http = requests[0]
 	account_http.respond(200,{"screen_name":"Original","email":"original@example.com","email_status":"verified","capabilities":{"email":true}})
-	ui.show_settings(); ok(ui.controls.account_email.caption == "Account email","old backend has no deletion entry")
+	ui.show_settings(); ok(ui.controls.account_email.caption == "Account","old backend still has account options for signout")
 	ui.deletion.begin(); ui.deletion.proceed(); ui.deletion.phrase = "DELETE MY ACCOUNT"; ui.deletion.submit("nwd_original",false)
 	var http = ui.deletion.api._request
 	ok(http.requests.is_empty(),"capability gate enforced before HTTP")

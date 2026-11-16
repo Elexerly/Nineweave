@@ -106,10 +106,10 @@ func _ready():
 func _deletion_blocked() -> bool:
 	# Another open tab may have submitted deletion since this account loaded.
 	if OS.has_feature("web") or store.deletion_marker_io.is_valid(): store.merge_deletion_marker()
-	return store.data.deletion_uncertain or store.deletion_reset_required
+	return store.data.signed_out or store.data.deletion_uncertain or store.deletion_reset_required
 func refresh():
 	if _deletion_blocked():
-		if not busy and not _refreshing and store.has_device_token():
+		if not store.data.signed_out and not busy and not _refreshing and store.has_device_token():
 			_refreshing = true; api.submit("/me",HTTPClient.METHOD_GET,{},"me",store.data.device_token)
 		return
 	if busy or _refreshing: return
@@ -222,6 +222,10 @@ func _recover_device(operation: String):
 	_recovering_device = true; busy = true
 	_submit_registration()
 func _completed(operation: String, response: int, data: Dictionary, problem: String):
+	# A different tab can sign out while this request is in flight.
+	_deletion_blocked()
+	if store.data.signed_out:
+		api.cancel_all(); busy = false; _refreshing = false; return
 	if operation == "rename":
 		_rename_completed(response,data,problem); return
 	if response == 401 and operation in ["me","consent","hero","email_store","email_request","email_confirm"]:

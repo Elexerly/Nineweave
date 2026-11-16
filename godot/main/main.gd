@@ -229,7 +229,7 @@ func _ready():
 	tournament.setup(self)
 	add_child(online_tournament); online_tournament.setup(self)
 	_apply_preferences(); _relayout()
-	if account.store.deletion_reset_required: _clear_local_account(account.store.deletion_reset_reason == "deleted")
+	if account.store.deletion_reset_required: _clear_local_account(account.store.deletion_reset_reason == "deleted", account.store.deletion_reset_reason == "signedout")
 	if account.store.data.deletion_uncertain:
 		page = "title"; overlay = "account_options"
 	_rebuild()
@@ -1018,7 +1018,7 @@ func _online_room_update(data: Dictionary):
 		message = end_message if not end_message.is_empty() else "This room is closed. Return to the lobby to play again."; _online_status()
 	if page == "game" and overlay == "result" and not end_message.is_empty(): _result_controls_refresh()
 func _name_required() -> bool:
-	return not test_online_bypass and not _debug_capture and not account.store.complete() and not account.store.data.deletion_uncertain
+	return not test_online_bypass and not _debug_capture and not account.store.complete() and not account.store.data.deletion_uncertain and not account.store.data.signed_out
 func _require_screen_name(destination: String = "title") -> bool:
 	if not _name_required(): return false
 	if page != "onboarding" or not overlay.is_empty(): _show_onboarding(destination)
@@ -1047,6 +1047,7 @@ func _account_recovered(token: String, player: Dictionary):
 	if page != "recovery": return
 	# Server-confirmed existing identity only. No /auth/device registration here.
 	account.api.cancel_all(); account.busy = false; account._refreshing = false
+	account.store.data.signed_out = false
 	account.store.keep_device(token,str(player.screen_name))
 	for key in ["tos_version","privacy_version","accepted_at","age_confirmed"]:
 		account.store.data[key] = player[key] if typeof(player.get(key)) == typeof(account.store.data[key]) else (false if key == "age_confirmed" else "")
@@ -1082,9 +1083,36 @@ func _deletion_action(kind: String):
 func _retire_account_client(node: Node):
 	node.set_block_signals(true); node.set_process(false)
 	for child in node.get_children(): _retire_account_client(child)
+func _account_status_copy() -> String:
+	if account.store.data.pending_sync or not account.store.has_device_token():
+		return "Local-only profile. Server registration is still pending; progress may not be backed up."
+	return "Server account · verified recovery email" if account.store.data.email_status == "verified" else "Server account · recovery email not verified this session"
+func _signout_copy() -> String:
+	var copy = _account_status_copy()+"\n\nSign out on this device? Your server account is NOT deleted. Local profile and saved game details will be cleared."
+	if account.store.data.email_status != "verified" or account.store.data.pending_sync or not account.store.has_device_token():
+		copy += "\n\nWARNING: Without a verified recovery email, you may permanently lose access to this profile. Stay signed in and verify an email first if you want to keep it."
+	else: copy += "\n\nUse your verified email to sign back in, or choose a different account."
+	copy += "\n\nAny active match will disconnect and may count as a loss."
+	if account.busy or account.email_busy or account.rename_pending() or not account.api._current.is_empty():
+		copy = "Wait for your account changes to finish before signing out.\n\n"+copy
+	return copy
+func _confirm_signout():
+	# Recheck synchronous cross-tab state at the action boundary, not just when
+	# the confirmation opened. Never overwrite another tab's pending deletion.
+	account.store.merge_deletion_marker()
+	if account.store.data.deletion_uncertain or account.store.deletion_reset_required or deletion.busy:
+		overlay = "account_options"; _rebuild(); return
+	if account.busy or account.email_busy or account.rename_pending() or not account.api._current.is_empty():
+		message = "Wait for your account changes to finish, then try again."; _rebuild(); return
+	_clear_local_account(false,true)
+func _new_account_after_signout():
+	account.store.data.signed_out = false
+	if not account.store.save():
+		account.store.data.signed_out = true; return
+	_show_onboarding("title")
 func _account_deleted():
 	_clear_local_account(true)
-func _clear_local_account(deletion_confirmed: bool):
+func _clear_local_account(deletion_confirmed: bool, signed_out: bool = false):
 	# Reached after precise server deletion success OR explicit typed local reset.
 	# Retire request owners rather than letting late callbacks restore old identity.
 	var account_path = account.store.path
@@ -1094,7 +1122,8 @@ func _clear_local_account(deletion_confirmed: bool):
 	account = DeviceAccount.new(); account.store = DeviceAccount.Store.new(account_path); account.store.deletion_marker_io = marker_io
 	for key in account.store.data:
 		account.store.data[key] = false if account.store.data[key] is bool else ""
-	var reset_persisted = account.store.mark_deletion_resolved(deletion_confirmed,"" if deletion_confirmed else "cleared")
+	account.store.data.signed_out = signed_out
+	var reset_persisted = account.store.mark_deletion_resolved(deletion_confirmed,"signedout" if signed_out else ("" if deletion_confirmed else "cleared"))
 	deletion.store = account.store; account.api.request_factory = account_factory
 	account.onboarding_complete.connect(_account_completed); account.sync_finished.connect(_account_sync_finished)
 	account.name_updated.connect(_account_name); account.player_received.connect(_account_player)
@@ -1129,6 +1158,8 @@ func _clear_local_account(deletion_confirmed: bool):
 	game = Rules.new(); board.game = game; board.clear_effects()
 	_pending_game = {}; thinking = false; hint_busy = false; cinematic.clear()
 	page = "onboarding"; overlay = ""; message = "Your account was deleted." if deletion_confirmed else "Local account details cleared. Earlier server deletion remains unconfirmed."
+	if signed_out:
+		page = "account_choice"; message = "Signed out. Your server account has not been deleted."
 	if not reset_persisted:
 		page = "title"; overlay = "account_options"
 		message = "Local reset could not be saved. Automatic account creation remains blocked. Retry clearing this device."
@@ -1365,6 +1396,8 @@ func _u() -> float:
 	if layout.mode == "tablet_portrait": return 1.25
 	return 1.0
 func _rebuild():
+	if account.store.data.signed_out and page != "recovery" and not account.store.data.deletion_uncertain:
+		page = "account_choice"; overlay = ""
 	if page != "recovery" and recovery.active: recovery.cancel()
 	if page != "email": _onboarding_email_confirmation = false
 	if not is_instance_valid(board): return
@@ -1377,6 +1410,11 @@ func _rebuild():
 	title_label.visible = page == "title" and not tutorial.active
 	var s: Vector2 = layout.size
 	if page == "title": _title_controls(s)
+	elif page == "account_choice":
+		var w = minf(420,s.x-48); var x = (s.x-w)*.5; var y = maxf(48,s.y*.3)
+		_modal_label("SIGNED OUT",Rect2(x,y,w,48),28,P.PALE)
+		_button("sign_in","Sign in",Rect2(x,y+68,w,52),func(): recovery.begin(); page = "recovery"; _rebuild(),true)
+		_button("new_account","New account",Rect2(x,y+132,w,52),_new_account_after_signout)
 	elif page == "character_select":
 		hero_select = HeroSelect.new(); hero_select.size = s; hero_select.hinge = layout.hinge
 		hero_select.selected_id = _hero_focus if not _hero_focus.is_empty() else str(profile.data.character_id)
@@ -1591,7 +1629,7 @@ func _overlay_controls(s: Vector2):
 		if not test_online_bypass and account.store.complete():
 			var save_width = 60 if short else 120
 			name_field.size.x = sw-save_width-8
-			_button("save_name","Check" if short else "Check & save",Rect2(name_x+sw-save_width,name_y,save_width,44),func(): account.rename(str(controls.player_name.text)))
+			_button("save_name","Change",Rect2(name_x+sw-save_width,name_y,save_width,44),func(): account.rename(str(controls.player_name.text)))
 			name_field.text_submitted.connect(account.rename)
 			var notice = Label.new(); notice.position = Vector2(lx,r.position.y+210) if short else Vector2(rx,y+46); notice.size = Vector2(pw-48,22) if short else Vector2(sw,34)
 			notice.text = account.rename_message; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1602,9 +1640,8 @@ func _overlay_controls(s: Vector2):
 			name_field.text_changed.connect(func(value):
 				var clean = value.strip_edges().left(24)
 				settings.set_value("player_name",clean); profile.data.display_name = clean; profile.save())
-		_button("account_email","Account" if account.deletion_capable or account.store.data.deletion_uncertain else "Account email",Rect2(lx,r.end.y-116,sw*.52-4,44),func():
-			if account.deletion_capable or account.store.data.deletion_uncertain: overlay = "account_options"; _rebuild()
-			else: open_account_email())
+		_button("account_email","Account",Rect2(lx,r.end.y-116,sw*.52-4,44),func():
+			overlay = "account_options"; _rebuild())
 		_button("replay_tutorial","How to play",Rect2(lx+sw*.52+4,r.end.y-116,sw*.48-4,44),func(): start_tutorial(true))
 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
 		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
@@ -1633,7 +1670,20 @@ func _overlay_controls(s: Vector2):
 				recovery.begin(); page = "recovery"; overlay = ""; _rebuild())
 			_button("start_fresh","Start fresh on this device",Rect2(x,y+282,w,48),func():
 				overlay = "local_reset"; deletion.begin())
-		_button("account_options_back","Back",Rect2(x,y+(344 if account.store.data.deletion_uncertain else 130),w,48),func(): overlay = "settings"; _rebuild())
+		if not account.store.data.deletion_uncertain:
+			_modal_label(_account_status_copy(),Rect2(x,y+114,w,54),14,P.PALE)
+			_button("sign_out","Sign out",Rect2(x,y+172,w,48),func(): overlay = "signout_confirm"; _rebuild())
+		_button("account_options_back","Back",Rect2(x,y+(344 if account.store.data.deletion_uncertain else 226),w,48),func(): overlay = "settings"; _rebuild())
+	elif overlay == "signout_confirm":
+		var x = r.position.x+24; var w = r.size.x-48
+		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,r.position.y+70); scroll.size = Vector2(w,r.size.y-160)
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		add_child(scroll); ui_nodes.append(scroll)
+		var copy = Label.new(); copy.text = _signout_copy(); copy.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL; copy.add_theme_font_size_override("font_size",18)
+		scroll.add_child(copy); controls["signout_copy"] = copy
+		_button("confirm_signout","Sign out",Rect2(x,r.end.y-74,w*.48,48),_confirm_signout)
+		_button("cancel_signout","Stay signed in",Rect2(x+w*.52,r.end.y-74,w*.48,48),func(): overlay = "account_options"; _rebuild(),true)
 	elif overlay == "cosmetics":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
 		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.BACKGROUNDS).name,Rect2(x,y,w,44),func():
@@ -2069,7 +2119,7 @@ func _draw_modal(node: Control):
 		_draw_result(node,r,short); return
 	node.draw_rect(Rect2(Vector2.ZERO,s),Color(.001,.005,.015,.88))
 	P.panel(node,r,false,1,true); P.outline(node,r.grow(-8),P.GOLD.darkened(.4),1)
-	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
+	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
 	if overlay == "online_end": heading = Clock.cancelled_title(str(transport.room.get("end_reason","")) if transport is HTTP else "")
 	P.text(node,heading,Rect2(r.position+Vector2(20,23),Vector2(r.size.x-72,44)),25,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
 	if overlay == "setup":

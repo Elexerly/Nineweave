@@ -261,17 +261,17 @@ func offline_first_play():
 	ui.free(); await frames()
 func email_editing_and_restart():
 	var bundle = make_ui("edit"); var ui = bundle.ui
-	ui.show_settings(); ui.controls.account_email.pressed.emit()
+	ui.show_settings(); ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit()
 	ok(ui.overlay == "account" and not ui.email_view.onboarding,"Settings exposes later account email editor")
 	var requests = bundle.http.requests.size()
 	ui.controls.email.text = "first@example.com"; ui.controls.save_email.pressed.emit()
 	ok(ui.overlay == "settings" and ui.account.store.data.email == "first@example.com","later add saves and returns to settings")
-	ui.controls.account_email.pressed.emit(); ok(ui.controls.email.text == "first@example.com","later edit prefills saved email")
+	ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit(); ok(ui.controls.email.text == "first@example.com","later edit prefills saved email")
 	ui.controls.email.text_changed.emit("second@example.org"); ui.set_view_size(Vector2(867,553))
 	ok(ui.controls.email.text == "second@example.org","unsaved draft survives rotation")
 	ui.controls.email.text_submitted.emit("second@example.org")
 	ok(ui.account.store.data.email == "second@example.org" and ui.overlay == "settings","Enter saves changed email")
-	ui.controls.account_email.pressed.emit(); ui.controls.email.text = "bad"; ui.controls.save_email.pressed.emit()
+	ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit(); ui.controls.email.text = "bad"; ui.controls.save_email.pressed.emit()
 	ok(ui.account.store.data.email == "second@example.org" and "valid email" in ui.email_view.status,"invalid replacement preserves prior saved email")
 	ui.controls.continue_email.pressed.emit()
 	ok(ui.overlay == "settings" and bundle.http.requests.size() == requests,"return discards draft without network")
@@ -317,7 +317,7 @@ func responsive_forms():
 		for id in ["account_email","replay_tutorial"]:
 			for other in ["player_name","save_name","done","cosmetics","toggle_show_hints","difficulty"]:
 				ok(not ui.controls[id].get_global_rect().intersects(ui.controls[other].get_global_rect()),"Settings links do not overlap "+id+" "+other+str(view_size))
-		ui.controls.account_email.pressed.emit(); await frames()
+		ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit(); await frames()
 		for id in ["email","save_email","continue_email"]:
 			ok(ui.controls[id].size.x >= 44 and ui.controls[id].size.y >= 44,"email touch size "+id+str(view_size))
 		# Short landscape scrolls; portrait/desktop exposes the complete form at once.

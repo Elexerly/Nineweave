@@ -1,5 +1,6 @@
 extends Control
 ## Event-driven playback. The existing cinematic remains underneath and owns skip/results.
+const HeroAudio = preload("res://characters/hero_audio.gd")
 const Roster = preload("res://characters/roster.gd")
 const Rig = preload("res://characters/art.gd")
 const P = preload("res://ui/paint.gd")
@@ -12,7 +13,7 @@ const PRELUDE_GRACE_SECONDS = 2.0
 const FLASH_SECONDS = .18
 const STILL_SECONDS = 3.0
 # Leave summing headroom for other game audio; never amplify source clips.
-const VIDEO_GAIN_DB = -6.0
+const VIDEO_GAIN_DB = -8.0
 signal prelude_ended
 signal intro_revealed
 signal finished
@@ -57,18 +58,24 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 	if kind == "versus": display_lane = Rect2()
 	scene_kind = kind; active = true; visible = true; size = extent
 	for i in range(ids.size()):
-		var side = {"id":ids[i],"kind":clip_kind,"video":not paths[i].is_empty(),"done":paths[i].is_empty(),"audio":false,"node":null,"frame":Rect2(),"mark":mark if i == 0 else 3-mark}
+		var side = {"id":ids[i],"kind":clip_kind,"video":not paths[i].is_empty(),"done":paths[i].is_empty(),"audio":false,"sound":null,"node":null,"frame":Rect2(),"mark":mark if i == 0 else 3-mark}
 		if side.video:
 			var player = VideoStreamPlayer.new()
 			player.mouse_filter = Control.MOUSE_FILTER_IGNORE; player.expand = true
 			# Master already exists; video must not go through Announcer or alter bus layout.
 			player.bus = &"Master"
+			# Skip all embedded audio tracks: do not drive audio from render updates.
+			player.audio_track = -1; player.volume = 0.0
 			# Use Godot's normal audio buffer for the audible lane, not the old
 			# aggressive 100ms buffer shared by two competing soundtracks.
 			player.buffering_msec = 500 if i == 0 else 100
 			var stream = VideoStreamTheora.new(); stream.file = paths[i]
 			player.stream = stream; add_child(player); side.node = player
-			side.audio = source.has_audio(ids[i],clip_kind)
+			if i == 0 and source.has_audio(ids[i],clip_kind):
+				var audio_stream = HeroAudio.load_clip(paths[i])
+				if audio_stream != null:
+					var sound = AudioStreamPlayer.new(); sound.bus = &"Master"
+					sound.stream = audio_stream; add_child(sound); side.sound = sound; side.audio = true
 			player.finished.connect(_side_finished.bind(i,_generation))
 		else:
 			var art = Rig.new(); art.art_key = "versus" if kind == "versus" else "victory"; art.fit_height = true
@@ -81,7 +88,9 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 	_play_age = 0
 	relayout(extent); set_sound_enabled(sound_enabled)
 	for side in sides:
-		if side.video and decode_enabled: side.node.play()
+		if side.video and decode_enabled:
+			side.node.play()
+			if side.sound != null: side.sound.play()
 	if kind == "versus" and not _waiting_for_intros: intro_revealed.emit()
 	return true
 func _intros_pending(ids: Array) -> bool:
@@ -109,7 +118,8 @@ func set_sound_enabled(value: bool):
 			# The first lane is local on versus, or the featured winner on results.
 			# Never promote opponent audio when the local clip ends or is absent.
 			var enabled = i == 0 and side.audio and not side.done and sound_enabled
-			side.node.volume = db_to_linear(VIDEO_GAIN_DB) if enabled else 0.0
+			side.node.volume = 0.0
+			if side.sound != null: side.sound.volume_db = VIDEO_GAIN_DB if enabled else -80.0
 			audible = audible or enabled
 	_set_audio(active and audible)
 func holds_completed_result() -> bool:
@@ -120,6 +130,7 @@ func _set_audio(value: bool):
 func _side_finished(index: int, generation: int):
 	if generation != _generation or not active or index >= sides.size(): return
 	sides[index].done = true
+	if sides[index].sound != null: sides[index].sound.stop()
 	set_sound_enabled(sound_enabled)
 	for side in sides:
 		if side.video and not side.done: return
@@ -132,6 +143,8 @@ func clear():
 	_reveal_age = 0; _still_only = false
 	active = false; visible = false; _set_audio(false)
 	for side in sides:
+		if side.sound != null:
+			side.sound.stop(); side.sound.stream = null; side.sound.queue_free()
 		if side.video: side.node.stop(); side.node.stream = null
 		side.node.visible = false; side.node.queue_free()
 	sides.clear()
@@ -182,8 +195,9 @@ func _draw():
 func _draw_chrome():
 	if not visible: return
 	if _waiting_for_intros:
+		preload("res://characters/arena_backdrop.gd").draw_at(_chrome,size,_wait_age)
 		var center = size*.5
-		# One quiet anticipation screen, no intermediate portraits/scenes.
+		# One atmospheric entrance, no intermediate portraits/scenes.
 		_chrome.draw_line(Vector2(size.x*.18,center.y-52),Vector2(size.x*.82,center.y-52),Color(.65,.5,.25,.45),1,true)
 		var title = "Two have stepped forward"
 		P.text(_chrome,title,Rect2(24,center.y-32,size.x-48,64),P.fit_size(title,size.x-48,38),P.GOLD)

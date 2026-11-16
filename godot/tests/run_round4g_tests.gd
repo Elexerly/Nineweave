@@ -129,7 +129,7 @@ func onboarding_flow():
 	ui.free(); await frames()
 func settings_and_restart():
 	var bundle = make_ui("settings"); var ui = bundle.ui
-	bundle.http.respond(200,player()); ui.show_settings(); ui.controls.account_email.pressed.emit()
+	bundle.http.respond(200,player()); ui.show_settings(); ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit()
 	store_and_send(bundle)
 	ok(ui.overlay == "account" and not ui.email_view.onboarding,"Settings add uses the same optional code-entry flow")
 	# Resend after the advertised timestamp, without another PATCH or an address body.
@@ -141,7 +141,7 @@ func settings_and_restart():
 	ok(bundle.http.requests.back().body.challenge_id == "ec_second","resend replaces saved challenge id")
 	bundle.http.respond(200,player("verified","weaver@example.com"))
 	ok(ui.controls.verification_status.text == "Verified","Settings verifies from server payload")
-	ui.controls.continue_email.pressed.emit(); ui.controls.account_email.pressed.emit(); save(bundle,"changed@example.org")
+	ui.controls.continue_email.pressed.emit(); ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit(); save(bundle,"changed@example.org")
 	ok(ui.controls.verification_status.text == "Not verified" and ui.account.store.data.email_verified_at.is_empty(),"changing verified address immediately clears local status")
 	bundle.http.respond(200,player("unverified","changed@example.org")); bundle.http.respond(200,challenge("ec_changed"))
 	ui.controls.email_code.text = "123456"; ui.controls.confirm_email.pressed.emit(); bundle.http.respond(200,player("verified","changed@example.org"))
@@ -174,7 +174,7 @@ func optional_continue():
 	finish_name(bundle,player(),player()); store_and_send(bundle)
 	var count = bundle.http.requests.size(); ui.controls.continue_email.pressed.emit()
 	ok(ui.page == "title" and ui.account.store.data.email == "weaver@example.com" and bundle.http.requests.size() == count,"saved address can continue without verifying")
-	ui.show_settings(); ui.controls.account_email.pressed.emit()
+	ui.show_settings(); ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit()
 	ok(ui.controls.has("email_code"),"Settings can resume an optional verification left during this session")
 	ui.free(); await frames()
 func error_flows():

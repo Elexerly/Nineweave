@@ -6,7 +6,7 @@ var deletion_marker_io: Callable
 var deletion_reset_required = false
 var deletion_reset_reason = ""
 var path: String
-var data: Dictionary = {"deletion_uncertain":false,"deletion_resolution":"","device_token":"","screen_name":"","tos_version":"","privacy_version":"","accepted_at":"","age_confirmed":false,"pending_sync":false,"registration_rejected":false,"email":"","email_status":"not_verified","email_verified_at":"","email_prompt_done":false}
+var data: Dictionary = {"signed_out":false,"deletion_uncertain":false,"deletion_resolution":"","device_token":"","screen_name":"","tos_version":"","privacy_version":"","accepted_at":"","age_confirmed":false,"pending_sync":false,"registration_rejected":false,"email":"","email_status":"not_verified","email_verified_at":"","email_prompt_done":false}
 func _init(file_path: String = "user://nineweave-device.cfg"):
 	path = file_path; data = data.duplicate(true)
 	var cfg = ConfigFile.new()
@@ -28,12 +28,13 @@ func merge_deletion_marker():
 	if state.is_empty(): return
 	if state == "pending" or state == "error":
 		data.deletion_uncertain = true; return
-	if state.begins_with("deleted:") or state.begins_with("recovered:") or state.begins_with("cleared:"):
+	if state.begins_with("deleted:") or state.begins_with("recovered:") or state.begins_with("cleared:") or state.begins_with("signedout:"):
 		var nonce = state.get_slice(":",1)
 		if not nonce.is_empty() and data.deletion_resolution == nonce:
 			data.deletion_uncertain = false; deletion_reset_required = false; return
-		if state.begins_with("deleted:") or state.begins_with("cleared:"):
+		if state.begins_with("deleted:") or state.begins_with("cleared:") or state.begins_with("signedout:"):
 			for key in data: data[key] = false if data[key] is bool else ""
+			data.signed_out = state.begins_with("signedout:")
 			deletion_reset_required = true; deletion_reset_reason = state.get_slice(":",0)
 		else: data.deletion_uncertain = true
 func _deletion_marker(operation: String) -> String:
@@ -58,7 +59,7 @@ func mark_deletion_resolved(deleted: bool, terminal_kind: String = "") -> bool:
 	# Keep the terminal marker. A matching cfg nonce proves these credentials
 	# were persisted after resolution; stale cfg must never recreate an account.
 	var nonce = Crypto.new().generate_random_bytes(16).hex_encode()
-	var kind = terminal_kind if terminal_kind == "cleared" else ("deleted" if deleted else "recovered")
+	var kind = terminal_kind if terminal_kind in ["cleared","signedout"] else ("deleted" if deleted else "recovered")
 	if _deletion_marker("write:"+kind+":"+nonce) != "ok":
 		data.deletion_uncertain = true; return false
 	var prior_resolution = data.deletion_resolution
@@ -69,7 +70,7 @@ func mark_deletion_resolved(deleted: bool, terminal_kind: String = "") -> bool:
 	deletion_reset_required = false
 	return true
 func complete() -> bool:
-	return valid_screen_name(data.screen_name) and data.tos_version == TOS_VERSION and data.privacy_version == PRIVACY_VERSION and not str(data.accepted_at).is_empty() and data.age_confirmed and not data.registration_rejected
+	return not data.signed_out and valid_screen_name(data.screen_name) and data.tos_version == TOS_VERSION and data.privacy_version == PRIVACY_VERSION and not str(data.accepted_at).is_empty() and data.age_confirmed and not data.registration_rejected
 func has_device_token() -> bool:
 	return str(data.device_token).begins_with("nwd_") and str(data.device_token).length() > 4
 func online_ready() -> bool:

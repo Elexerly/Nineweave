@@ -1,4 +1,5 @@
 extends SceneTree
+const HeroAudio = preload("res://characters/hero_audio.gd")
 const Video = preload("res://characters/hero_video.gd")
 const Cache = preload("res://characters/hero_video_cache.gd")
 const Roster = preload("res://characters/roster.gd")
@@ -29,8 +30,23 @@ func clean(path: String):
 	for name in DirAccess.get_files_at(path): DirAccess.remove_absolute(path.path_join(name))
 	for name in DirAccess.get_directories_at(path): clean(path.path_join(name))
 	DirAccess.remove_absolute(path)
+func audio_demux():
+	ok(HeroAudio.extract(PackedByteArray([1,2,3])).is_empty(),"reject truncated Ogg")
+	var sample = FileAccess.get_file_as_bytes("res://assets/hero_video/shard_jack/intro.ogv")
+	ok(HeroAudio.extract(sample.slice(0,sample.size()-1)).is_empty(),"reject incomplete trailing page")
+	var bytes = HeroAudio.extract(sample)
+	ok(not bytes.is_empty() and bytes.size() < sample.size(),"audio demux excludes video pages")
+	var broken = sample.duplicate(); broken[4] = 1
+	ok(HeroAudio.extract(broken).is_empty(),"reject unsupported Ogg version")
+	for id in DirAccess.get_directories_at("res://assets/hero_video"):
+		for kind in ["intro","victory"]:
+			var path = "res://assets/hero_video/"+id+"/"+kind+".ogv"
+			if not FileAccess.file_exists(path): continue
+			var stream = HeroAudio.load_clip(path)
+			ok(stream != null and stream.get_length() > 0,"independent Vorbis decode: "+id+"/"+kind)
 func run():
 	clean(TEST_ROOT)
+	audio_demux()
 	catalog()
 	beth_labels()
 	await beth_screens()
@@ -307,12 +323,13 @@ func controller():
 	ok(cinema.video_playing() and cinema.video_overlay.sides.size() == 2,"versus uses split overlay")
 	ok(cinema.video_overlay.sides[0].video and cinema.video_overlay.sides[1].video,"Jack and Max intros both play")
 	var video = cinema.video_overlay
+	ok(video.sides[0].node.audio_track == -1 and video.sides[1].node.audio_track == -1,"both Theora decoders skip audio tracks")
 	video.set_sound_enabled(true)
-	ok(is_equal_approx(video.sides[0].node.volume_db,-6.0) and video.sides[1].node.volume == 0,"only local left intro is audible")
+	ok(video.sides[0].sound != null and is_equal_approx(video.sides[0].sound.volume_db,-8.0) and video.sides[0].node.volume == 0 and video.sides[1].sound == null,"only local left intro is audible")
 	video.set_sound_enabled(false)
-	ok(video.sides[0].node.volume == 0 and video.sides[1].node.volume == 0,"sound off fully silences both lanes")
+	ok(video.sides[0].sound.volume_db == -80 and video.sides[0].node.volume == 0 and video.sides[1].node.volume == 0,"sound off fully silences both lanes")
 	video.set_sound_enabled(true); video.sides[0].done = true; video.set_sound_enabled(true)
-	ok(video.sides[0].node.volume == 0 and video.sides[1].node.volume == 0 and not video._audible,"opponent stays silent after local intro ends")
+	ok(video.sides[0].sound.volume_db == -80 and video.sides[0].node.volume == 0 and video.sides[1].node.volume == 0 and not video._audible,"opponent stays silent after local intro ends")
 	video.sides[0].done = false; video.set_sound_enabled(true)
 	for extent in [Vector2(390,844),Vector2(844,390),Vector2(1366,1024)]:
 		cinema.relayout(ui.layout)

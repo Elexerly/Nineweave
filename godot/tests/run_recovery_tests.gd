@@ -26,8 +26,37 @@ func run():
 	root.add_child(ui); ui.set_process(false); ui.set_view_size(Vector2(320,568))
 	await process_frame
 	ok(ui.controls.has("sign_in"),"first-run existing-player entry")
-	ui.controls.sign_in.pressed.emit(); http = ui.recovery.api._request
+	# Exercise the actual input pipeline, not just the button signal.
+	ui._onboarding_name = "night"; ui._rebuild()
+	await process_frame; await process_frame
+	var position = ui.controls.sign_in.get_global_rect().get_center()
+	for pressed in [true,false]:
+		var mouse = InputEventMouseButton.new(); mouse.button_index = MOUSE_BUTTON_LEFT; mouse.pressed = pressed; mouse.position = position
+		root.push_input(mouse,true)
+	await process_frame; await process_frame
+	http = ui.recovery.api._request
+	ok(ui.page == "recovery","real sign-in click opens recovery")
+	var motion = InputEventMouseMotion.new(); motion.position = Vector2(40,40); root.push_input(motion,true)
+	ok(ui.page == "recovery","pointer motion does not eject recovery")
+	# Continue after a failing pre-fix assertion to collect the complete regression.
+	if ui.page != "recovery": ui._online_action("sign_in",""); http = ui.recovery.api._request
+	await process_frame; await process_frame
+	position = ui.controls.recovery_email.get_global_rect().get_center()
+	for pressed in [true,false]:
+		var mouse = InputEventMouseButton.new(); mouse.button_index = MOUSE_BUTTON_LEFT; mouse.pressed = pressed; mouse.position = position
+		root.push_input(mouse,true)
+	ok(ui.page == "recovery","email field press and release preserve recovery")
+	if ui.page != "recovery": ui._online_action("sign_in",""); http = ui.recovery.api._request
+	ui.controls.recovery_email.grab_focus()
+	var key = InputEventKey.new(); key.keycode = KEY_N; key.unicode = 110; key.pressed = true
+	root.push_input(key); key = key.duplicate(); key.pressed = false; root.push_input(key)
+	await process_frame
+	ok(ui.page == "recovery" and ui.recovery.email == "n","real keyboard entry reaches recovery email")
+	if ui.page != "recovery": ui._online_action("sign_in",""); http = ui.recovery.api._request
 	ok(ui.page == "recovery" and ui.controls.has("recovery_email"),"recovery available without name")
+	var escape = InputEventKey.new(); escape.keycode = KEY_ESCAPE; escape.pressed = true; root.push_input(escape)
+	ok(ui.page == "onboarding" and ui.controls.screen_name.text == "night","Escape returns to retained screen-name draft")
+	ui._online_action("sign_in",""); http = ui.recovery.api._request
 	ui.recovery.email = "bad"; ui.recovery.request_code()
 	ok(http.requests.is_empty(),"invalid email stays local")
 	ui.recovery.email = "unknown@example.com"; ui.recovery.request_code()
@@ -45,6 +74,7 @@ func run():
 	ui.recovery.confirm(); http.respond(503,{"error":"offline"})
 	ok(ui.recovery.email == "known@example.com" and not ui.recovery.busy,"failure permits retry preserving email")
 	ui.recovery.confirm(); ui._recovery_action("cancel")
+	ok(ui._onboarding_name == "night" and ui.controls.screen_name.text == "night","cancel preserves typed screen name")
 	var player = Store.consent_payload(); player.screen_name = "OriginalPlayer"; player.email = "known@example.com"; player.email_status = "verified"; player.capabilities = {"email":true}
 	http.respond(200,{"token":"nwd_old_late","player":player})
 	ok(ui.page == "onboarding" and ui.account.store.data.device_token.is_empty(),"late reply after cancel ignored")

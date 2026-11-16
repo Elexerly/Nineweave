@@ -411,6 +411,12 @@ func _cinematic_finished(kind: String):
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
 func _input(event):
+	# Recovery is a legitimate pre-account screen. Let its controls receive real
+	# pointer/key events instead of routing every event back through registration.
+	if page == "recovery":
+		if event is InputEventKey and event.pressed and (event.keycode in [KEY_ESCAPE,KEY_BACK] or event.is_action_pressed("ui_cancel")):
+			_recovery_action("cancel"); get_viewport().set_input_as_handled()
+		return
 	if _name_required():
 		_require_screen_name()
 		if event is InputEventKey and (event.keycode in [KEY_ESCAPE,KEY_BACK] or event.is_action_pressed("ui_cancel")):

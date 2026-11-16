@@ -25,6 +25,11 @@ const HeroSelect = preload("res://characters/select.gd")
 const HeroVideo = preload("res://characters/hero_video.gd")
 const Cinematic = preload("res://characters/cinematic.gd")
 const Sound = preload("res://fx/sound.gd")
+const Clock = preload("res://net/turn_clock.gd")
+const Social = preload("res://net/social.gd")
+const ChatPanel = preload("res://ui/chat_panel.gd")
+## Round 5a: "<Name> joined" beat before the versus intro (protocol 2 only).
+const JOINED_BEAT = 1.6
 ## Result panel appears at this fraction of the game-win animation (real flow and debug poses).
 const RESULT_AT = .75
 const FIREWORK_BURSTS = 7
@@ -124,6 +129,25 @@ var _title: Dictionary = {}
 const SKIP_GUARD_MS = 350
 var _skip_guard_until: int = 0
 var _hint_ply: int = -1
+## Round 5a: capability gate, moderation, chat and the turn clock display.
+var social = Social.new()
+## Tests and captures inject a fake HTTPRequest for live rooms (never the network).
+var http_request_factory: Callable
+var end_message: String = ""
+var joined_timer: Timer
+var chat_open: bool = false
+var chat_unread: int = 0
+var chat_muted: bool = false
+var chat_blocked: bool = false
+var chat_status: String = ""
+var _chat_draft: String = ""
+var chat_view
+var prompt_layer: Control
+var blocked_status: String = ""
+var _prompt_key: String = ""
+var _prompt_sent: String = ""
+var _moved_turn: String = ""
+var _you_name: String = ""
 
 func _ready():
 	# Handle close/Android back ourselves so first-run onboarding cannot dismiss.
@@ -164,6 +188,14 @@ func _ready():
 	account.email_flow_changed.connect(_account_email_flow_changed)
 	account.error.connect(_account_error); add_child(account)
 	online_api.completed.connect(_online_response); add_child(online_api)
+	social.store = account.store
+	if http_request_factory.is_valid(): social.api.request_factory = http_request_factory
+	social.capabilities_changed.connect(_capabilities_changed)
+	social.blocks_changed.connect(func(_names): blocked_status = "" ; if overlay == "blocked": _rebuild())
+	social.finished.connect(_social_finished)
+	add_child(social)
+	account.player_received.connect(social.merge_player)
+	joined_timer = Timer.new(); joined_timer.one_shot = true; add_child(joined_timer); joined_timer.timeout.connect(_joined_beat_done)
 	lobby_timer = Timer.new(); lobby_timer.wait_time = 2.5; add_child(lobby_timer); lobby_timer.timeout.connect(_refresh_lobby)
 	if not test_online_bypass:
 		if not account.store.complete(): page = "onboarding"; _onboarding_name = account.store.data.screen_name
@@ -284,8 +316,14 @@ func _process(delta):
 				_show_spotlight()
 		else:
 			_result_shown = true; overlay = "result"; _rebuild()
+	tick_online()
 	_sync_fx()
 	queue_redraw()
+## Round 5a: re-evaluate the "Still there?" prompt as the local countdown crosses still_there_at.
+func tick_online():
+	if mode != "online" or page != "game" or not transport is HTTP: return
+	if overlay.is_empty() and prompt_state() != _prompt_key: _clock_changed()
+	if is_instance_valid(prompt_layer): prompt_layer.queue_redraw()
 ## Effects that depend on the board's animation clock: statue glow, result panel entrance.
 func _sync_fx():
 	if board.win_fx.is_empty():
@@ -440,7 +478,8 @@ func play_cell(b: int, c: int) -> bool:
 	if mode == "computer" and game.turn != human_mark: return false
 	if mode == "online":
 		if not remote_ready or game.turn != human_mark or not game.is_legal(b,c): _invalid(b); return false
-		transport.send_move(b,c,online_sequence+1); return true
+		# A move dismisses "Still there?" at once; the server ends the turn.
+		_moved_turn = _turn_key(); transport.send_move(b,c,online_sequence+1); _clock_changed(); return true
 	return _apply_move(b,c)
 func _apply_move(b: int, c: int) -> bool:
 	# Online polling stays authoritative while the instructional board is showing.
@@ -513,7 +552,7 @@ func _refresh_labels():
 		turn_label = "Draw" if game.status == 3 else ("X" if game.status == 1 else "O")+" wins"
 		active_label = result_line()
 func side_name(mark: int) -> String:
-	if mark == human_mark and mode != "local": return str(settings.values.player_name)
+	if mark == human_mark and mode != "local": return _you_name if mode == "online" and not _you_name.is_empty() else str(settings.values.player_name)
 	if mode == "local": return "PLAYER 1" if mark == human_mark else "PLAYER 2"
 	return _rival_name()
 ## One-line result for the info pill / panels after game over.
@@ -583,6 +622,8 @@ func _leave_online():
 	if is_instance_valid(demo_rival): demo_rival.leave(); demo_rival.queue_free()
 	if is_instance_valid(transport): transport.leave(); transport.queue_free()
 	demo_rival = null; transport = null; remote_ready = false
+	chat_open = false; _prompt_key = ""
+	if is_instance_valid(joined_timer): joined_timer.stop()
 func request_online():
 	_pending_game = {}; _select_player = 0; open_online()
 func request_resume():
@@ -594,12 +635,28 @@ func open_online():
 	if _require_screen_name("online"): return
 	_leave_online(); message = ""; room_code = ""; _room_password = ""
 	page = "online"; overlay = ""; online_state = "lobby"
+	if not test_online_bypass and not _debug_capture: social.probe()
 	if not test_online_bypass and not _debug_capture and not account.store.online_ready():
 		message = "Syncing your screen name for online play…"; _rebuild(); account.sync_pending(); return
 	_rebuild(); _refresh_lobby()
 func _attach_transport(t):
 	_leave_online(); transport = t
-	if t is HTTP: t.device_token = account.store.data.device_token
+	end_message = ""; chat_open = false; chat_unread = 0; chat_muted = false; chat_blocked = false; chat_status = ""; _chat_draft = ""
+	_prompt_sent = ""; _moved_turn = ""; _you_name = ""
+	if t is HTTP:
+		t.device_token = account.store.data.device_token
+		t.online2 = social.online2(); t.chat_enabled = social.chat()
+		if http_request_factory.is_valid():
+			t.api.request_factory = http_request_factory; t.aux_api.request_factory = http_request_factory
+			if not t.farewell_factory.is_valid():
+				var factory = http_request_factory
+				t.farewell_factory = func():
+					var farewell = JsonAPI.new(); farewell.request_factory = factory; return farewell
+		t.chat_received.connect(_chat_received)
+		t.chat_failed.connect(func(text): chat_status = text; if is_instance_valid(chat_view): chat_view.set_status(text))
+		t.chat_sent.connect(func(): _chat_draft = ""; chat_status = ""; if is_instance_valid(chat_view): chat_view.clear_draft(); chat_view.set_status(""))
+		t.link_changed.connect(func(_down): queue_redraw())
+		t.clock_changed.connect(_clock_changed)
 	add_child(t)
 	lobby_timer.stop(); online_api.cancel_all(); _lobby_pending = false
 	t.player_name = str(settings.values.player_name)
@@ -608,8 +665,12 @@ func _attach_transport(t):
 		if mark != t.seat:
 			rival_character = Roster.canonical_id(id)
 			hero_video.prefetch_pair(str(profile.data.character_id),rival_character))
-	t.room_created.connect(func(code): room_code = code; online_state = "waiting"; message = "Waiting for opponent…"; _rebuild())
-	t.joined.connect(func(code,seat): room_code = code; human_mark = seat)
+	t.room_created.connect(func(code): room_code = code; online_state = "waiting"; message = ""; _rebuild())
+	t.joined.connect(func(code,seat):
+		room_code = code; human_mark = seat
+		# A joiner whose room still reports waiting sees the same waiting screen.
+		if t is HTTP and page == "online" and str(t.room.get("status","")) == "waiting" and online_state != "waiting":
+			online_state = "waiting"; message = ""; _rebuild())
 	t.opponent_joined.connect(_online_ready)
 	t.rematch_changed.connect(func(_local,_remote): _result_controls_refresh())
 	t.match_started.connect(func(seat,_round):
@@ -617,7 +678,11 @@ func _attach_transport(t):
 		if remote_ready: _reset_online_match())
 	t.move_received.connect(_receive_move)
 	t.state_received.connect(_receive_state)
-	t.opponent_left.connect(func(): remote_ready = false; thinking = false; message = "Your opponent has left the room."; _rebuild())
+	t.opponent_left.connect(func():
+		remote_ready = false; thinking = false; joined_timer.stop()
+		message = end_message if not end_message.is_empty() else "Your opponent has left the room."
+		if page == "online" and online_state == "joined": online_state = "waiting"
+		_rebuild())
 	t.error.connect(func(msg): message = msg; _rebuild())
 	if t is HTTP: t.room_updated.connect(_online_room_update)
 func create_online(demo: bool = false, private_game: bool = false, password: String = ""):
@@ -625,15 +690,17 @@ func create_online(demo: bool = false, private_game: bool = false, password: Str
 	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
 	if private_game and (password.is_empty() or password.length() > 64):
 		message = "Use a private-room password with 1–64 characters."; _online_status(); return
-	_attach_transport(Loopback.new() if demo else HTTP.new())
+	_attach_transport(Loopback.new() if demo else _new_http())
 	if transport is HTTP: transport.private_room = private_game; transport.password = password
 	transport.create_room()
 func join_online(code: String, demo: bool = false, password: String = ""):
 	if _require_screen_name("online"): return
 	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
-	_attach_transport(Loopback.new() if demo else HTTP.new())
+	_attach_transport(Loopback.new() if demo else _new_http())
 	if transport is HTTP: transport.password = password
 	transport.join_room(code)
+func _new_http():
+	return HTTP.new()
 func invite_demo_rival():
 	if not transport is Loopback: return
 	demo_rival = Loopback.new(); demo_rival.player_name = "Legend · Demo"
@@ -642,12 +709,209 @@ func invite_demo_rival():
 	demo_rival.join_room(room_code)
 func _online_ready():
 	remote_ready = true; opponent_name = transport.remote_name; rival_character = transport.remote_character_id
-	human_mark = transport.seat; _reset_online_match()
+	human_mark = transport.seat
+	# Protocol 2 shows "<Name> joined" with their hero first; round 1–4 servers keep round 4g's flow.
+	if transport is HTTP and transport.online2 and page == "online" and online_state in ["lobby","waiting","private"]:
+		online_state = "joined"; message = ""; _rebuild(); joined_timer.start(JOINED_BEAT); return
+	_reset_online_match()
+func _joined_beat_done():
+	if page == "online" and online_state == "joined" and remote_ready and is_instance_valid(transport): _reset_online_match()
+func _capabilities_changed(_caps: Dictionary):
+	if transport is HTTP:
+		transport.online2 = transport.online2 or social.online2(); transport.chat_enabled = social.chat()
+	if page in ["online","game"] or overlay == "settings": _rebuild()
+## Chat is offered only when the server advertises it; old servers never see a chat request.
+func chat_capable() -> bool:
+	return transport is HTTP and transport.chat_enabled
+func chat_notice() -> String:
+	if not test_online_bypass and not account.store.online_ready(): return "Create a screen name to chat"
+	if not chat_capable(): return "Chat — update coming soon"
+	match str(transport.room.get("status","")):
+		"waiting", "": return "Chat opens when your rival joins"
+		"closed": return "This room is closed"
+	return ""
+func chat_messages() -> Array:
+	if not chat_capable(): return []
+	if not (chat_muted or chat_blocked): return transport.chat_log
+	return transport.chat_log.filter(func(m): return m.mine)
+func toggle_chat():
+	if not chat_capable(): return
+	chat_open = not chat_open; chat_unread = 0
+	if chat_open: chat_status = ""
+	_rebuild()
+func _chat_received(fresh: Array):
+	for m in fresh:
+		if not m.mine and not chat_muted and not chat_blocked and not chat_open: chat_unread += 1
+	if is_instance_valid(chat_view): chat_view.set_messages(chat_messages())
+	if controls.has("chat") and is_instance_valid(controls.chat): controls.chat.unread = chat_unread; controls.chat.queue_redraw()
+func _chat_moderation(kind: String, reason: String, note: String):
+	if not is_instance_valid(transport): return
+	var who = opponent_name
+	match kind:
+		"mute", "unmute":
+			chat_muted = kind == "mute"; chat_status = (who+" muted for this match") if chat_muted else (who+" unmuted")
+			_show_chat_view("chat")
+		"block":
+			if not social.block(transport.code,3-transport.seat): chat_status = "Couldn't block right now."; _show_chat_view("block")
+		"report":
+			if not social.report(transport.code,3-transport.seat,reason,note): chat_status = "Couldn't send the report right now."; _show_chat_view("report")
+func _show_chat_view(view: String):
+	if not is_instance_valid(chat_view): return
+	chat_view.muted = chat_muted; chat_view.blocked = chat_blocked; chat_view.messages = chat_messages()
+	chat_view.show_view(view); chat_view.set_status(chat_status)
+func _social_finished(kind: String, ok: bool, text: String):
+	match kind:
+		"block":
+			if ok: chat_blocked = true; chat_status = opponent_name+" blocked"
+			else: chat_status = text
+			_show_chat_view("chat" if ok else "block")
+		"report":
+			chat_status = "Thanks — we'll review it" if ok else text
+			_show_chat_view("chat" if ok else "report")
+		"unblock", "blocks":
+			blocked_status = "" if ok else text
+			if kind == "unblock" and ok: social.fetch_blocks()
+			if overlay == "blocked": _rebuild()
+func open_blocked_players():
+	if not social.chat(): return
+	overlay = "blocked"; blocked_status = "Loading…" if social.fetch_blocks() else "Blocked players need an online screen name."; _rebuild()
+## Turn key: one still-here and one "move dismisses the prompt" per server turn clock.
+func _turn_key() -> String:
+	return str(transport.room.get("turn_started_at","")) if transport is HTTP else ""
+func turn_info() -> Dictionary:
+	if not transport is HTTP or mode != "online" or page != "game" or not remote_ready: return {"phase":"none","mine":false}
+	return transport.turn_phase()
+## "", "ask" (Still there? + I'm here) or "move" (Move now!, allowance used).
+func prompt_state() -> String:
+	if not transport is HTTP or not transport.online2 or game.status != 0 or tutorial.active: return ""
+	if cinematic.active and cinematic.kind == "versus": return ""
+	var info = turn_info()
+	if info.phase != "still_there" or not info.mine: return ""
+	if _moved_turn == _turn_key(): return ""
+	if bool(transport.room.get("still_here_used",false)) or _prompt_sent == _turn_key(): return "move"
+	return "ask"
+func confirm_still_here():
+	if not transport is HTTP: return
+	if transport.still_here(): _prompt_sent = _turn_key()
+	_prompt_key = prompt_state(); _rebuild()
+func _clock_changed():
+	var key = prompt_state()
+	if key != _prompt_key: _prompt_key = key; _rebuild()
+## Online status lines under the board: [primary, small secondary].
+func online_lines() -> Array:
+	if mode != "online" or page != "game" or not transport is HTTP or game.status != 0: return ["",""]
+	if transport.reconnecting: return ["Reconnecting…",""]
+	var info = turn_info()
+	var first = "First moves — no-shows cancel with no loss" if transport.online2 and transport.room.has("both_moved") and not bool(transport.room.both_moved) else ""
+	if transport.room.get("opponent_connected") == false: return [opponent_name+" reconnecting…",first]
+	match info.phase:
+		"turn", "still_there":
+			if info.mine: return ["Your move · "+Clock.mmss(info.remaining) if info.phase == "turn" else "",first]
+			return ["Waiting for %s… %s" % [opponent_name,Clock.mmss(info.remaining)],first]
+		"legacy": return ["Turn time "+Clock.mmss(info.remaining),""]
+	return ["",first]
+func chat_button_rect() -> Rect2:
+	var hdr: Rect2 = layout.header
+	var hb = 52.0 if layout.mode == "landscape" else 44.0
+	return Rect2(hdr.end.x-hb*2-8,hdr.position.y,hb,hb)
+func _chat_button(rect: Rect2, z: int = 0):
+	var b = ChatPanel.ChatButton.new(); b.name = "chat"; b.tooltip_text = "Chat"; b.unread = chat_unread
+	b.position = rect.position; b.size = rect.size; b.z_index = z
+	b.pressed.connect(func(): sound.cue("ui")); b.pressed.connect(toggle_chat)
+	add_child(b); ui_nodes.append(b); controls["chat"] = b
+func _build_chat_panel(rect: Rect2, z: int = 40):
+	chat_view = ChatPanel.new(); chat_view.position = rect.position; chat_view.size = rect.size; chat_view.z_index = z
+	chat_view.messages = chat_messages(); chat_view.presets = social.presets(); chat_view.opponent_name = opponent_name if remote_ready or transport.chat_log.size() > 0 else ""
+	chat_view.notice = chat_notice(); chat_view.can_send = chat_view.notice.is_empty()
+	chat_view.can_moderate = remote_ready and (test_online_bypass or account.store.online_ready())
+	chat_view.muted = chat_muted; chat_view.blocked = chat_blocked; chat_view.status = chat_status; chat_view.draft = _chat_draft
+	chat_view.send_text.connect(func(text): if transport is HTTP: transport.send_chat(text))
+	chat_view.send_preset.connect(func(key): if transport is HTTP: transport.send_chat("",key))
+	chat_view.closed.connect(toggle_chat)
+	chat_view.draft_changed.connect(func(text): _chat_draft = text)
+	chat_view.moderation.connect(_chat_moderation)
+	add_child(chat_view); ui_nodes.append(chat_view)
+## Chat sheet and the "Still there?" prompt on the live board. The prompt wins the space.
+func _online_game_chrome():
+	_prompt_key = prompt_state()
+	if not _prompt_key.is_empty(): _build_prompt(_prompt_key)
+	elif chat_open and chat_capable(): _build_chat_panel(ChatPanel.panel_rect(layout))
+func prompt_rect() -> Rect2:
+	if layout.mode == "phone_portrait":
+		var top = layout.board.end.y+4
+		return Rect2(14,top,layout.size.x-28,clampf(layout.controls.end.y-top,86,104))
+	var info: Rect2 = layout.get("info",Rect2())
+	if info.size.x >= 220 and info.size.y >= 96: return Rect2(info.position,Vector2(info.size.x,minf(info.size.y,124)))
+	var b: Rect2 = layout.board
+	return Rect2(b.position.x+8,b.end.y-112,b.size.x-16,104)
+func _build_prompt(state: String):
+	var r = prompt_rect()
+	prompt_layer = Layer.new(); prompt_layer.name = "StillThere"; prompt_layer.painter = _draw_prompt
+	prompt_layer.position = r.position; prompt_layer.size = r.size; prompt_layer.z_index = 45; prompt_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(prompt_layer); ui_nodes.append(prompt_layer)
+	if state == "ask":
+		var bw = minf(150,r.size.x*.4)
+		var b = _button("still_here","I'm here",Rect2(r.end.x-bw-12,r.position.y+(r.size.y-52)*.5,bw,52),confirm_still_here,true)
+		b.z_index = 46
+func _draw_prompt(n: Control):
+	var r = Rect2(Vector2.ZERO,n.size)
+	var info = turn_info()
+	var red = Clock.tier_color("red")
+	var pulse = 1.0 if board.reduced_motion else .7+.3*sin(clock*TAU*1.2)
+	P.box_glow(n,r,Color(red,.3*pulse),12,10)
+	n.draw_colored_polygon(P.polygon(r.grow(-2)),Color(.03,.02,.04,.96))
+	P.panel(n,r,false,1,true); P.outline(n,r.grow(-5),Color(red,.8*pulse),1.6)
+	var ask = _prompt_key == "ask"
+	var text_w = r.size.x-(minf(150,r.size.x*.4)+36 if ask else 32)
+	var title = "Still there?" if ask else "Move now!"
+	var tfs = P.fit_size(title,text_w-80,24,P.SERIF)
+	var tw = P.text_width(title,tfs,P.SERIF)
+	var top = (r.size.y-68)*.5
+	P.text(n,title,Rect2(18,top,tw+8,36),tfs,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_LEFT,.4)
+	P.text(n,Clock.mmss(info.get("remaining",0.0)),Rect2(28+tw,top-2,72,40),28,red,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+	var hint = "Tap I'm here or make a move" if ask else "Extra time used — make a move"
+	P.text(n,hint,Rect2(18,top+40,text_w,24),P.fit_size(hint,text_w,15),P.MUTED,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+## Timer ring geometry around the active seat's portrait (for drawing and tests).
+func ring_geometry(mark: int) -> Dictionary:
+	var r: Rect2 = layout.players
+	if layout.mode == "landscape":
+		var hh = (r.size.y-52.0*_u())*.5
+		var rr = Rect2(r.position,Vector2(r.size.x,hh)) if mark == human_mark else Rect2(r.position.x,r.end.y-hh,r.size.x,hh)
+		var radius = minf(rr.size.x*.34,rr.size.y*.25)
+		var center = Vector2(rr.get_center().x,rr.position.y+rr.size.y*.12+radius+14*_u())
+		# Stay above the name line (drawn at 64% of the card) so the ring never crosses it.
+		return {"center":center,"radius":minf(radius+8,rr.position.y+rr.size.y*.64-center.y-6)}
+	var gap = minf(46,r.size.x*.12); var width = (r.size.x-gap)/2
+	var side = Rect2(r.position,Vector2(width,r.size.y)) if mark == human_mark else Rect2(r.end.x-width,r.position.y,width,r.size.y)
+	var g = scorecard_geometry(side,mark != human_mark)
+	return {"center":g.center,"radius":g.radius+maxf(2.5,g.radius*.13)*.5+2.2}
+func timer_ring_rect(mark: int) -> Rect2:
+	var g = ring_geometry(mark); var reach = g.radius+3.0
+	return Rect2(g.center-Vector2(reach,reach),Vector2(reach,reach)*2)
+func _draw_timer_ring(mark: int):
+	var info = turn_info()
+	if not info.phase in ["turn","still_there"] or int(info.get("turn",0)) != mark: return
+	var g = ring_geometry(mark)
+	var color = Clock.tier_color(info.tier)
+	# Reduced motion: a steady ring. Otherwise amber/red breathe gently.
+	var alpha = 1.0 if board.reduced_motion or info.tier == "calm" else .82+.18*sin(clock*TAU*1.5)
+	var end = -PI*.5+TAU*float(info.fraction)
+	draw_arc(g.center,g.radius,0,TAU,64,Color(.01,.02,.05,.85),5.5,true)
+	draw_arc(g.center,g.radius,-PI*.5,end,64,Color(color,alpha),4,true)
+	draw_circle(g.center+Vector2.from_angle(end)*g.radius,2.6,Color(color.lightened(.45),alpha))
+func leave_costs_loss() -> bool:
+	return transport.leave_costs_loss() if transport is HTTP else false
+## In-game back: a live match asks first; the copy depends on both_moved.
+func game_back():
+	if mode == "online" and page == "game" and game.status == 0 and remote_ready and is_instance_valid(transport) and not tutorial.active and overlay.is_empty():
+		chat_open = false; callout.callout = ""; overlay = "leave_confirm"; _rebuild(); return
+	go_home()
 func _reset_online_match():
 	if _require_screen_name("online"): return
 	if not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
-	_spotlight_done = false; cinematic.clear(); _debug_capture = false
+	_spotlight_done = false; cinematic.clear(); _debug_capture = false; joined_timer.stop(); end_message = ""
+	_prompt_sent = ""; _moved_turn = ""
 	game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
 	board.clear_effects(); thinking = false; _result_shown = false; match_seconds = 0; message = ""
 	_refresh_labels(); _rebuild(); _begin_versus()
@@ -665,6 +929,19 @@ func _receive_state(state: Dictionary, seq: int):
 			board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
 
 func _online_room_update(data: Dictionary):
+	var you = data.get("you")
+	if you is Dictionary and you.get("name") is String and not str(you.name).is_empty(): _you_name = str(you.name)
+	if is_instance_valid(transport) and not transport.remote_name.is_empty() and transport.remote_name != "Remote player": opponent_name = transport.remote_name
+	var reason = str(data.get("end_reason")) if data.get("end_reason") is String else ""
+	if data.get("status","") == "closed" and end_message.is_empty() and not reason.is_empty():
+		var winner = int(data.result.get("winner",-1)) if data.get("result") is Dictionary else -1
+		end_message = Clock.end_text(reason,winner,transport.seat if is_instance_valid(transport) else human_mark,bool(data.get("opponent_left",false)),opponent_name)
+		if not end_message.is_empty():
+			message = end_message
+			if winner == -1 and page == "game" and not tutorial.active:
+				# No recorded result: a clear "cancelled, no loss" card instead of a winner.
+				remote_ready = false; thinking = false; chat_open = false; callout.callout = ""; overlay = "online_end"; _rebuild()
+			elif winner == -1 and page == "online": online_state = "waiting" if online_state == "joined" else online_state; _rebuild()
 	# Forfeits/timeouts are authoritative full-match results, outside board mechanics.
 	var result = data.get("result")
 	if data.get("status","") in ["finished","closed"] and result is Dictionary and game.status == 0:
@@ -674,7 +951,8 @@ func _online_room_update(data: Dictionary):
 			if not tutorial.active: board.start_win([],game.status)
 			_refresh_labels()
 	if data.get("status","") == "closed" and page == "online":
-		message = "This room is closed. Return to the lobby to play again."; _online_status()
+		message = end_message if not end_message.is_empty() else "This room is closed. Return to the lobby to play again."; _online_status()
+	if page == "game" and overlay == "result" and not end_message.is_empty(): _result_controls_refresh()
 func _name_required() -> bool:
 	return not test_online_bypass and not _debug_capture and not account.store.complete()
 func _require_screen_name(destination: String = "title") -> bool:
@@ -683,6 +961,9 @@ func _require_screen_name(destination: String = "title") -> bool:
 	elif destination == "online": _onboarding_destination = destination
 	return true
 func _notification(what: int):
+	# Backgrounded/unfocused: keep polling, slower, so a brief app switch stays inside the grace.
+	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT,NOTIFICATION_APPLICATION_PAUSED] and transport is HTTP: transport.set_background(true)
+	elif what in [NOTIFICATION_APPLICATION_FOCUS_IN,NOTIFICATION_APPLICATION_RESUMED] and transport is HTTP: transport.set_background(false)
 	if what in [NOTIFICATION_WM_GO_BACK_REQUEST,NOTIFICATION_WM_CLOSE_REQUEST] and is_node_ready():
 		if _require_screen_name(): return
 		get_tree().quit()
@@ -832,6 +1113,7 @@ func _online_action(kind: String, value: String):
 		"demo": create_online(true)
 		"invite": invite_demo_rival()
 		"copy": DisplayServer.clipboard_set(room_code); message = "Room code copied."; _online_status()
+		"chat": toggle_chat()
 func _online_draft(kind: String, value: String):
 	match kind:
 		"screen_name": _onboarding_name = value
@@ -839,9 +1121,14 @@ func _online_draft(kind: String, value: String):
 		"password": _room_password = value
 func _build_online_screen(s: Vector2):
 	online_view = OnlineScreen.new(); online_view.size = s
-	online_view.screen = page if page in ["onboarding","leaderboard"] else online_state
+	online_view.screen = page if page in ["onboarding","leaderboard"] else ("waiting" if online_state == "joined" else online_state)
+	online_view.joined = online_state == "joined"; online_view.hero_id = str(profile.data.character_id)
+	if remote_ready and is_instance_valid(transport): online_view.opponent_name = opponent_name; online_view.opponent_hero = rival_character
+	online_view.chat_button = chat_capable() and online_state in ["waiting","joined"]; online_view.chat_unread = chat_unread
+	online_view.reduced_motion = board.reduced_motion
 	online_view.screen_name = _onboarding_name if page == "onboarding" else str(account.store.data.screen_name)
-	online_view.room_code = room_code if online_state == "waiting" else _room_entry
+	if page == "online" and online_view.screen_name.is_empty(): online_view.screen_name = _you_name if not _you_name.is_empty() else str(settings.values.player_name)
+	online_view.room_code = room_code if online_state in ["waiting","joined"] else _room_entry
 	online_view.password = _room_password; online_view.status = message; online_view.rooms = public_rooms
 	online_view.players = leaderboard_players; online_view.me = leaderboard_me
 	online_view.local_demo = transport is Loopback
@@ -849,11 +1136,14 @@ func _build_online_screen(s: Vector2):
 	online_view.busy = account.busy
 	online_view.action.connect(_online_action); online_view.draft_changed.connect(_online_draft)
 	add_child(online_view); ui_nodes.append(online_view); controls.merge(online_view.controls)
+	if page == "online" and online_state in ["waiting","joined"] and chat_open and chat_capable():
+		var wide = s.x > s.y
+		_build_chat_panel(Rect2(s.x*.5+8,8,s.x*.5-16,s.y-16) if wide else Rect2(8,s.y*.44,s.x-16,s.y*.56-8))
 
 func _clear_nodes():
 	for n in ui_nodes:
 		if is_instance_valid(n): remove_child(n); n.queue_free()
-	ui_nodes.clear(); controls.clear(); online_view = null; email_view = null; history_label = null; _result_bases.clear(); field_heroes.clear(); hero_select = null
+	ui_nodes.clear(); controls.clear(); online_view = null; email_view = null; chat_view = null; prompt_layer = null; history_label = null; _result_bases.clear(); field_heroes.clear(); hero_select = null
 func _button(id: String, caption: String, rect: Rect2, callback: Callable, accent: bool = false, icon: String = ""):
 	var b = OrnateButton.new(); b.name = id; b.caption = caption; b.tooltip_text = caption if not caption.is_empty() else id.capitalize()
 	b.icon_kind = icon
@@ -871,6 +1161,14 @@ func _field(id: String, placeholder: String, rect: Rect2, value: String = ""):
 	e.text_submitted.connect(func(_value): e.release_focus())
 	add_child(e); ui_nodes.append(e); controls[id] = e
 	return e
+func _modal_label(value: String, rect: Rect2, font_size: int, color: Color) -> Label:
+	var label = Label.new(); label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; label.text = value
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font",P.SANS); label.add_theme_font_size_override("font_size",font_size); label.add_theme_color_override("font_color",color)
+	# Size last: before autowrap is on, the unwrapped text would force a wider minimum.
+	label.position = rect.position; label.size = rect.size
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE; add_child(label); ui_nodes.append(label)
+	return label
 func _volume_slider(key: String, caption: String, rect: Rect2):
 	var slider = HSlider.new(); slider.name = key; slider.position = rect.position+Vector2(rect.size.x*.43,0); slider.size = Vector2(rect.size.x*.57,44)
 	slider.min_value = 0; slider.max_value = 1; slider.step = .01; slider.value = settings.values[key]
@@ -914,8 +1212,9 @@ func _rebuild():
 		var hdr: Rect2 = layout.header
 		var big = layout.mode == "landscape"
 		var hb = 52.0 if big else 44.0
-		_button("home","" if not big else "",Rect2(hdr.position,Vector2(hb,hb)),go_home,false,"home" if big else "back")
+		_button("home","" if not big else "",Rect2(hdr.position,Vector2(hb,hb)),game_back,false,"home" if big else "back")
 		_button("settings","⚙",Rect2(Vector2(hdr.end.x-hb,hdr.position.y),Vector2(hb,hb)),show_settings)
+		if mode == "online" and chat_capable(): _chat_button(chat_button_rect())
 		var cr: Rect2 = layout.controls
 		# Round 3e: Undo/Hint only vs the computer; the X/O tiles stay centred without them.
 		if mode != "computer": pass
@@ -929,6 +1228,7 @@ func _rebuild():
 		if controls.has("hint"): controls.hint.disabled = not settings.values.show_hints
 		if layout.has("history"): _create_history(layout.history)
 		_create_field_heroes()
+		if mode == "online" and overlay.is_empty(): _online_game_chrome()
 	elif page in ["online","onboarding","leaderboard"]: _build_online_screen(s)
 	elif page == "email": _build_email_screen(s)
 	if is_instance_valid(lobby_timer):
@@ -947,7 +1247,7 @@ func _rebuild():
 		move_child(tutorial,get_child_count()-1)
 		tutorial.relayout(layout)
 	elif overlay == "account": _build_email_screen(s)
-	elif overlay == "result": _winner_controls(s)
+	elif overlay == "result": _winner_controls(s); _result_chat()
 	elif not overlay.is_empty(): _overlay_controls(s)
 	queue_redraw()
 func _create_field_heroes():
@@ -1053,6 +1353,8 @@ func _overlay_controls(s: Vector2):
 	if overlay == "setup": ph = minf(410,s.y-24)
 	if overlay == "settings" and not short: ph = minf(670,s.y-24)
 	if overlay == "result": pw = minf(pw,460); ph = minf(340,s.y-24)
+	if overlay in ["leave_confirm","online_end"]: pw = minf(440,s.x-28); ph = minf(300,s.y-24)
+	if overlay == "blocked": pw = minf(460,s.x-28); ph = minf(480,s.y-24)
 	_modal_rect = Rect2((s.x-pw)/2,(s.y-ph)/2,pw,ph)
 	if layout.hinge.size.x > 0:
 		pw = minf(pw,s.x-layout.hinge.end.x-24)
@@ -1061,7 +1363,7 @@ func _overlay_controls(s: Vector2):
 	var painter = Control.new(); painter.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	painter.mouse_filter = Control.MOUSE_FILTER_IGNORE; painter.draw.connect(_draw_modal.bind(painter)); add_child(painter); ui_nodes.append(painter)
 	var r = _modal_rect
-	if overlay != "result": _button("close","×",Rect2(r.end.x-56,r.position.y+10,44,44),_close_overlay)
+	if overlay not in ["result","online_end"]: _button("close","×",Rect2(r.end.x-56,r.position.y+10,44,44),(func(): overlay = "settings"; _rebuild()) if overlay == "blocked" else _close_overlay)
 	if overlay == "setup":
 		var y = r.position.y+(76 if short else 94); var step = (pw-56)/3
 		for i in range(3):
@@ -1105,11 +1407,19 @@ func _overlay_controls(s: Vector2):
 		_button("replay_tutorial","How to play",Rect2(lx+sw*.52+4,r.end.y-116,sw*.48-4,44),func(): start_tutorial(true))
 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
 		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
+		# Round 5a: blocked-player list only when the server advertises chat.
+		if social.chat() and not test_online_bypass and account.store.complete():
+			_button("blocked_players","Blocked players",Rect2(lx,r.end.y-170,sw,44),open_blocked_players)
 		if short:
 			controls.account_email.position = Vector2(name_x,r.position.y+120); controls.account_email.size = Vector2(sw,44)
 			controls.replay_tutorial.position = Vector2(name_x,r.position.y+170); controls.replay_tutorial.size = Vector2(sw,44)
 			controls.done.size.x = (pw-48)*.48
 			controls.cosmetics.position.x = lx+(pw-48)*.52; controls.cosmetics.size.x = (pw-48)*.48
+			if controls.has("blocked_players"):
+				if r.position.y+264 <= r.end.y-62: controls.blocked_players.position = Vector2(name_x,r.position.y+220); controls.blocked_players.size = Vector2(sw,44)
+				else:
+					controls.account_email.size.x = (sw-8)*.5
+					controls.blocked_players.position = Vector2(name_x+(sw+8)*.5,r.position.y+120); controls.blocked_players.size = Vector2((sw-8)*.5,44)
 	elif overlay == "cosmetics":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
 		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.BACKGROUNDS).name,Rect2(x,y,w,44),func():
@@ -1123,6 +1433,34 @@ func _overlay_controls(s: Vector2):
 
 	elif overlay == "how":
 		_button("done","I’m ready",Rect2(r.position.x+24,r.end.y-70,pw-48,48),_close_overlay,true)
+	elif overlay in ["leave_confirm","online_end"]:
+		var body = Clock.leave_copy(leave_costs_loss()) if overlay == "leave_confirm" else end_message
+		var label = _modal_label(body,Rect2(r.position.x+24,r.position.y+72,pw-48,r.size.y-200),20,P.PALE)
+		label.name = "ModalCopy"; controls["modal_copy"] = label
+		var half = (pw-60)*.5; var y = r.end.y-70
+		if overlay == "leave_confirm":
+			_button("leave_match","Leave match",Rect2(r.position.x+24,y,half,52),go_home)
+			_button("stay","Stay",Rect2(r.position.x+36+half,y,half,52),_close_overlay,true)
+			if leave_costs_loss() == false and transport is HTTP and transport.online2:
+				_modal_label("First moves — no-shows cancel with no loss",Rect2(r.position.x+24,y-34,pw-48,26),14,P.MUTED)
+		else:
+			_button("end_lobby","Online lobby",Rect2(r.position.x+24,y,half,52),open_online,true)
+			_button("end_menu","Main menu",Rect2(r.position.x+36+half,y,half,52),go_home)
+	elif overlay == "blocked":
+		var scroll = ScrollContainer.new(); scroll.position = r.position+Vector2(24,76); scroll.size = Vector2(pw-48,r.size.y-76-128)
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; add_child(scroll); ui_nodes.append(scroll)
+		var rows = VBoxContainer.new(); rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL; rows.add_theme_constant_override("separation",6); scroll.add_child(rows)
+		for blocked_name in social.blocks:
+			var row = HBoxContainer.new(); row.add_theme_constant_override("separation",8); rows.add_child(row)
+			var label = Label.new(); label.text = blocked_name; label.size_flags_horizontal = Control.SIZE_EXPAND_FILL; label.clip_text = true
+			label.add_theme_font_override("font",P.SANS); label.add_theme_font_size_override("font_size",20); label.add_theme_color_override("font_color",P.WHITE)
+			row.add_child(label)
+			var unblock = OrnateButton.new(); unblock.name = "unblock_"+blocked_name; unblock.caption = "Unblock"; unblock.custom_minimum_size = Vector2(112,44)
+			unblock.pressed.connect(func(): sound.cue("ui"); blocked_status = "Unblocking…" if social.unblock(blocked_name) else "Couldn't unblock right now."; _rebuild())
+			row.add_child(unblock); controls[unblock.name] = unblock
+		if social.blocks.is_empty() and blocked_status.is_empty(): blocked_status = "No blocked players."
+		controls["blocked_status"] = _modal_label(blocked_status,Rect2(r.position.x+24,r.end.y-122,pw-48,48),16,P.GOLD)
+		_button("done","Settings",Rect2(r.position.x+24,r.end.y-66,pw-48,48),func(): overlay = "settings"; _rebuild(),true)
 	elif overlay == "result":
 		_button("again","Play Again",Rect2(r.position.x+26,r.end.y-122,pw-52,50),func():
 			if mode == "online": open_online()
@@ -1183,7 +1521,9 @@ func _draw_game():
 	var u = _u()
 	if not board.win_fx.is_empty(): _draw_victory_rays(board.win_progress(),int(board.win_fx.player))
 	_draw_players(layout.players,layout.mode == "landscape")
-	_draw_turn(layout.turn,u)
+	var turn_r: Rect2 = layout.turn
+	if mode == "online" and chat_capable() and layout.mode == "phone_portrait": turn_r.size.x = minf(turn_r.size.x,chat_button_rect().position.x-6-turn_r.position.x)
+	_draw_turn(turn_r,u)
 	if layout.info.size.y > 0: _draw_info(layout.info,layout.mode == "landscape",u)
 	if layout.has("minimap"): _draw_minimap(layout.minimap)
 	if layout.has("stats"): _draw_stats(layout.stats)
@@ -1209,17 +1549,28 @@ func _draw_game():
 		return
 	if not message.is_empty():
 		P.text(self,message,layout.message,12,P.GOLD)
+	else:
+		var lines = online_lines()
+		var joined_line = "   ·   ".join(lines.filter(func(v): return not v.is_empty()))
+		if not joined_line.is_empty(): P.text(self,fit_label(joined_line,layout.message.size.x,13),layout.message,13,_online_line_color())
 	if hint_busy: P.text(self,"Reading the threads…",Rect2(layout.board.position.x,layout.board.end.y-22,layout.board.size.x,20),14,P.PALE)
 ## Round 3e phone portrait has no info panel: one slim lane under the board carries
 ## messages, "Reading the threads…", the result, else a quiet "Play X in Center" hint.
 func _draw_phone_lane(r: Rect2):
 	var fs = int(minf(13,r.size.y-2))
+	var lines = online_lines()
+	if not lines[1].is_empty(): P.text(self,fit_label(lines[1],r.size.x,11),Rect2(r.position.x,r.end.y+1,r.size.x,14),11,Color(P.MUTED,.85))
 	if not message.is_empty(): P.text(self,fit_label(message,r.size.x,fs),r,fs,P.GOLD)
+	elif not lines[0].is_empty(): P.text(self,fit_label(lines[0],r.size.x,fs),r,fs,_online_line_color())
 	elif hint_busy: P.text(self,"Reading the threads…",r,fs,P.PALE)
 	elif game.status != 0: P.text(self,result_line(),r,fs,P.mark_color(game.status) if game.status != 3 else P.MUTED)
 	else:
 		var where = "any open board" if game.active_board == -1 else Rules.BOARD_NAMES[game.active_board]
 		P.text(self,"Play "+("X" if game.turn == 1 else "O")+" in "+where,r,fs,Color(P.MUTED,.9))
+func _online_line_color() -> Color:
+	if not transport is HTTP or transport.reconnecting or transport.room.get("opponent_connected") == false: return P.GOLD
+	var info = turn_info()
+	return Clock.tier_color(info.tier) if info.phase in ["turn","still_there"] and info.tier != "calm" else P.PALE
 func _draw_turn(r: Rect2, u: float):
 	P.panel(self,r,false,1,r.size.y >= 34)
 	var fs = int(clampf(r.size.y*.56,15,28)*minf(u,1.2))
@@ -1296,6 +1647,7 @@ func _draw_player(r: Rect2, mark: int, caption: String, active: bool, style: Str
 		var ir = 12*u
 		P.mark(self,Vector2(r.get_center().x,name_y+30*u+ir+4),ir,mark)
 		P.text(self,"%d claimed" % game.owners.count(mark),Rect2(r.position.x+6,name_y+30*u+ir*2+10,r.size.x-12,24*u),int(17*u),col if mark == 1 else P.PALE)
+		if mode == "online": _draw_timer_ring(mark)
 		return
 	var right = style == "right"
 	var g = scorecard_geometry(r,right)
@@ -1310,6 +1662,7 @@ func _draw_player(r: Rect2, mark: int, caption: String, active: bool, style: Str
 	if c.icon > 0: P.mark(self,Vector2(lx+c.icon,ly),c.icon,mark)
 	P.text(self,c.text,Rect2(lx+c.icon*2.6,ly-10,c.width-c.icon*2.6+6,20),c.fs,col if mark == 1 else P.PALE,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 	_medallion(center,radius,mark,portrait,active,rival_thinking)
+	if mode == "online": _draw_timer_ring(mark)
 	# Crown rides above the name, clear of the corner header buttons.
 	if active: P.crown(self,Vector2(g.text.get_center().x,r.position.y+1),.5)
 ## Round 3c: horizontal scorecard geometry. The name and "claimed" lanes end before the
@@ -1502,7 +1855,8 @@ func _draw_modal(node: Control):
 		_draw_result(node,r,short); return
 	node.draw_rect(Rect2(Vector2.ZERO,s),Color(.001,.005,.015,.88))
 	P.panel(node,r,false,1,true); P.outline(node,r.grow(-8),P.GOLD.darkened(.4),1)
-	var heading = {"settings":"SETTINGS","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS"}.get(overlay,"")
+	var heading = {"settings":"SETTINGS","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
+	if overlay == "online_end": heading = Clock.cancelled_title(str(transport.room.get("end_reason","")) if transport is HTTP else "")
 	P.text(node,heading,Rect2(r.position+Vector2(20,23),Vector2(r.size.x-72,44)),25,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
 	if overlay == "setup":
 		if not short: P.text(node,"Choose difficulty, then your sigil",Rect2(r.position+Vector2(20,65),Vector2(r.size.x-40,25)),17,P.MUTED)
@@ -1779,6 +2133,10 @@ func debug_refresh():
 	for n in ui_nodes:
 		if is_instance_valid(n): n.queue_redraw()
 
+func _result_chat():
+	if mode != "online" or not chat_capable(): return
+	_chat_button(chat_button_rect(),31)
+	if chat_open: _build_chat_panel(ChatPanel.panel_rect(layout),41)
 func _winner_controls(s: Vector2):
 	var g = Cinematic.card_geometry(s,"draw" if game.status == 3 else "spotlight")
 	for item in [["again","REMATCH",g.again,rematch,true],["menu","MAIN MENU",g.menu,go_home,false]]:

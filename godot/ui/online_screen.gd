@@ -3,6 +3,8 @@ extends Control
 const P = preload("res://ui/paint.gd")
 const ButtonArt = preload("res://ui/ornate_button.gd")
 const Roster = preload("res://characters/roster.gd")
+const HeroRig = preload("res://characters/art.gd")
+const ChatPanel = preload("res://ui/chat_panel.gd")
 const TERMS_URL = "https://nineweave.grok.me/terms"
 const PRIVACY_URL = "https://nineweave.grok.me/privacy"
 const AGREEMENT = "By creating a screen name, you agree to our Terms of Service and Privacy Policy and confirm you are 13 or older or have a parent or guardian's permission."
@@ -26,6 +28,16 @@ var link_opener: Callable
 var status_label: Label
 var _name_rect: Rect2
 var _panel: Rect2
+## Round 5a waiting room.
+var hero_id: String = "vesper_vale"
+var opponent_name: String = ""
+var opponent_hero: String = ""
+var joined: bool = false
+var chat_button: bool = false
+var chat_unread: int = 0
+var reduced_motion: bool = false
+var _you_rect: Rect2
+var _opp_rect: Rect2
 class PublicRoomButton extends "res://ui/ornate_button.gd":
 	var host_name: String
 	var hero_name: String
@@ -164,23 +176,79 @@ func _private_form():
 			if child is Label and child != status_label and child.position.y == 104: child.visible = false
 		status_label.position = Vector2(20,220); status_label.size = Vector2(size.x-40,80)
 func _waiting():
-	_header("LOCAL ONLINE DEMO" if local_demo else "WAITING FOR A RIVAL")
-	var w = minf(440,size.x-40); var x = (size.x-w)/2; var y = maxf(110,size.y*.24)
-	if size.y < 450: y = 100
-	_label(room_code,Rect2(x,y,w,58),42,P.PALE,true)
-	_label("LOCAL DEMO" if local_demo else ("PRIVATE GAME · share code + password" if private_room else "PUBLIC GAME · listed in the lobby"),Rect2(x,y+60,w,32),18,P.BLUE)
-	_button("copy","Copy code",Rect2(x,y+104,w*.48,44),"copy")
-	_button("cancel","Cancel / Leave",Rect2(x+w*.52,y+104,w*.48,44),"lobby")
-	if local_demo: _button("demo_join","Invite demo rival",Rect2(x,y+158,w,44),"invite","",true)
-	_status(Rect2(x,y+212 if size.y >= 450 else y+152,w,72 if size.y >= 450 else 54))
-	if size.y < 450:
-		var half = (size.x-56)*.5
-		controls.copy.position = Vector2(36+half,106); controls.copy.size = Vector2(half,44)
-		controls.cancel.position = Vector2(36+half,160); controls.cancel.size = Vector2(half,44)
-		if local_demo: controls.demo_join.position = Vector2(36+half,214); controls.demo_join.size = Vector2(half,44)
-		for child in get_children():
-			if child is Label and child != status_label and child.position.y in [y,y+60]: child.size.x = half
-		status_label.position = Vector2(20,202); status_label.size = Vector2(half,94)
+	# Round 5a: code, both seats with hero + screen name, Leave (no penalty) and chat.
+	var wide = size.x > size.y and size.y < 600
+	var title = (opponent_name+" joined") if joined else ("LOCAL ONLINE DEMO" if local_demo else "Waiting for other player…")
+	var privacy = "LOCAL DEMO" if local_demo else ("PRIVATE GAME · share code + password" if private_room else "PUBLIC GAME · listed in the lobby")
+	if joined: privacy = "Get ready — the match is starting"
+	var col_w = (size.x-56)*.5 if wide else minf(460,size.x-40)
+	var x = 20.0 if wide else (size.x-col_w)/2
+	var y = 12.0 if wide else maxf(20,size.y*.03)
+	var top = y
+	var title_label = _label(title,Rect2(x,y,col_w,40),P.fit_size(title,col_w-(60 if wide and chat_button else 12),22 if wide else 25,P.SERIF),P.PALE,true); title_label.name = "WaitingTitle"
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; title_label.autowrap_mode = TextServer.AUTOWRAP_OFF; title_label.clip_text = true
+	y += 44 if wide else 52
+	if not wide: _label("ROOM CODE",Rect2(x,y,col_w,20),14,P.GOLD).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; y += 20
+	var code_label = _label(room_code,Rect2(x,y,col_w,54 if wide else 60),40 if wide else 48,P.PALE,true); code_label.name = "RoomCode"
+	code_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	y += 54 if wide else 62
+	var line = _label(privacy,Rect2(x,y,col_w,26),16 if wide else 17,P.BLUE); line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	y += 32
+	var row_w = col_w
+	_button("copy","Copy code",Rect2(x,y,row_w*.48,44),"copy")
+	_button("cancel","Leave",Rect2(x+row_w*.52,y,row_w*.48,44),"lobby")
+	_panel = Rect2(x-10,top-8,col_w+20,y+44+12-top)
+	y += 52
+	if local_demo: _button("demo_join","Invite demo rival",Rect2(x,y,col_w,44),"invite","",true); y += 52
+	if chat_button:
+		var chat = ChatPanel.ChatButton.new(); chat.name = "chat"; chat.unread = chat_unread
+		chat.tooltip_text = "Chat"; chat.pressed.connect(func(): action.emit("chat",""))
+		add_child(chat); controls["chat"] = chat
+	# Seats: you (left) and the rival slot (right).
+	var seats: Rect2
+	if wide: seats = Rect2(36+col_w,12,size.x-56-col_w,size.y-24)
+	else:
+		var bottom = size.y-150
+		seats = Rect2(x,y+6,col_w,maxf(150,bottom-y-6))
+	var gap = 16.0
+	var sw = (seats.size.x-gap)*.5
+	var portrait = minf(sw,seats.size.y-62)
+	# Centre the two seats in the space left between the code block and Leave.
+	seats.position.y += maxf(0,(seats.size.y-portrait-58)*.5)
+	_you_rect = Rect2(seats.position.x,seats.position.y,sw,portrait+58)
+	_opp_rect = Rect2(seats.position.x+sw+gap,seats.position.y,sw,portrait+58)
+	_seat(_you_rect,hero_id,screen_name if not screen_name.is_empty() else "You",1)
+	if joined or not opponent_hero.is_empty():
+		_seat(_opp_rect,opponent_hero if Roster.valid(opponent_hero) else "auric_rex",opponent_name if not opponent_name.is_empty() else "Rival",-1)
+	else:
+		var waiting = _label("Waiting…",Rect2(_opp_rect.position.x,_opp_rect.end.y-54,_opp_rect.size.x,26),18,P.MUTED); waiting.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if wide:
+		_status(Rect2(x,y,col_w,maxf(40,size.y-y-8)))
+		if chat_button:
+			controls.chat.position = Vector2(x+col_w-52,12); controls.chat.size = Vector2(52,48)
+			title_label.size.x = col_w-60; title_label.position.x = x
+	else:
+		var by = size.y-140
+		if chat_button:
+			controls.chat.position = Vector2(x+col_w-56,by); controls.chat.size = Vector2(56,52)
+		_status(Rect2(x,by+60,col_w,maxf(40,size.y-by-66)))
+		# Leave is the prominent bottom action on phones; Copy stays beside the code.
+		controls.cancel.position = Vector2(x,by); controls.cancel.size = Vector2(col_w-(64 if chat_button else 0),52)
+		controls.copy.position = Vector2(x+(col_w-col_w*.6)*.5,controls.copy.position.y); controls.copy.size.x = col_w*.6
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+func _process(_delta):
+	if screen == "waiting" and not joined and not reduced_motion: queue_redraw()
+func _seat(rect: Rect2, id: String, name_value: String, facing: int):
+	var size_px = minf(rect.size.x,rect.size.y-58)
+	var rig = HeroRig.new(); rig.hero_id = Roster.canonical_id(id) if Roster.valid(id) else "vesper_vale"
+	rig.side = 1 if facing > 0 else 2; rig.facing = facing; rig.bust = true; rig.reduced_motion = reduced_motion
+	rig.position = Vector2(rect.get_center().x-size_px*.5,rect.position.y+4); rig.size = Vector2(size_px,size_px-6)
+	rig.mouse_filter = Control.MOUSE_FILTER_IGNORE; add_child(rig)
+	var label = _label(name_value,Rect2(rect.position.x,rect.end.y-54,rect.size.x,26),20,P.WHITE)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; label.autowrap_mode = TextServer.AUTOWRAP_OFF; label.clip_text = true
+	label.name = "SeatName" if facing > 0 else "OpponentName"
+	var hero = _label(Roster.get_hero(rig.hero_id).name,Rect2(rect.position.x,rect.end.y-28,rect.size.x,22),15,P.GOLD)
+	hero.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; hero.autowrap_mode = TextServer.AUTOWRAP_OFF; hero.clip_text = true
 func _leaderboard():
 	_header("HALL OF VICTORS","lobby")
 	var w = minf(640,size.x-40); var x = (size.x-w)/2
@@ -219,6 +287,16 @@ func open_legal(link):
 	else: OS.shell_open(str(link))
 func _draw():
 	if _panel.has_area(): P.panel(self,_panel,false,1,true)
+	if screen == "waiting" and _you_rect.has_area():
+		for r in [_you_rect,_opp_rect]: P.panel(self,r,r == _opp_rect and joined,1,r.size.y >= 120)
+		if not joined and opponent_hero.is_empty():
+			var c = Vector2(_opp_rect.get_center().x,_opp_rect.position.y+(_opp_rect.size.y-58)*.5)
+			var radius = minf(_opp_rect.size.x,_opp_rect.size.y-58)*.3
+			var spin = 0.0 if reduced_motion else P.clock*1.4
+			for i in range(12):
+				var a = spin+i*TAU/12
+				draw_arc(c,radius,a,a+TAU/24,6,Color(P.GOLD,.75),2,true)
+			P.text(self,"?",Rect2(c-Vector2(radius,radius),Vector2(radius*2,radius*2)),int(radius*1.1),P.PALE,P.SERIF)
 	if not _name_rect.has_area(): return
 	var r = _name_rect; var field = controls.get("screen_name")
 	var edge = P.BLUE if is_instance_valid(field) and field.has_focus() else P.GOLD

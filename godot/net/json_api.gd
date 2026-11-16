@@ -2,6 +2,7 @@ extends Node
 ## Shared JSON boundary. Injectable HTTPRequest factory keeps every test off network.
 const LIVE_ORIGIN = "https://nineweave.grok.me"
 const API_PATH = "/api/nineweave"
+const Clock = preload("res://net/turn_clock.gd")
 signal completed(operation: String, response: int, data: Dictionary, problem: String)
 var base_url: String = LIVE_ORIGIN
 var request_factory: Callable
@@ -15,8 +16,11 @@ static func authorization(credential: String) -> PackedStringArray:
 	if not credential.is_empty(): headers.append("Authorization: Bearer "+credential)
 	return headers
 func _ready():
-	if OS.has_feature("web") and base_url == LIVE_ORIGIN:
-		base_url = origin_base(str(JavaScriptBridge.eval("window.location.origin")))
+	if OS.has_feature("web"):
+		# Local QA only: ?api=http://127.0.0.1:PORT is honoured on a localhost page, never elsewhere.
+		var local = Clock.api_override(str(JavaScriptBridge.eval("window.location.hostname")),str(JavaScriptBridge.eval("(new URLSearchParams(window.location.search)).get('api')||''")))
+		if not local.is_empty(): base_url = local
+		elif base_url == LIVE_ORIGIN: base_url = origin_base(str(JavaScriptBridge.eval("window.location.origin")))
 	_request = request_factory.call() if request_factory.is_valid() else HTTPRequest.new()
 	_request.timeout = 8.0; add_child(_request)
 	_request.request_completed.connect(_complete)

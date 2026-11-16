@@ -51,7 +51,7 @@ if git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   TAG=$(git -C "$REPO" describe --tags --exact-match 2>/dev/null || true)
 fi
 cat > "$OUT/BUILD_INFO.txt" <<INFO
-Nineweave Round 5p (trimmed Kellen intro)
+Nineweave Round 5q (measured victory text spacing)
 engine: $("$GODOT" --headless --version)
 preset: Web / Compatibility / variant/thread_support=false
 mode: $MODE
@@ -74,6 +74,19 @@ find "$ROOT/assets/hero_video" -type f -name '*.ogv' | while IFS= read -r clip; 
   cp "$clip" "$OUT/hero_video/$rel"
 done
 python3 "$ROOT/tools/check_hero_video_pack.py" "$ROOT" "$OUT" || status=1
+# Content-addressed pack request prevents an old cached PCK mixing with new HTML.
+python3 - "$OUT" <<'PYCODE'
+from pathlib import Path
+import hashlib,json,re,sys
+out=Path(sys.argv[1]); p=out/'index.html'; text=p.read_text()
+match=re.search(r'const GODOT_CONFIG = (\{.*?\});',text)
+config=json.loads(match.group(1)); key='index.pck?v='+hashlib.sha256((out/'index.pck').read_bytes()).hexdigest()[:16]
+config['mainPack']=key
+config['fileSizes'][key]=config['fileSizes']['index.pck']
+text=text[:match.start(1)]+json.dumps(config,separators=(',',':'))+text[match.end(1):]
+p.write_text(text)
+PYCODE
+
 # Round 3b: every owner recording must be packed as an imported stream.
 oggs=0
 for ogg in "$ROOT"/assets/audio/*/*.ogg; do

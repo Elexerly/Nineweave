@@ -745,13 +745,58 @@ func _wrapped(value: String, rect: Rect2, fs: int, color: Color):
 	var line_h = minf(P.SANS.get_height(fs)+2,rect.size.y/maxi(1,lines.size()))
 	for i in range(lines.size()):
 		P.text(front,lines[i],Rect2(rect.position+Vector2(0,i*line_h),Vector2(rect.size.x,line_h)),fs,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+## Shared by rendering and tests: every next baseline follows the measured
+## previous block, including font ascent/descent, keyline and inter-block padding.
+func result_text_layout(s: Vector2) -> Array:
+	var g = combined_geometry(s)
+	var short = s.y < 500
+	var title_fs = 40 if short or s.x < 700 else 48
+	var name_fs = 24 if short else (28 if s.x < 700 else 32)
+	var body_fs = 22 if short else (20 if s.x < 700 else 24)
+	var score_fs = 16 if short or s.x < 700 else 20
+	var winner = R.get_hero(winner_id).name
+	var defeated = R.get_hero(loser_id).name
+	var values = [result_title,winner_name+" WINS",winner+" won and defeated "+defeated+".",result_score]
+	var fonts = [title_fs,name_fs,body_fs,score_fs]
+	var colors = [P.GOLD,P.WHITE,P.PALE,P.MUTED]
+	var gap = 12.0 if short else 14.0
+	var text_top = 46.0 if short else maxf(64,minf(s.y*.14,90))
+	var width: float = g.name.size.x
+	var available: float = g.again.position.y-text_top-18
+	var sections: Array = []
+	for attempt in range(40):
+		sections.clear()
+		var y: float = text_top
+		for i in range(values.size()):
+			var fs: int = fonts[i]
+			# A single long screen name must fit without hidden per-line shrinking.
+			for word in values[i].split(" "):
+				fs = mini(fs,P.fit_size(word,width-12,fs,P.SANS))
+			var lines = wrapped_lines(values[i],width-12,fs)
+			var border = maxi(2,int(fs*.14))
+			var line_h = P.SANS.get_ascent(fs)+P.SANS.get_descent(fs)+border*2+4
+			var rect = Rect2(g.name.position.x,y,width,lines.size()*line_h)
+			sections.append({"lines":lines,"font_size":fs,"border":border,"line_height":line_h,"rect":rect,"color":colors[i]})
+			y = rect.end.y+gap
+		if y-gap-text_top <= available:
+			if not result_detail.is_empty():
+				var fs = 14 if s.x < 700 else 18
+				var lines = wrapped_lines(result_detail,width-12,fs)
+				var border = maxi(2,int(fs*.14))
+				var line_h = P.SANS.get_ascent(fs)+P.SANS.get_descent(fs)+border*2+4
+				if y+lines.size()*line_h <= g.again.position.y-18:
+					sections.append({"lines":lines,"font_size":fs,"border":border,"line_height":line_h,"rect":Rect2(g.name.position.x,y,width,lines.size()*line_h),"color":P.PALE})
+			return sections
+		# Preserve the display hierarchy. Only shrink to fit a genuinely short view.
+		for i in range(fonts.size()): fonts[i] = maxi(11,fonts[i]-1)
+	return sections
 func _draw_combined():
 	var s = region.size; var g = combined_geometry(s)
 	P.text(front,"NINEWEAVE / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
 	P.outline(front,g.hero.grow(2),Color(P.GOLD,.55),1)
-	_wrapped(result_title,g.name,40 if s.y < 500 or s.x < 700 else 56,P.GOLD)
-	_wrapped(winner_name+" WINS",g.names,24 if s.y < 500 else (28 if s.x < 700 else 34),P.WHITE)
-	var winner = R.get_hero(winner_id).name; var defeated = R.get_hero(loser_id).name
-	_wrapped(winner+" won and defeated "+defeated+".",g.outcome,22 if s.y < 500 else (20 if s.x < 700 else 30),P.PALE)
-	_wrapped(result_score,g.score,16 if s.x < 700 or s.y < 500 else 22,P.MUTED)
-	if g.detail.size.y >= 40: _wrapped(result_detail,g.detail,14 if s.x < 700 else 18,P.PALE)
+	for section in result_text_layout(s):
+		var fs: int = section.font_size
+		for i in range(section.lines.size()):
+			var baseline = section.rect.position+Vector2(4,section.border+P.SANS.get_ascent(fs)+i*section.line_height)
+			front.draw_string_outline(P.SANS,baseline+Vector2(0,1),section.lines[i],HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.border,Color(0,0,0,.75))
+			front.draw_string(P.SANS,baseline,section.lines[i],HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.color)

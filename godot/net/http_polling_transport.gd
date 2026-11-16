@@ -11,7 +11,7 @@ signal chat_failed(message: String)
 signal chat_sent
 signal link_changed(reconnecting: bool)
 signal clock_changed
-const ROOM_KEYS = ["status","private","opponent","opponent_left","result","end_reason","turn_expires_at","protocol","turn_started_at","still_there_at","still_here_used","turn_seconds","still_there_seconds","grace_seconds","both_moved","opponent_joined_at","opponent_last_seen_at","opponent_connected","you","players","poll_after_ms"]
+const ROOM_KEYS = ["tournament","status","private","opponent","opponent_left","result","end_reason","turn_expires_at","protocol","turn_started_at","still_there_at","still_here_used","turn_seconds","still_there_seconds","grace_seconds","both_moved","opponent_joined_at","opponent_last_seen_at","opponent_connected","you","players","poll_after_ms"]
 var base_url: String = LIVE_ORIGIN
 var device_token: String = ""
 var token: String = "" # Seat only; never copied into the device store.
@@ -251,5 +251,14 @@ func leave() -> void:
 	room = {}; chat_since = 0; chat_log = []; _chat_ids = {}; _chat_busy = false; _still_here_turn = ""; _last_stamp = 0.0
 	reconnecting = false; poll_failures = 0; chat_retry_until = 0.0
 func request_rematch() -> void:
+	if room.get("tournament") is Dictionary: return
 	if _inflight not in ["","poll"] or local_rematch or token.is_empty(): return
 	_send("/rooms/"+code+"/rematch",HTTPClient.METHOD_POST,{"round":match_round,"token":token},"rematch")
+
+func enter_tournament_match(match_info: Dictionary):
+	# Already seated by online3: never POST /join or use the device token as a seat.
+	code = str(match_info.get("room_code","")); token = str(match_info.get("token","")); seat = int(match_info.get("seat",0))
+	if code.is_empty() or token.is_empty() or not seat in [1,2]:
+		code = ""; token = ""; error.emit("Your tournament match is not ready. Return to the bracket."); return
+	private_room = true; room = {"status":"waiting","tournament":{"rematch":false}}
+	connected.emit(); joined.emit(code,seat); _poll()

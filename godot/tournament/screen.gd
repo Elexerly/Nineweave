@@ -44,7 +44,7 @@ func _ready():
 	video_overlay.set_sound_enabled(sound_enabled); video_overlay.z_index = 50; add_child(video_overlay)
 	# Consume the complete skip gesture above the outcome buttons. A tap on a
 	# full-screen clip must not accidentally start another tournament underneath.
-	video_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	video_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	video_overlay.gui_input.connect(_video_input)
 	video_overlay.finished.connect(func(): video_overlay.clear())
 	queue_redraw()
@@ -61,7 +61,7 @@ func _process(delta):
 	if data.status == "champion" and age >= .95 and not _video_attempted:
 		_video_attempted = true
 		if play_victory and not reduced_motion:
-			victory_started.emit(); video_overlay.begin("spotlight",data.hero,"",1,size)
+			victory_started.emit(); video_overlay.display_lane = geo.hero; video_overlay.begin("spotlight",data.hero,"",1,size)
 	queue_redraw()
 func _gui_input(event):
 	var tap = (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed) or (event is InputEventScreenTouch and event.pressed)

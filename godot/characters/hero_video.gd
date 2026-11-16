@@ -45,7 +45,14 @@ func prefetch_hero(hero_id: String):
 		prefetch_requested.emit(id,kind)
 		if streaming() and has_clip(id,kind): cache.prefetch(id,kind)
 func prefetch_pair(first: String, second: String):
-	prefetch_hero(first); prefetch_hero(second)
+	# Both intros share the two download slots before either victory is queued.
+	for kind in KINDS:
+		for raw_id in [first,second]:
+			var id = Roster.canonical_id(raw_id)
+			if not Roster.valid(id): continue
+			prefetch_requested.emit(id,kind)
+			if streaming() and has_clip(id,kind): cache.prefetch(id,kind)
+	if streaming(): cache.prioritize_intros(first,second)
 func is_ready(hero_id: String, kind: String) -> bool:
 	if not has_clip(hero_id,kind): return false
 	if streaming(): return cache.is_ready(hero_id,kind)

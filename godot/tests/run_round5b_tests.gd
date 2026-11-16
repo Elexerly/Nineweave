@@ -131,6 +131,8 @@ func controller_cases():
 	var bundle = make_ui("flow"); var ui = bundle.ui
 	ok(ui.controls.has_all(["computer","tournament","online","local"]),"Tournament added alongside existing modes")
 	ui.controls.tournament.pressed.emit()
+	ok(ui.online_tournament.state == "chooser","Tournament opens mode chooser")
+	ui.controls.computer.pressed.emit()
 	ok(ui.page == "character_select" and ui._pending_game.mode == "tournament","Tournament uses existing hero selection")
 	ui.hero_select._confirm()
 	ok(ui.page == "tournament" and ui.tournament.session.active.hero == "shard_jack","hero lock-in enters bracket")
@@ -260,7 +262,7 @@ func champion_video():
 		# Round 5v supplies victory clips for both heroes, including Jack.
 		ok(screen.video_overlay.visible,"champion plays available victory clip for "+hero)
 		ok(screen.video_overlay.scene_kind == "spotlight" and screen.video_overlay.sides[0].kind == "victory","champion uses existing victory video layer")
-		ok(screen.video_overlay.mouse_filter == Control.MOUSE_FILTER_STOP,"video shields Try Again and Main Menu")
+		ok(screen.video_overlay.mouse_filter == Control.MOUSE_FILTER_IGNORE and not screen.video_overlay.sides[0].frame.intersects(screen.geo.primary),"champion video leaves outcome actions accessible")
 		var release = InputEventMouseButton.new(); release.button_index = MOUSE_BUTTON_LEFT; release.pressed = false
 		screen._video_input(release)
 		ok(not screen.video_overlay.visible and ui.tournament.session.active.status == "champion","clip skip reveals champion without activating another run")

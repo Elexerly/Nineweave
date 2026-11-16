@@ -120,7 +120,7 @@ func winner_flow(ui):
 		ui._show_spotlight()
 		ok(ui.cinematic.winner_caption() == case[3] and ui.cinematic.hero.hero_id == case[4],"winner identity "+case[3])
 		ok(ui.cinematic.hero.art_key == "victory" and ui.cinematic.duration() == 5,"victory pose and 5-second cutscene")
-		ui.cinematic.advance(.79); ok(not ui.cinematic.skip() and not ui.controls.has("again"),"winner short protected entrance")
+		ui.cinematic.advance(.79); ok(not ui.cinematic.skip() and ui.controls.has("again"),"clip skip guarded while combined actions are available")
 		ui.cinematic.advance(.02); ok(ui.cinematic.skip() and ui.controls.has_all(["again","menu"]),"tap skips to buttons after 800ms")
 		ok(ui.cinematic.visible and not ui.cinematic.active,"victory art persists behind buttons")
 		ui.controls.menu.pressed.emit(); ok(ui.page == "title" and not ui.cinematic.visible,"main menu button works")

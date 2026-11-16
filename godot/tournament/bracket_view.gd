@@ -150,7 +150,7 @@ func _card(r: int, i: int):
 	for side in range(2):
 		var id = _visible_id(r,i,side); var row = row_rect(r,i,side)
 		var known = not id.is_empty(); var you = id == focus_id
-		var lost = known and B.eliminated(model,id) and (n < 0 or p > .15)
+		var lost = known and (B.eliminated(model,id) or model.entrants.get(id,{}).get("eliminated",false)) and (n < 0 or p > .15)
 		var alpha = .32 if lost else 1.0
 		if you: draw_rect(row,Color(P.BLUE,.09))
 		if side == 0: draw_line(Vector2(row.position.x+2,row.end.y),Vector2(row.end.x-2,row.end.y),Color("28364b"),1,true)
@@ -163,9 +163,13 @@ func _card(r: int, i: int):
 				var c = icon.get_center()+Vector2(0,fall)
 				draw_polyline(PackedVector2Array([c+Vector2(-6,-10),c+Vector2(2,-3),c+Vector2(-2,3),c+Vector2(7,11)]),Color(P.GOLD,.55),1,true)
 		var label = str(model.entrants[id].get("name",id)) if known else ("BYE" if r == 0 else "Awaiting winner")
-		var text_rect = Rect2(row.position+Vector2(icon_size+3,0),Vector2(row.size.x-icon_size-7-(22 if you else 0),row.size.y))
+		var scored = game.get("score") is Dictionary
+		var text_rect = Rect2(row.position+Vector2(icon_size+3,0),Vector2(row.size.x-icon_size-7-(22 if you else 0)-(20 if scored else 0),row.size.y))
 		P.text(self,label,text_rect,P.fit_box(label,text_rect,16 if not geo.portrait else 14),Color(P.PALE if you else P.WHITE,alpha),P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
-		if you: P.text(self,"YOU",Rect2(row.end.x-25,row.position.y,24,row.size.y),10,P.BLUE)
+		if you: P.text(self,"YOU",Rect2(row.end.x-25-(20 if scored else 0),row.position.y,24,row.size.y),10,P.BLUE)
+		if scored: P.text(self,str(int(game.score.get("a" if side == 0 else "b",0))),Rect2(row.end.x-21,row.position.y,20,row.size.y),16,P.GOLD)
+	if game.get("status","") in ["live","ready"]:
+		draw_circle(card.position+Vector2(card.size.x-4,3),2.5,P.BLUE if game.status == "live" else P.GOLD)
 	if flip:
 		draw_set_transform(Vector2.ZERO)
 		P.outline(self,card,Color(P.PALE,sin(p*PI)*.6),2)

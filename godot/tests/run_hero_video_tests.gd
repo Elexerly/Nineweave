@@ -307,7 +307,7 @@ func controller():
 		ok(cinema.position == Vector2.ZERO and cinema.scale == Vector2.ONE,"video relayout keeps viewport transform")
 		cinema.video_overlay.relayout(extent)
 		for side in cinema.video_overlay.sides:
-			ok(Rect2(Vector2.ZERO,extent).encloses(side.frame) and is_equal_approx(side.frame.size.x/side.frame.size.y,540.0/730.0),"portrait letterbox frame fits "+str(extent))
+			ok(Rect2(Vector2.ZERO,extent).encloses(side.frame) and is_equal_approx(side.frame.size.x/side.frame.size.y,540.0/720.0),"portrait letterbox frame fits "+str(extent))
 	cinema.video_overlay.relayout(ui.layout.size)
 	cinema.advance(3.2); ok(cinema.active and ui.board.frozen and not cinema.buttons_shown,"video not cut at old versus deadline")
 	ok(cinema.skip() and not ui.board.frozen and not cinema.video_playing(),"video skip enters play")
@@ -324,8 +324,8 @@ func controller():
 	ok(ui.mode == "online" and pair_requested(requested,str(ui.profile.data.character_id),ui.rival_character),"local online demo still starts and prefetches remote")
 	ui.go_home(); ui.profile.data.character_id = "max_granite"; ui.rival_character = "shard_jack"
 	ui.debug_load_position(ui.game.serialize()); ui.game.status = 1; ui._show_spotlight()
-	ok(cinema.kind == "spotlight" and cinema.video_playing() and not ui.controls.has("again"),"Max victory video precedes results")
-	cinema.advance(6); ok(cinema.active and not cinema.buttons_shown,"results wait for video completion")
+	ok(cinema.kind == "spotlight" and cinema.video_playing() and ui.controls.has_all(["again","menu"]),"Max victory video shares the combined results screen")
+	cinema.advance(6); ok(cinema.active and cinema.buttons_shown,"result controls remain visible while video plays")
 	ui.sound.clear_announcer(); ui.sound.advance_mix(.2)
 	ok(ui.sound.hero_video_audio and ui.sound.duck_db < -4,"video Vorbis ducks Music")
 	ok(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Music")) < linear_to_db(float(ui.sound.volumes.music_volume))-4,"video duck reaches configured Music bus")

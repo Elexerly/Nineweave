@@ -51,6 +51,7 @@ var game = Rules.new()
 var settings = Store.new()
 var profile = Profile.new()
 var tournament = Tournament.new()
+var online_tournament = preload("res://tournament/online_flow.gd").new()
 var account = DeviceAccount.new()
 var online_api = JsonAPI.new()
 ## Explicit harness/capture opt-out; never derived from character-select onboarding.
@@ -207,6 +208,7 @@ func _ready():
 				page = "email"; _email_draft = account.store.data.email
 		account.refresh()
 	tournament.setup(self)
+	add_child(online_tournament); online_tournament.setup(self)
 	_apply_preferences(); _relayout(); _rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
 	call_deferred("_clip_preview")
@@ -340,7 +342,7 @@ func _sync_fx():
 	if fx_overlay: fx_overlay.queue_redraw()
 func _apply_result_anim():
 	if cinematic.kind in ["spotlight","draw"]:
-		var g = Cinematic.card_geometry(layout.size,cinematic.kind)
+		var g = cinematic.result_geometry(layout.size)
 		var progress = cinematic.buttons_progress()
 		for id in ["again","menu"]:
 			if controls.has(id) and is_instance_valid(controls[id]):
@@ -412,7 +414,11 @@ func _input(event):
 		if not event.pressed: _skip_guard_until = 0
 		get_viewport().set_input_as_handled(); return
 	var tap = (pointer and event.pressed) or (event is InputEventKey and event.pressed and not event.echo)
-	if tap and cinematic and cinematic.active and not cinematic.buttons_shown:
+	var result_skip = false
+	if tap and cinematic and cinematic.combined_result:
+		var g = cinematic.result_geometry(layout.size)
+		result_skip = event is InputEventKey or (pointer and not g.again.has_point(event.position) and not g.menu.has_point(event.position))
+	if tap and cinematic and cinematic.active and (not cinematic.buttons_shown or result_skip):
 		var was = cinematic.kind
 		var skipped = cinematic.skip()
 		if was != "pop":
@@ -423,6 +429,8 @@ func hero_for(mark: int) -> String:
 func _show_spotlight():
 	var winner = game.status if game.status in [1,2] else human_mark
 	cinematic.winner_name = side_name(winner); cinematic.loser_name = side_name(3-winner)
+	cinematic.result_title = _victory_title()
+	cinematic.result_detail = end_message if mode == "online" else ""
 	cinematic.result_score = "%d — %d  BOARDS CLAIMED" % [game.owners.count(winner),game.owners.count(3-winner)]
 	cinematic.show_scene("draw" if game.status == 3 else "spotlight",hero_for(winner),hero_for(3-winner),winner,layout)
 	if game.status != 3 and not cinematic.video_playing(): sound.stinger(Roster.audio_index(hero_for(winner)),"full",-.35 if winner == human_mark else .35)
@@ -432,6 +440,7 @@ func _begin_versus():
 	cinematic.show_scene("versus",hero_for(human_mark),hero_for(3-human_mark),human_mark,layout)
 	if not cinematic.video_playing(): sound.cue("route"); sound.stinger(Roster.audio_index(hero_for(human_mark)),"tag",-.35)
 func rematch():
+	if online_tournament.match_active: online_tournament.return_to_bracket(); return
 	if mode == "online":
 		message = ""
 		if is_instance_valid(transport):
@@ -619,6 +628,8 @@ func go_home():
 	_pending_game = {}; _select_player = 0
 	sound.clear_announcer()
 	_save_match(); tournament.match_active = false
+	if online_tournament.match_active:
+		online_tournament.match_active = false; online_tournament._auto_return = -1
 	_leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
 func show_settings():
 	if _require_screen_name(): return
@@ -718,6 +729,9 @@ func invite_demo_rival():
 	add_child(demo_rival)
 	demo_rival.join_room(room_code)
 func _online_ready():
+	if online_tournament.match_active:
+		remote_ready = true; opponent_name = transport.remote_name; rival_character = transport.remote_character_id
+		human_mark = transport.seat; _reset_online_match(); return
 	remote_ready = true; opponent_name = transport.remote_name; rival_character = transport.remote_character_id
 	human_mark = transport.seat
 	# Protocol 2 shows "<Name> joined" with their hero first; round 1–4 servers keep round 4g's flow.
@@ -939,6 +953,7 @@ func _receive_state(state: Dictionary, seq: int):
 			board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
 
 func _online_room_update(data: Dictionary):
+	if online_tournament.match_active: online_tournament.match_ended(data)
 	var you = data.get("you")
 	if you is Dictionary and you.get("name") is String and not str(you.name).is_empty(): _you_name = str(you.name)
 	if is_instance_valid(transport) and not transport.remote_name.is_empty() and transport.remote_name != "Remote player": opponent_name = transport.remote_name
@@ -954,12 +969,14 @@ func _online_room_update(data: Dictionary):
 			elif winner == -1 and page == "online": online_state = "waiting" if online_state == "joined" else online_state; _rebuild()
 	# Forfeits/timeouts are authoritative full-match results, outside board mechanics.
 	var result = data.get("result")
-	if data.get("status","") in ["finished","closed"] and result is Dictionary and game.status == 0:
+	if data.get("status","") in ["finished","closed"] and result is Dictionary and (game.status == 0 or (online_tournament.match_active and game.status == 3)):
 		var winner = int(result.get("winner",-1))
 		if winner in [0,1,2]:
 			game.status = 3 if winner == 0 else winner; thinking = false
 			if not tutorial.active: board.start_win([],game.status)
 			_refresh_labels()
+	if online_tournament.match_active and data.get("status","") in ["finished","closed"] and result is Dictionary and not _result_shown:
+		_show_spotlight()
 	if data.get("status","") == "closed" and page == "online":
 		message = end_message if not end_message.is_empty() else "This room is closed. Return to the lobby to play again."; _online_status()
 	if page == "game" and overlay == "result" and not end_message.is_empty(): _result_controls_refresh()
@@ -1220,6 +1237,7 @@ func _rebuild():
 		add_child(hero_select); ui_nodes.append(hero_select)
 		if _select_player > 0: hero_select.field.editable = false
 	elif page == "tournament": tournament.build(s)
+	elif page == "online_tournament": online_tournament.build(s)
 	elif page == "game":
 		var hdr: Rect2 = layout.header
 		var big = layout.mode == "landscape"
@@ -1314,7 +1332,7 @@ func _title_controls(s: Vector2):
 	_button("hero","Hero",Rect2(s.x-100,12,84,44),open_character_select)
 	var items = [["computer","Play vs Computer",func(): overlay = "setup"; _rebuild(),true],["online","Play Online",request_online,false],["local","Pass & Play",func(): request_game("local"),false]]
 	items.insert(1,["tournament","Tournament" if tournament.session.active.is_empty() else "Resume Tournament",func():
-		if not _require_screen_name(): tournament.request(),false])
+		if not _require_screen_name(): online_tournament.request(),false])
 	if not settings.saved_game.is_empty(): items.append(["resume","Resume Journey",request_resume,false])
 	var bh = clampf(s.y*.064,44,58)
 	if _title.hinge:
@@ -2084,7 +2102,7 @@ func debug_scenario(scenario: String, progress: float = .45):
 			game.play(2,2)
 		_refresh_labels(); _show_spotlight(); cinematic.seek(progress*5)
 		cinematic.frozen = true; cinematic.pose(); _result_shown = true
-		if cinematic.buttons_shown: overlay = "result"; _rebuild()
+		overlay = "result" if cinematic.buttons_shown else ""; _rebuild()
 		return
 	if scenario in ["character_select","lock_in"]:
 		open_character_select(); _hero_focus = "vesper_vale"; _name_draft = "Weaver"; _rebuild()
@@ -2153,8 +2171,10 @@ func _result_chat():
 	_chat_button(chat_button_rect(),31)
 	if chat_open: _build_chat_panel(ChatPanel.panel_rect(layout),41)
 func _winner_controls(s: Vector2):
-	var g = Cinematic.card_geometry(s,"draw" if game.status == 3 else "spotlight")
+	var g = cinematic.result_geometry(s) if cinematic.combined_result else Cinematic.card_geometry(s,"draw" if game.status == 3 else "spotlight")
 	for item in [["again","REMATCH",g.again,rematch,true],["menu","MAIN MENU",g.menu,go_home,false]]:
+		if item[0] == "again" and online_tournament.match_active:
+			item[1] = "VIEW BRACKET"; item[3] = online_tournament.return_to_bracket
 		if item[0] == "again" and tournament.match_active:
 			item[1] = "REPLAY MATCH" if game.status == 3 else ("THE CROWN" if tournament.session.active.get("status","") == "champion" else "VIEW BRACKET")
 			item[3] = tournament.after_match
@@ -2163,12 +2183,13 @@ func _winner_controls(s: Vector2):
 		button.z_index = 31; button.pressed.connect(item[3]); button.pressed.connect(func(): sound.cue("ui"))
 		add_child(button); ui_nodes.append(button); controls[item[0]] = button
 	_apply_result_anim()
-	if mode == "online" and is_instance_valid(transport):
+	if mode == "online" and is_instance_valid(transport) and not online_tournament.match_active:
 		controls.again.disabled = transport.local_rematch or not remote_ready
 		controls.again.caption = "ACCEPT" if transport.remote_rematch and not transport.local_rematch else "REMATCH"
 		var label = Label.new(); label.z_index = 31; label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		label.text = message if not message.is_empty() else transport.rematch_status(); label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.position = Vector2(s.x*.04,g.again.position.y-38); label.size = Vector2(s.x*.92,32)
+		label.text = (transport.rematch_status() if cinematic.combined_result else message) if not message.is_empty() else transport.rematch_status(); label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.position = Vector2(g.again.position.x,g.again.position.y-34) if cinematic.combined_result else Vector2(s.x*.04,g.again.position.y-38)
+		label.size = Vector2(g.menu.end.x-g.again.position.x if s.y < 500 else g.again.size.x,30) if cinematic.combined_result else Vector2(s.x*.92,32)
 		label.add_theme_font_override("font",P.SANS); label.add_theme_font_size_override("font_size",18)
 		add_child(label); ui_nodes.append(label)
 

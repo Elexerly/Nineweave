@@ -212,3 +212,22 @@ static func ogg_info_bytes(data: PackedByteArray) -> Dictionary:
 func _exit_tree():
 	for job in pending.values(): _dispose(job); _remove(_path(job.id,job.kind)+".part")
 	pending.clear()
+
+func prioritize_intros(first: String, second: String):
+	# Hero selection may already be downloading a victory. Give the opponent's
+	# intro its slot, preserving that victory job for later (no extra decoder).
+	var priority: Array = [key(first,"intro"),key(second,"intro")]
+	var waiting = false
+	for k in priority:
+		if pending.has(k) and not is_instance_valid(pending[k].request): waiting = true
+	if not waiting: return
+	for job in pending.values():
+		if job.kind == "victory" and is_instance_valid(job.request):
+			_dispose(job); job.attempt = maxi(0,job.attempt-1)
+			_remove(_path(job.id,job.kind)+".part")
+	var ordered = {}
+	for k in priority:
+		if pending.has(k): ordered[k] = pending[k]
+	for k in pending:
+		if not ordered.has(k): ordered[k] = pending[k]
+	pending = ordered; _pump()

@@ -3,7 +3,7 @@ extends Control
 const Roster = preload("res://characters/roster.gd")
 const Rig = preload("res://characters/art.gd")
 const P = preload("res://ui/paint.gd")
-const PORTRAIT = Vector2(540,730)
+const PORTRAIT = Vector2(540,720)
 signal finished
 signal audio_active(value: bool)
 var source
@@ -17,6 +17,7 @@ var _audible: bool = false
 var _chrome: Control
 var _play_age: float = 0
 var _generation: int = 0
+var display_lane: Rect2 = Rect2()
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE; visible = false
 func begin(kind: String, first: String, second: String, mark: int, extent: Vector2) -> bool:
@@ -30,6 +31,7 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 		paths.append(path)
 		if not path.is_empty(): _held.append([id,clip_kind])
 	if _held.is_empty(): return false
+	if kind == "versus": display_lane = Rect2()
 	scene_kind = kind; active = true; visible = true; size = extent
 	for i in range(ids.size()):
 		var side = {"id":ids[i],"kind":clip_kind,"video":not paths[i].is_empty(),"done":paths[i].is_empty(),"audio":false,"node":null,"frame":Rect2(),"mark":mark if i == 0 else 3-mark}
@@ -37,13 +39,13 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 			var player = VideoStreamPlayer.new()
 			player.mouse_filter = Control.MOUSE_FILTER_IGNORE; player.expand = true
 			# Master already exists; video must not go through Announcer or alter bus layout.
-			player.bus = &"Master"; player.buffering_msec = 500
+			player.bus = &"Master"; player.buffering_msec = 100
 			var stream = VideoStreamTheora.new(); stream.file = paths[i]
 			player.stream = stream; add_child(player); side.node = player
 			side.audio = source.has_audio(ids[i],clip_kind)
 			player.finished.connect(_side_finished.bind(i,_generation))
 		else:
-			var art = Rig.new(); art.art_key = "versus"; art.fit_height = true
+			var art = Rig.new(); art.art_key = "versus" if kind == "versus" else "victory"; art.fit_height = true
 			add_child(art); art.configure(ids[i],false); art.side = side.mark; art.set_clip("idle")
 			side.node = art
 		sides.append(side)
@@ -57,7 +59,7 @@ func begin(kind: String, first: String, second: String, mark: int, extent: Vecto
 func relayout(extent: Vector2):
 	size = extent
 	for i in range(sides.size()):
-		var lane = Rect2(0,0,size.x,size.y)
+		var lane = display_lane if display_lane.has_area() else Rect2(0,0,size.x,size.y)
 		if scene_kind == "versus": lane = Rect2(size.x*i*.5+10,58,size.x*.5-20,maxf(1,size.y-156))
 		var fit = minf(lane.size.x/PORTRAIT.x,lane.size.y/PORTRAIT.y)
 		var frame = Rect2(lane.get_center()-PORTRAIT*fit*.5,PORTRAIT*fit)
@@ -104,12 +106,17 @@ func _process(delta):
 	if _play_age < .5: return
 	for i in range(sides.size()):
 		if sides[i].video and not sides[i].done and not sides[i].node.is_playing():
-			_side_finished(i,_generation)
+			# Keep the still portrait visible if a decoder cannot open this side.
+			var side = sides[i]; side.node.stop(); side.node.stream = null; side.node.queue_free()
+			var art = Rig.new(); art.art_key = "versus" if scene_kind == "versus" else "victory"; art.fit_height = true
+			add_child(art); art.configure(side.id,false); art.side = side.mark; side.node = art
+			side.video = false; _side_finished(i,_generation)
+			relayout(size)
 			if not active: return
 func _exit_tree(): clear()
 func _draw():
 	if not visible: return
-	draw_rect(Rect2(Vector2.ZERO,size),Color("050c1a"))
+	if scene_kind == "versus": draw_rect(Rect2(Vector2.ZERO,size),Color("050c1a"))
 func _draw_chrome():
 	if not visible: return
 	if scene_kind == "versus":
@@ -131,5 +138,6 @@ func _draw_chrome():
 				P.text(_chrome,caption,box,fs,color)
 		_chrome.draw_line(Vector2(size.x*.5,58),Vector2(size.x*.5,size.y-98),Color("776239"),1,true)
 		P.text(_chrome,"VS",Rect2(size.x*.5-25,size.y*.5-22,50,44),24,P.GOLD)
+	if scene_kind != "versus": return
 	_chrome.draw_rect(Rect2(size.x*.5-64,size.y-38,128,26),Color(.02,.04,.09,.8))
 	P.text(_chrome,"TAP TO SKIP",Rect2(12,size.y-38,size.x-24,26),14,P.MUTED)

@@ -12,6 +12,9 @@ signal buttons_ready
 var video_source
 var video_overlay
 var buttons_shown: bool = false
+var combined_result: bool = false
+var result_title: String = "VICTORY"
+var result_detail: String = ""
 var winner_name: String = "YOU"
 var loser_name: String = "COMPUTER"
 var result_score: String = ""
@@ -58,6 +61,7 @@ func duration() -> float:
 	return {"lock_in":.95,"pop":1.2,"spotlight":3.0}.get(kind,1.0)
 func show_scene(scene_kind: String, winner: String, rival: String, mark: int, layout: Dictionary, claimed_board: int = 4):
 	video_overlay.clear()
+	combined_result = scene_kind == "spotlight"
 	hero.visible = true
 	mouse_filter = Control.MOUSE_FILTER_STOP if scene_kind in ["versus","spotlight","draw"] else Control.MOUSE_FILTER_IGNORE
 	kind = scene_kind; winner_id = winner; loser_id = rival; player = mark
@@ -85,7 +89,10 @@ func show_scene(scene_kind: String, winner: String, rival: String, mark: int, la
 	clip_word = R.get_hero(winner_id).action
 	pose()
 	video_overlay.source = video_source
+	video_overlay.display_lane = combined_geometry(region.size).hero if combined_result else Rect2()
 	if not reduced_motion: video_overlay.begin(kind,winner_id,loser_id,player,region.size)
+	if combined_result:
+		buttons_shown = true; buttons_ready.emit(); pose()
 ## Recompute regions for the current scene after a resize; age/clips are untouched.
 func relayout(layout: Dictionary):
 	if not visible: return
@@ -94,20 +101,24 @@ func relayout(layout: Dictionary):
 		if region.size.x <= 0: clear(); return
 		hero.configure(winner_id,true); hero.expression = "smug"; hero.refresh_texture()
 	pose()
-	if video_playing(): video_overlay.relayout(region.size)
+	if video_playing():
+		video_overlay.display_lane = combined_geometry(region.size).hero if combined_result else Rect2()
+		video_overlay.relayout(region.size)
 func _place(layout: Dictionary, claimed_board: int):
 	_layout = layout; _claimed_board = claimed_board
 	var s: Vector2 = layout.size; var seam: Rect2 = layout.hinge
 	if kind in ["versus","spotlight","draw"]:
 		region = Rect2(Vector2.ZERO,s)
 		arrangement = "vertical" if s.x < s.y else "horizontal"
-		var g = card_geometry(s,kind)
+		var g = combined_geometry(s) if combined_result else card_geometry(s,kind)
 		hero_rect = g.hero; loser_rect = g.rival
 		hero.position = hero_rect.position; hero.size = hero_rect.size
 		loser.position = loser_rect.position; loser.size = loser_rect.size
 		loser.facing = -1 if kind in ["versus","draw"] else 1
 		front.position = Vector2.ZERO; front.size = s
-		_build_halftone(s); _build_letters(g)
+		_build_halftone(s)
+		if not combined_result: _build_letters(g)
+		else: _letters.clear()
 		return
 	var safe = Rect2(Vector2(14,14),s-Vector2(28,28))
 	if seam.size.x > 0: safe = Rect2(seam.end.x+12,14,s.x-seam.end.x-26,s.y-28)
@@ -234,13 +245,17 @@ func complete():
 	finished.emit(was)
 func clear():
 	if is_instance_valid(video_overlay): video_overlay.clear()
-	active = false; visible = false; kind = ""; buttons_shown = false; mouse_filter = Control.MOUSE_FILTER_IGNORE
+	combined_result = false; active = false; visible = false; kind = ""; buttons_shown = false; mouse_filter = Control.MOUSE_FILTER_IGNORE
 	position = Vector2.ZERO; scale = Vector2.ONE; modulate.a = 1
 func buttons_at() -> float: return .25 if reduced_motion else Motion.BUTTONS_AT
 func buttons_progress() -> float:
+	if combined_result: return 1.0
 	return clampf((age-buttons_at())/(.15 if reduced_motion else .28),0,1)
 ## Tool-only seek. Never emits controller signals or advances the match/AI.
 func seek(seconds: float):
+	# Analytic legacy captures remain stable; live results use the combined card.
+	if combined_result:
+		combined_result = false; hero.visible = true; loser.visible = true; _place(_layout,_claimed_board)
 	# Analytic capture always uses the original code animation, even after a live video.
 	if is_instance_valid(video_overlay): video_overlay.clear()
 	age = clampf(seconds,0,duration()); frozen = true; active = age < duration()
@@ -263,6 +278,11 @@ func versus_cover_alpha() -> float:
 func loser_badge_rect() -> Rect2:
 	return Rect2(loser.position,loser.size)
 func pose():
+	if combined_result:
+		position = Vector2.ZERO; scale = Vector2.ONE; modulate.a = 1; front.modulate.a = 1
+		hero.position = hero_rect.position; hero.size = hero_rect.size; hero.scale = Vector2.ONE; hero.modulate.a = 1
+		hero.visible = not video_playing(); loser.visible = false
+		front.queue_redraw(); queue_redraw(); return
 	if video_playing():
 		position = Vector2.ZERO; scale = Vector2.ONE; modulate.a = 1
 		return
@@ -315,6 +335,10 @@ func pose():
 	hero.scale = Vector2.ONE*(1 if reduced_motion or kind == "pop" else 1+sin(ease*PI)*.07)
 	queue_redraw()
 func _draw():
+	if combined_result and visible:
+		draw_rect(region,Color("071222"))
+		preload("res://ui/readability.gd").draw_panel(self,Rect2(region.size.x*.48,0,region.size.x*.52,region.size.y))
+		return
 	if kind in ["versus","spotlight","draw"] and visible:
 		_draw_card_background(); return
 	if not active: return
@@ -616,6 +640,8 @@ func _draw_particles():
 			var v = Vector2.from_angle(p.angle)*p.length*.5
 			front.draw_line(p.position-v,p.position+v,col,maxf(1,p.length*.42),true)
 func _draw_front():
+	if combined_result and visible:
+		_draw_combined(); return
 	if not visible or not kind in ["versus","spotlight","draw"]: return
 	var s = region.size; var g = card_geometry(s,kind)
 	_draw_particles()
@@ -664,3 +690,49 @@ func _draw_front():
 			headline(front,"A PERFECT STANDOFF" if kind == "draw" else R.get_hero(winner_id).name.to_upper(),Rect2(g.subtitle.position+offset,g.subtitle.size),Color(winner_accent(),fade),int(g.subtitle.size.y*.92))
 			var fs = score_font_size()
 			P.text(front,result_score,Rect2(g.subtitle.position+Vector2(0,g.subtitle.size.y+2)+offset,Vector2(g.subtitle.size.x,fs*1.25)),fs,Color(P.PALE,fade))
+
+## The same left-video / right-result layout, including on phones.
+static func combined_geometry(s: Vector2) -> Dictionary:
+	var gap = 12.0 if s.x < 700 else 32.0
+	var right = s.x*.50+gap*.5
+	var width = s.x-right-gap
+	var top = s.y*.19
+	var bh = 48.0 if s.x < 700 else 54.0
+	var g = {"hero":Rect2(gap,64,s.x*.50-gap*1.5,s.y-128),
+		"rival":Rect2(),"name":Rect2(right,top,width,s.y*.10),
+		"names":Rect2(right,top+(36 if s.x < 700 else 48),width,40),
+		"outcome":Rect2(right,top+s.y*.11,width,s.y*.25),
+		"score":Rect2(right,top+s.y*.39,width,60),
+		"again":Rect2(right,s.y-64-bh*2-12,width,bh),
+		"menu":Rect2(right,s.y-64-bh,width,bh)}
+	if s.y < 500:
+		g.name = Rect2(right,46,width,32)
+		g.names = Rect2(right,82,width,22)
+		g.outcome = Rect2(right,110,width,78)
+		g.score = Rect2(right,196,width,46)
+		g.again = Rect2(right,s.y-68,(width-10)*.5,48)
+		g.menu = Rect2(right+(width+10)*.5,s.y-68,(width-10)*.5,48)
+	g.detail = Rect2(right,g.score.end.y+8,width,maxf(0,g.again.position.y-g.score.end.y-16))
+	return g
+func result_geometry(s: Vector2) -> Dictionary:
+	return combined_geometry(s) if combined_result else card_geometry(s,kind)
+func _wrapped(value: String, rect: Rect2, fs: int, color: Color):
+	var lines: Array = []; var line = ""
+	for word in value.split(" "):
+		var candidate = word if line.is_empty() else line+" "+word
+		if not line.is_empty() and P.text_width(candidate,fs) > rect.size.x:
+			lines.append(line); line = word
+		else: line = candidate
+	if not line.is_empty(): lines.append(line)
+	for i in range(lines.size()):
+		P.text(front,lines[i],Rect2(rect.position+Vector2(0,i*(fs+5)),Vector2(rect.size.x,fs+5)),fs,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+func _draw_combined():
+	var s = region.size; var g = combined_geometry(s)
+	P.text(front,"NINEWEAVE / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
+	P.outline(front,g.hero.grow(2),Color(P.GOLD,.55),1)
+	_wrapped(result_title,g.name,26 if s.y < 500 else (22 if s.x < 700 else 36),P.GOLD)
+	_wrapped(winner_name+" WINS",g.names,14 if s.x < 700 or s.y < 500 else 20,P.WHITE)
+	var winner = R.get_hero(winner_id).name; var defeated = R.get_hero(loser_id).name
+	_wrapped(winner+" won and defeated "+defeated+".",g.outcome,22 if s.y < 500 else (20 if s.x < 700 else 30),P.PALE)
+	_wrapped(result_score,g.score,16 if s.x < 700 or s.y < 500 else 22,P.MUTED)
+	if g.detail.size.y >= 40: _wrapped(result_detail,g.detail,14 if s.x < 700 else 18,P.PALE)

@@ -204,7 +204,7 @@ func winners(ui):
 		c.seek(1.5); ok(c.loser.art_key == "head_pout" and c.loser.position.y > c.loser_rect.position.y,"loser droops and pouts")
 		var first = snap(c); var sway_time = c._sway.get_shader_parameter("cinematic_time")
 		c.seek(.1); c.seek(1.5); ok(first == snap(c) and sway_time == c._sway.get_shader_parameter("cinematic_time"),"winner seek and feet-anchored sway deterministic")
-		c.seek(2.99); c.frozen = false; ok(not c.buttons_shown and not ui.controls.has("again"),"actions hidden before 3s")
+		ui.debug_seek_cinematic(2.99); c.frozen = false; ok(not c.buttons_shown and not ui.controls.has("again"),"actions hidden before 3s")
 		c.advance(.02); ok(c.buttons_shown and ui.controls.has_all(["again","menu"]),"actions arrive at 3s")
 		ui._apply_result_anim(); ok(ui.controls.again.modulate.a < .1,"actions start with a fade")
 		c.advance(.30); ui._apply_result_anim(); ok(ui.controls.again.modulate.a == 1,"actions finish fading/sliding")

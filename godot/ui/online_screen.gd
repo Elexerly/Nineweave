@@ -286,6 +286,8 @@ func open_legal(link):
 	if link_opener.is_valid(): link_opener.call(str(link))
 	else: OS.shell_open(str(link))
 func _draw():
+	if screen != "onboarding":
+		preload("res://ui/readability.gd").draw_panel(self,readability_rect())
 	if _panel.has_area(): P.panel(self,_panel,false,1,true)
 	if screen == "waiting" and _you_rect.has_area():
 		for r in [_you_rect,_opp_rect]: P.panel(self,r,r == _opp_rect and joined,1,r.size.y >= 120)
@@ -306,3 +308,8 @@ func _draw():
 	draw_line(points[0]+Vector2(3,2),points[3]+Vector2(3,-2),edge,3,true)
 	P.diamond(self,Vector2(r.end.x-12,r.position.y+10),3,edge)
 	P.text(self,"SCREEN NAME",Rect2(r.position+Vector2(16,1),Vector2(r.size.x-32,16)),12,P.GOLD,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+
+func readability_rect() -> Rect2:
+	var wide = size.x > size.y
+	var w = size.x-minf(380,size.x*.46)-30 if wide and screen == "lobby" else size.x
+	return Rect2(0,58,w,maxf(0,size.y-58))

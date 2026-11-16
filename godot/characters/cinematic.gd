@@ -713,10 +713,10 @@ static func combined_geometry(s: Vector2) -> Dictionary:
 	var available = maxf(100,again.position.y-top-16)
 	var spacing = clampf(available*.035,5,16)
 	var usable = available-spacing*4
-	var title_h = usable*.19
-	var names_h = usable*.13
-	var outcome_h = usable*.38
-	var score_h = usable*.14
+	var title_h = usable*.24
+	var names_h = usable*.16
+	var outcome_h = usable*.32
+	var score_h = usable*.12
 	var y = top
 	var g = {"hero":Rect2(gap,64,s.x*.50-gap*1.5,s.y-128),"rival":Rect2(),"again":again,"menu":menu}
 	g.name = Rect2(right,y,width,title_h); y += title_h+spacing
@@ -749,8 +749,8 @@ func _draw_combined():
 	var s = region.size; var g = combined_geometry(s)
 	P.text(front,"NINEWEAVE / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
 	P.outline(front,g.hero.grow(2),Color(P.GOLD,.55),1)
-	_wrapped(result_title,g.name,26 if s.y < 500 else (22 if s.x < 700 else 36),P.GOLD)
-	_wrapped(winner_name+" WINS",g.names,14 if s.x < 700 or s.y < 500 else 20,P.WHITE)
+	_wrapped(result_title,g.name,40 if s.y < 500 or s.x < 700 else 56,P.GOLD)
+	_wrapped(winner_name+" WINS",g.names,24 if s.y < 500 else (28 if s.x < 700 else 34),P.WHITE)
 	var winner = R.get_hero(winner_id).name; var defeated = R.get_hero(loser_id).name
 	_wrapped(winner+" won and defeated "+defeated+".",g.outcome,22 if s.y < 500 else (20 if s.x < 700 else 30),P.PALE)
 	_wrapped(result_score,g.score,16 if s.x < 700 or s.y < 500 else 22,P.MUTED)

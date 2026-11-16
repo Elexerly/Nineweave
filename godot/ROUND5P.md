@@ -8,3 +8,9 @@ Replaces only Kellen Byte's intro with the owner-provided OGV from Elexerly/Nine
 - Separate playback still demuxes the clip's own unchanged Vorbis pages. Existing gain, all other intros/endings, and Beth fade remain untouched.
 - Bumps persistent video-cache stamp and versions Kellen's HTTP URL so previous cached media does not survive replacement.
 - Native runtime audio lifecycle tests now include Kellen and assert the new intro soundtrack duration. Browser/device playback and subjective sync still require device verification.
+
+## Victory typography
+
+- Enlarged VICTORY/DEFEAT heading and player-name line, giving each more vertical space while retaining explicit inter-line gaps.
+- Outcome and score lanes remain bounded above action buttons at portrait, Duo, and short landscape sizes.
+- Reviewed owner screenshot IMG_0702.jpeg; actual revised rendering remains device QA.

@@ -1,0 +1,10 @@
+Nineweave online usability (November 17)
+engine: 4.7.2.stable.official.ed1daf0bf
+preset: Web / Compatibility / variant/thread_support=false
+mode: --export-release
+built: 2026-11-17T14:43:59Z
+source SHA: fdef75771c3618082c725343c9446ecb302e3f7f
+branch: plax/online-usability-nov17
+tag: pending
+tree: 
+notices: THIRD_PARTY_NOTICES.md and LICENSES/*OFL.txt

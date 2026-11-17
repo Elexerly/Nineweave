@@ -1,5 +1,6 @@
 extends RefCounted
 ## Session-only local report draft. No networking, identity, file persistence or auto-send.
+const SUPPORT_EMAIL = "escapetheavalanchedeux@gmail.com"
 const REASONS = ["Inappropriate content", "Not appropriate for the game's age rating", "Misleading ad", "Cannot close the ad"]
 var _last: Dictionary = {}
 func capture(response: Dictionary, placement: String):
@@ -11,3 +12,8 @@ func draft(reason: String, details: String = "") -> String:
 	if not available(): return "No ad presentation has been recorded in this session."
 	if reason not in REASONS: return "Choose a report reason."
 	return "Nineweave ad report (not sent)\nReason: %s\nTime UTC: %s\nPlacement: %s\nAd response ID: %s\nDetails: %s" % [reason,_last.time_utc,_last.placement,_last.response_id if not _last.response_id.is_empty() else "Unavailable",details.strip_edges().left(1000)]
+
+func email_draft_uri(reason: String, details: String = "") -> String:
+	# Building a URI does not open an app or send anything. Call only on player action.
+	if not available() or reason not in REASONS: return ""
+	return "mailto:"+SUPPORT_EMAIL+"?subject="+"Nineweave ad report".uri_encode()+"&body="+draft(reason,details).uri_encode()

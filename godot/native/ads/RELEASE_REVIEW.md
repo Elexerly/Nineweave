@@ -18,8 +18,13 @@ test-device diagnostics, not the user-facing reporting feature. Publisher
 [Ad Review Center](https://support.google.com/admob/answer/7672109) is where the
 operator can review/block/report an offending creative; users cannot access our account.
 
-Current source has a native-only Options → Report ad local draft/copy screen. It
-does not send reports and is not a complete delivery mechanism or compliance proof.
+Current source has a native-only Options → Report ad local draft/copy screen and a
+player-initiated mailto action to escapetheavalanchedeux@gmail.com (the owner-approved
+games support address). The recipient/body are visible before the action. The
+player must review/send in their email client; no automatic send occurs. A successful
+OS open request is never called delivery. Copy/manual-email fallback stays available
+when no app opens. Actual iOS/Android mail-client behavior is unverified and this is
+not compliance proof.
 Follow-up requirements before shipping:
 - Options and post-ad results: "Report last ad", with inappropriate content,
   age-inappropriate content, misleading ad, or cannot close categories.
@@ -37,8 +42,8 @@ our adapter captures only its response_id after the SDK showed callback, before
 destruction. This remains session-only and does not log impressions or upload data.
 The rest of the SDK dictionary is discarded.
 Google documents [response IDs](https://developers.google.com/admob/ios/response-info)
-for diagnostics and creative review. Reporting transport and retention need to be
-implemented and disclosed before activation.
+for diagnostics and creative review. Support handling/retention and actual email-client delivery behavior must be
+verified and disclosed before activation.
 
 ## Pacing and fairness
 

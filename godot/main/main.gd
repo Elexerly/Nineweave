@@ -1712,7 +1712,7 @@ func _overlay_controls(s: Vector2):
 		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,r.position.y+66); scroll.size = Vector2(w,r.size.y-136)
 		add_child(scroll); ui_nodes.append(scroll)
 		var box = VBoxContainer.new(); box.size_flags_horizontal = Control.SIZE_EXPAND_FILL; box.add_theme_constant_override("separation",12); scroll.add_child(box)
-		var notice = Label.new(); notice.text = "Prepare a local report. Nothing is sent automatically. You can also use the ad's AdChoices reporting control."; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(notice)
+		var notice = Label.new(); notice.text = "Review your report below. Email support: escapetheavalanchedeux@gmail.com. Nothing is sent automatically; you choose Send in your email app. You can also use the ad's AdChoices reporting control."; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(notice)
 		var reason = OptionButton.new(); reason.custom_minimum_size.y = 48
 		for choice in TestAdMob.Report.REASONS: reason.add_item(choice)
 		reason.select(TestAdMob.Report.REASONS.find(ad_report_reason)); box.add_child(reason)
@@ -1725,6 +1725,12 @@ func _overlay_controls(s: Vector2):
 		var copied = Label.new(); copied.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(copied)
 		var copy = Button.new(); copy.text = "Copy report (not sent)"; copy.custom_minimum_size.y = 48; copy.disabled = not test_admob.last_report.available(); box.add_child(copy)
 		copy.pressed.connect(func(): DisplayServer.clipboard_set(test_admob.last_report.draft(ad_report_reason,ad_report_details)); copied.text = "Copied. No report has been sent.")
+		var email = Button.new(); email.text = "Open email draft"; email.custom_minimum_size.y = 48; email.disabled = not test_admob.last_report.available(); box.add_child(email)
+		email.pressed.connect(func():
+			var uri = test_admob.last_report.email_draft_uri(ad_report_reason,ad_report_details)
+			if uri.is_empty(): return
+			var result = OS.shell_open(uri)
+			copied.text = "Email app requested. Review and tap Send there. Delivery has not been confirmed. If no email app opens, copy this report and email support yourself." if result == OK else "Could not open an email app. Copy this report and email it to escapetheavalanchedeux@gmail.com. Nothing has been sent.")
 		_button("ad_report_back","Back",Rect2(x,r.end.y-62,w,44),func(): overlay = "settings"; _rebuild())
 	elif overlay == "account_options":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48

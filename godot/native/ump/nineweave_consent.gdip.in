@@ -1,0 +1,12 @@
+[config]
+name="NineweaveConsent"
+binary="NineweaveConsent.xcframework"
+initialization="nineweave_consent_init"
+deinitialization="nineweave_consent_deinit"
+[dependencies]
+linked=[]
+embedded=[]
+system=["Foundation.framework"]
+capabilities=[]
+files=[]
+[plist]

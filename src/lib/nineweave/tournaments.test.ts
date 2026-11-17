@@ -11,6 +11,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { handleNineweaveRequest } from "./api.ts";
+import { canonicalHero } from "./heroes.ts";
 import { O, Rules, X } from "./rules.ts";
 import { createService, type Service } from "./service.ts";
 import { pgliteDb } from "./store.ts";
@@ -773,5 +774,33 @@ describe("privacy and capabilities", () => {
     await call("GET", "/tournaments");
     assert.equal(await count("nw_tournaments"), 0);
     assert.equal(await count("nw_tournament_players"), 0);
+  });
+});
+
+
+describe("Patrick tournament compatibility", () => {
+  it("allows Patrick to host and a legacy Kite selection to join", async () => {
+    const [host, guest] = await players(2);
+    const created = await createT(host, { size: 4, starts_in_minutes: 2, character_id: "patrick_laquin" });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const joined = await joinT(created.body.code, guest, { character_id: "kite_hollow" });
+    assert.equal(joined.status, 200, JSON.stringify(joined.body));
+    assert.equal(joined.body.you.hero, "patrick_laquin");
+    assert.deepEqual(joined.body.players.map((p: { hero: string }) => p.hero), ["patrick_laquin", "patrick_laquin"]);
+  });
+});
+
+
+describe("pre-upgrade persisted Kite tournament entries", () => {
+  it("loads old entrants while retaining their tournament and seat", async () => {
+    const [host, guest] = await players(2);
+    const created = await createT(host, { size: 4, starts_in_minutes: 2, character_id: "patrick_laquin" });
+    await joinT(created.body.code, guest, { character_id: "auric_rex" });
+    await pg.query("update nw_tournament_players set hero = 'kite_hollow' where hero = 'patrick_laquin'");
+    const view = await pollT(created.body.code, host);
+    assert.equal(view.status, 200, JSON.stringify(view.body));
+    assert.equal(canonicalHero(view.body.you.hero), "patrick_laquin");
+    assert.equal(view.body.players.length, 2);
+    assert.equal(view.body.code, created.body.code);
   });
 });

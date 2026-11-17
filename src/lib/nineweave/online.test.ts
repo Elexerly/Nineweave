@@ -12,6 +12,7 @@ import { handleNineweaveRequest } from "./api.ts";
 import { createService, type Service } from "./service.ts";
 import { pgliteDb } from "./store.ts";
 import { DRAW_GAME_X_MORE_BOARDS, X_WIN_GAME } from "./fixtures.ts";
+import { canonicalHero } from "./heroes.ts";
 import { runCleanup } from "./rooms.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "..", "..", "migrations");
@@ -796,5 +797,44 @@ describe("CORS and limits", () => {
     const third = await call("POST", "/rooms", { body: {}, headers: hdr });
     assert.equal(third.status, 429);
     assert.equal(typeof third.body.error, "string");
+  });
+});
+
+
+describe("Patrick Laquin hero compatibility", () => {
+  it("accepts Patrick and canonicalizes legacy Kite profile choices", async () => {
+    const d = await device("PatrickTest");
+    for (const id of ["patrick_laquin", "kite_hollow"]) {
+      const res = await call("PATCH", "/me", { token: d.token, body: { last_hero_id: id } });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.last_hero_id, "patrick_laquin");
+      assert.equal((await me(d.token)).last_hero_id, "patrick_laquin");
+    }
+  });
+
+  it("accepts Patrick rooms and old Kite joins without losing either character", async () => {
+    const created = await call("POST", "/rooms", { body: { name: "Patrick", character_id: "patrick_laquin" } });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const joined = await call("POST", `/rooms/${created.body.code}/join`, { body: { name: "Legacy", character_id: "kite_hollow" } });
+    assert.equal(joined.status, 200, JSON.stringify(joined.body));
+    assert.deepEqual(joined.body.characters, { "1": "patrick_laquin", "2": "patrick_laquin" });
+  });
+});
+
+
+describe("pre-upgrade persisted Kite records", () => {
+  it("loads old selected hero and an existing match without rewriting identities", async () => {
+    const d = await device("OldKite");
+    await pg.query("update nw_players set last_hero_id = 'kite_hollow' where id = $1", [d.player_id]);
+    const profile = await me(d.token);
+    assert.equal(profile.player_id, d.player_id);
+    assert.equal(canonicalHero(profile.last_hero_id), "patrick_laquin");
+    const match = await startMatch(d.token);
+    await pg.query("update nw_rooms set a_hero = 'kite_hollow' where code = $1", [match.code]);
+    const view = await call("GET", `/rooms/${match.code}`, { token: match.host.token });
+    assert.equal(view.status, 200, JSON.stringify(view.body));
+    assert.equal(canonicalHero(view.body.characters["1"]), "patrick_laquin");
+    assert.equal(view.body.characters["2"], "auric_rex");
+    assert.equal(view.body.code, match.code);
   });
 });

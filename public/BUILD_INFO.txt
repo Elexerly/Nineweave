@@ -1,11 +1,11 @@
-Nineweave Round 5c (dual versus videos, victory screen, online tournaments, readable online lobby)
+Nineweave Round 5s (Patrick Laquin and hero video redo)
 engine: 4.7.2.stable.official.ed1daf0bf
 preset: Web / Compatibility / variant/thread_support=false
 mode: --export-release
-built: 2026-11-16T03:56:18Z
-source SHA: 93aad5ddb2a8a80bead9595ab51658cc5971b1c0
-branch: godot-game
-tag: round5c
+built: 2026-11-17T01:36:46Z
+source SHA: 7659a1a6814fe8b989a868d1d6a021ecc02e7dec
+branch: plax/round5s-hero-redo
+tag: pending
 tree: 
-staging: /tmp/nineweave-export.RgWLMV/project
+staging: /tmp/finish-hero-export-stage/project
 notices: THIRD_PARTY_NOTICES.md and LICENSES/*OFL.txt

@@ -15,7 +15,7 @@ export const HERO_IDS = [
   "shard_jack",
   "madame_solstice",
   "bramble_ox",
-  "kite_hollow",
+  "patrick_laquin",
   "professor_gilt",
   "siren_coil",
   "ryan_blaze",
@@ -39,6 +39,7 @@ export const HERO_IDS = [
 ] as const;
 
 export const HERO_ALIASES: Readonly<Record<string, string>> = {
+  kite_hollow: "patrick_laquin",
   erik_comet: "erick_comet",
   ak_shade: "simon_shade",
   derrick_torque: "devin_torque",

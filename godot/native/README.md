@@ -1,7 +1,7 @@
 # Native launch integration contract
 
-Status: preparation, not an App Store build. No SDK, ads, payments or entitlement
-unlock is implemented by this directory. The web game remains unchanged.
+Status: preparation, not an App Store build. Optional test-ad boundary source is
+in `ads/`; no SDK, payments or entitlement unlock is activated. Web remains ad-free.
 
 ## Confirmed baseline
 

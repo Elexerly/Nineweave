@@ -1,5 +1,7 @@
 extends Control
 ## Scene/controller. Rules, AI, layout and networking remain independently testable.
+const MatchAdGate = preload("res://native/ads/match_gate.gd")
+const TestAdMob = preload("res://native/ads/test_admob.gd")
 const Rules = preload("res://kernel/rules.gd")
 const AI = preload("res://ai/strategist.gd")
 const Layout = preload("res://ui/layout.gd")
@@ -51,6 +53,9 @@ class Layer extends Control:
 	func _draw():
 		if painter.is_valid(): painter.call(self)
 
+var match_ads = MatchAdGate.new()
+var test_admob = TestAdMob.new()
+var _ad_prior_mute = false
 var game = Rules.new()
 var settings = Store.new()
 var profile = Profile.new()
@@ -160,6 +165,11 @@ var _moved_turn: String = ""
 var _you_name: String = ""
 
 func _ready():
+	add_child(match_ads); add_child(test_admob)
+	match_ads.provider = test_admob
+	# Disabled until native consent + verified StoreKit provider are integrated.
+	# Never derive entitlement from backend purchases or a local settings flag.
+	match_ads.presenting_changed.connect(_ad_presentation_changed)
 	# Handle close/Android back ourselves so first-run onboarding cannot dismiss.
 	get_tree().auto_accept_quit = false; get_tree().quit_on_go_back = false
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -460,6 +470,7 @@ func _input(event):
 func hero_for(mark: int) -> String:
 	return str(profile.data.character_id) if mark == human_mark else rival_character
 func _show_spotlight():
+	if not _debug_capture and game.status != 0: match_ads.match_completed()
 	var winner = game.status if game.status in [1,2] else human_mark
 	cinematic.winner_name = side_name(winner); cinematic.loser_name = side_name(3-winner)
 	cinematic.result_title = _victory_title()
@@ -475,7 +486,26 @@ func _begin_versus():
 		var speech_length = sound.play_versus_prelude()
 		cinematic.video_overlay.minimum_lead = maxf(cinematic.video_overlay.INTRO_LEAD_SECONDS,speech_length+.12 if speech_length > 0 else 0)
 	if not cinematic.video_playing(): sound.cue("route"); sound.stinger(Roster.audio_index(hero_for(human_mark)),"tag",-.35)
-func rematch():
+func configure_native_test_ads(entitlements, consent_check: Callable):
+	# Called only by a native build's reviewed StoreKit/consent composition layer.
+	# Native binaries, consent UI and real App IDs are not enabled in this branch.
+	match_ads.entitlements = entitlements; match_ads.consent_allowed = consent_check
+	match_ads.enabled = OS.get_name() in ["iOS","Android"]
+	if is_instance_valid(entitlements) and not entitlements.entitlement_changed.is_connected(refresh_native_test_ads):
+		entitlements.entitlement_changed.connect(refresh_native_test_ads)
+	refresh_native_test_ads()
+func refresh_native_test_ads():
+	if match_ads.can_serve(): test_admob.start(true)
+	else: test_admob.revoke_consent()
+func _ad_presentation_changed(active: bool):
+	var bus = AudioServer.get_bus_index("Master")
+	if active:
+		_ad_prior_mute = AudioServer.is_bus_mute(bus)
+		AudioServer.set_bus_mute(bus,true)
+	else: AudioServer.set_bus_mute(bus,_ad_prior_mute)
+func rematch(ad_checked: bool = false):
+	if not ad_checked and not online_tournament.match_active:
+		match_ads.before_next(func(): rematch(true)); return
 	if online_tournament.match_active: online_tournament.return_to_bracket(); return
 	if mode == "online":
 		message = ""
@@ -493,7 +523,10 @@ func _result_controls_refresh():
 
 ## `rematch` (Play Again) keeps the same rival hero; a new game from the menu/setup
 ## re-rolls. Round 3c product default, reversible: pass rematch=false to always re-roll.
-func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false, present: bool = false):
+func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false, present: bool = false, ad_checked: bool = false):
+	if not ad_checked and not tournament.starting:
+		match_ads.before_next(func(): start_game(new_mode,mark,rematch,present,true)); return
+	match_ads.begin_match()
 	if _require_screen_name(): return
 	if not tournament.starting: tournament.match_active = false
 	if new_mode == "online" and not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
@@ -659,6 +692,7 @@ func resume_game():
 	_refresh_labels(); _rebuild()
 	if not _maybe_tutorial(): _schedule_ai()
 func go_home():
+	match_ads.cancel()
 	if _require_screen_name(): return
 	if tutorial.active: tutorial.skip()
 	_pending_game = {}; _select_player = 0
@@ -742,7 +776,9 @@ func _attach_transport(t):
 		_rebuild())
 	t.error.connect(func(msg): message = msg; _rebuild())
 	if t is HTTP: t.room_updated.connect(_online_room_update)
-func create_online(demo: bool = false, private_game: bool = false, password: String = ""):
+func create_online(demo: bool = false, private_game: bool = false, password: String = "", ad_checked: bool = false):
+	if not ad_checked:
+		match_ads.before_next(func(): create_online(demo,private_game,password,true)); return
 	if _require_screen_name("online"): return
 	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
 	if private_game and (password.is_empty() or password.length() > 64):
@@ -750,7 +786,9 @@ func create_online(demo: bool = false, private_game: bool = false, password: Str
 	_attach_transport(Loopback.new() if demo else _new_http())
 	if transport is HTTP: transport.private_room = private_game; transport.password = password
 	transport.create_room()
-func join_online(code: String, demo: bool = false, password: String = ""):
+func join_online(code: String, demo: bool = false, password: String = "", ad_checked: bool = false):
+	if not ad_checked:
+		match_ads.before_next(func(): join_online(code,demo,password,true)); return
 	if _require_screen_name("online"): return
 	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
 	_attach_transport(Loopback.new() if demo else _new_http())
@@ -968,6 +1006,7 @@ func game_back():
 		chat_open = false; callout.callout = ""; overlay = "leave_confirm"; _rebuild(); return
 	go_home()
 func _reset_online_match():
+	match_ads.begin_match()
 	if _require_screen_name("online"): return
 	if not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)

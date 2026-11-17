@@ -67,3 +67,41 @@ purchase/restore integration separately. Verify actual test-ad impression,
 close/skip, no-fill, offline, resumed app and online rematch on iPhone/iPad before
 calling this functional native monetization. Online tournament readiness needs
 backend work; no backend or production changes were made here.
+
+## Reproducible native SDK staging (not production activation)
+
+`tools/stage_ios_admob.py` creates a **new separate Godot project**, leaving this
+checkout and its Web configuration unchanged. Supply a clean checkout of upstream
+`https://github.com/poingstudios/godot-admob-plugin.git` at
+`615974e9f66921a54e3c71c33db0856bdbf19d13` (v5.1.0) and the official release asset:
+
+`https://github.com/poingstudios/godot-admob-plugin/releases/download/v5.1.0/ios-template-v4.7.2.zip`
+
+The script verifies its SHA256
+`6e7f1c807761f9c0ad45d335ac4c74acd4bba7a31f9e1c7cd16a5220010cce71`, version marker,
+and both device/simulator XCFramework variants before staging. Only `ads/` is
+extracted, not the bundled mediation adapters. The editor addon is copied from
+tracked pinned source with MIT notices. Its automatic binary downloader is disabled
+in the staged copy, preventing surprise Android downloads or engine-version drift.
+
+Example (paths chosen outside the source project):
+
+```sh
+python3 godot/tools/stage_ios_admob.py --source godot \
+  --upstream /path/to/pinned-godot-admob-plugin \
+  --native-zip /path/to/ios-template-v4.7.2.zip \
+  --destination /path/to/new-nineweave-ios-stage
+```
+
+The staged editor exporter links the actual native Poing libraries and requests
+GoogleMobileAds 13.9.0 and GoogleUserMessagingPlatform 3.1.0 through Apple's Swift
+Package Manager. It uses Google's test application ID only. Android is disabled;
+no mediation is enabled. No real ad traffic, entitlement bypass, signing, purchase,
+or runtime consent grant is introduced. Runtime ads remain disabled until the real
+StoreKit/consent composition root is implemented and approved for device tests.
+
+The downloaded Poing ZIP itself contains no privacy manifest. Inspect the resolved
+Google SDK privacy manifests and app-level declarations in the **final Xcode archive**;
+this source inspection does not establish App Store privacy compliance. Xcode package
+resolution, native linking, simulator execution, and real-device ad lifecycle tests
+remain required. Godot editor import on Linux only validates GDScript wiring, not iOS.

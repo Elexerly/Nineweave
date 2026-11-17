@@ -22,7 +22,7 @@ func make_ui(id: String, registered: bool = true, fresh: bool = true, startup_re
 		for kind in ["device","settings","profile"]:
 			var path = path_for(id,kind)
 			if FileAccess.file_exists(path): DirAccess.remove_absolute(path)
-	var ui = Main.instantiate()
+	var ui = Main.instantiate(); ui._onboarding_create = true
 	ui.account.store = DeviceStore.new(path_for(id,"device"))
 	ui.settings = Settings.new(path_for(id,"settings")); ui.settings.values.sound = false
 	ui.profile = Profile.new(path_for(id,"profile")); ui.profile.data.character_id = "cryon"
@@ -204,7 +204,9 @@ func email_creation_paths():
 	create_name(bundle,"Weaver")
 	ok(ui.page == "email" and bundle.lobby.requests.is_empty(),"online destination waits for optional step")
 	ui.controls.continue_email.pressed.emit()
-	ok(ui.page == "online" and bundle.lobby.requests.size() == 1,"continue without email preserves online destination")
+	ok(ui.page == "character_select" and bundle.lobby.requests.is_empty(),"continue without email preserves online hero-selection destination")
+	ui.hero_select._confirm()
+	ok(ui.page == "online" and bundle.lobby.requests.size() == 1,"hero confirmation fetches requested online lobby")
 	ui.free(); await frames()
 func offline_first_play():
 	var bundle = make_ui("offline-first",false); var ui = bundle.ui
@@ -220,6 +222,8 @@ func offline_first_play():
 	bundle.http.respond(503,{"error":"Service unavailable"})
 	ok(ui.page == "email" and ui.account.store.complete() and not ui.account.busy,"repeated outage leaves optional email usable")
 	ui.controls.email.text = "offline@example.com"; ui.controls.save_email.pressed.emit()
+	ok(bundle.http.active and bundle.http.requests.back().url.ends_with("/auth/device"),"Save retries unavailable registration")
+	bundle.http.respond(503,{"error":"Service unavailable"})
 	ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and ui.account.store.data.email == "offline@example.com","optional email explains local-only save during outage")
 	ui.controls.continue_email.pressed.emit()
 	ui.start_game("computer",1,false,true)

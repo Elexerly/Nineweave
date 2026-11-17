@@ -183,7 +183,7 @@ func old_server():
 	ui.cinematic.advance(3.01); ui.cinematic.skip()
 	ok(not ui.controls.has("chat") and not ui.chat_capable(),"old server: no chat button in game")
 	ui.toggle_chat(); ok(not ui.chat_open and not is_instance_valid(ui.chat_view),"old server: chat cannot open")
-	ok(ui.online_lines()[0].begins_with("Turn time"),"old server: plain countdown from turn_expires_at")
+	ok(ui.online_lines()[0].begins_with("Your turn · "),"old server: explicit local turn plus countdown from turn_expires_at")
 	ok(ui.prompt_state() == "" and not ui.transport.still_here(),"old server: never a Still there? prompt")
 	ok(ui.play_cell(4,4) and last_request(bundle,"/moves").body.board == 4,"old server: moves still post")
 	ui.transport.send_chat("hello")

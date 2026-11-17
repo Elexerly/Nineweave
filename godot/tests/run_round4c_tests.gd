@@ -49,7 +49,7 @@ func run():
 func urls_and_storage():
 	for origin in ["https://elexerly.github.io","http://localhost:8080","http://127.0.0.1:8060","null",""]:
 		ok(HTTP.origin_base(origin) == "https://nineweave.grok.me","live origin for "+origin)
-	ok(HTTP.origin_base("https://nineweave.grok.me") == "","same origin uses relative API path")
+	ok(HTTP.origin_base("https://nineweave.grok.me") == "https://nineweave.grok.me","same origin uses absolute API path")
 	ok(HTTP.LIVE_ORIGIN == API.LIVE_ORIGIN,"transport shares single live-origin constant")
 	var store = clean_store("persist")
 	ok(not store.complete(),"fresh consent missing")
@@ -77,7 +77,7 @@ func json_boundary():
 	var results: Array = []; api.completed.connect(func(op,response,data,problem): results.append([op,response,data,problem]))
 	api.submit("/me",HTTPClient.METHOD_GET,{},"first","nwd_fixture")
 	api.submit("/me",HTTPClient.METHOD_PATCH,{"last_hero_id":"cryon"},"second","nwd_fixture")
-	ok(fake.requests.size() == 1 and fake.requests[0].url == "/api/nineweave/me","relative same-origin URL and single flight")
+	ok(fake.requests.size() == 1 and fake.requests[0].url == "https://nineweave.grok.me/api/nineweave/me","absolute same-origin URL and single flight")
 	fake.respond(200,{"screen_name":"Patrick"})
 	ok(fake.requests.size() == 2 and fake.requests[1].method == HTTPClient.METHOD_PATCH,"pending account writes run after GET")
 	fake.respond(200,{})
@@ -269,7 +269,7 @@ func outage_registration():
 	ok(a.store.online_ready() and a.store.data.screen_name == "Available","consent conflict can retry against existing real token")
 	a.free(); await frames()
 func make_ui(name: String, bypass: bool = false):
-	var ui = Main.instantiate(); ui.test_online_bypass = bypass
+	var ui = Main.instantiate(); ui._onboarding_create = true; ui.test_online_bypass = bypass
 	ui.account.store = clean_store(name); ui.profile = Profile.new("user://r4c-"+name+"-profile.cfg"); ui.settings = Settings.new("user://r4c-"+name+"-settings.cfg")
 	ui.settings.values.sound = false; ui.settings.saved_game = {}
 	# These controller fixtures exercise established players; Round 4e covers first play.
@@ -290,7 +290,7 @@ func onboarding_ui():
 	ok(ui.online_view.agreement.get_parsed_text() == Screen.AGREEMENT and ui.online_view.agreement.visible,"agreement sentence visible verbatim")
 	ok(ui.online_view.agreement.get_theme_font_size("normal_font_size") == 18,"phone agreement comfortable body size")
 	ok(Screen.TERMS_URL in ui.online_view.agreement.text and Screen.PRIVACY_URL in ui.online_view.agreement.text,"Terms and Privacy absolute URLs wired into tappable links")
-	ok(ui.controls.create_name.caption == "Create Screen Name","exact create label")
+	ok(ui.controls.create_name.caption == "Create Account","exact create label")
 	ok(not ui.controls.has("offline") and not ui.controls.has("back") and not ui.controls.has("home"),"no offline, back or home control on mandatory name screen")
 	var agreement = "By creating a screen name, you agree to our Terms of Service and Privacy Policy and confirm you are 13 or older or have a parent or guardian's permission."
 	ok(ui.online_view.agreement.get_parsed_text() == agreement,"round 4e consent text unchanged exactly")
@@ -350,7 +350,10 @@ func onboarding_ui():
 	ok(ui.page == "title" and ui.controls.has_all(["computer","local","online"]),"local name permits playable title after optional email")
 	ui.request_game("computer"); ok(ui.page == "character_select","computer not blocked by server")
 	ui.request_game("local"); ok(ui.page == "character_select","pass-and-play not blocked by server")
-	ui.go_home(); ui.request_online(); ok(ui.page == "online" and fake.active and bundle.lobby.requests.is_empty(),"opening Online syncs local registration before fetching lobby")
+	ui.go_home(); ui.request_online()
+	ok(ui.page == "character_select" and bundle.lobby.requests.is_empty(),"opening Online selects hero before fetching lobby")
+	ui.hero_select._confirm()
+	ok(ui.page == "online" and fake.active and bundle.lobby.requests.is_empty(),"confirming online hero syncs local registration before fetching lobby")
 	fake.respond(201,{"token":"nwd_onboard","player":{"screen_name":"Patrick"}}); fake.respond(200,{"screen_name":"Patrick"})
 	ok(ui.page == "online" and ui.online_state == "lobby" and ui.account.store.online_ready(),"synced registration unlocks live lobby without repeating optional email")
 	ok(bundle.lobby.requests.back().url.ends_with("/rooms") and not ui.lobby_timer.is_stopped(),"lobby fetch and 2.5-second refresh active")

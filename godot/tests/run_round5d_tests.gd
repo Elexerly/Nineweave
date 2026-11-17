@@ -24,7 +24,7 @@ func make_ui(tag: String, token: String = "nwd_stale", pending: bool = false, fi
 	var prefix = "user://r5d-"+tag
 	for suffix in ["-device.cfg","-settings.cfg","-profile.cfg","-profile-tournament.cfg"]:
 		if FileAccess.file_exists(prefix+suffix): DirAccess.remove_absolute(prefix+suffix)
-	var ui = Main.instantiate()
+	var ui = Main.instantiate(); ui._onboarding_create = true
 	ui.settings = Settings.new(prefix+"-settings.cfg"); ui.settings.values.sound = false
 	ui.profile = Profile.new(prefix+"-profile.cfg")
 	ui.account.store = Store.new(prefix+"-device.cfg")

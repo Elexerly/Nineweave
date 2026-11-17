@@ -23,6 +23,8 @@ class Layer extends Control:
 var game
 var clock: float = 0
 var reduced_motion: bool = false
+## Online UI may show the board without inviting a move on the other player's turn.
+var active_highlights_enabled: bool = true
 var last_move = Vector2i(-1,-1)
 var last_move_whole: bool = false
 var last_move_age: float = 1.0
@@ -83,7 +85,7 @@ func refresh():
 	_apply_camera()
 	if game != null:
 		var state = Vector4i(game.history.size(),game.status,game.active_board,game.turn)
-		var marks = Vector4i(game.cells.count(1),game.cells.count(2),int(reduced_motion),0)
+		var marks = Vector4i(game.cells.count(1),game.cells.count(2),int(reduced_motion),int(active_highlights_enabled))
 		if state != _sig_state or marks != _sig_marks or hover_move != _sig_hover or hint_move != _sig_hint or size != _sig_size:
 			_sig_state = state; _sig_marks = marks; _sig_hover = hover_move; _sig_hint = hint_move; _sig_size = size; _dirty = true
 	if _dirty or animating(): queue_redraw(); _dirty = false
@@ -252,7 +254,7 @@ func _draw():
 	for m in [Vector2(size.x*.5,1),Vector2(size.x*.5,size.y-1),Vector2(1,size.y*.5),Vector2(size.x-1,size.y*.5)]:
 		P.diamond(self,m,s*.7,P.gold_ramp(.7)); P.diamond(self,m,s*.32,P.BLUE)
 func is_active(b: int) -> bool:
-	return game.status == 0 and game.owners[b] == 0 and (game.active_board == b or game.active_board == -1)
+	return active_highlights_enabled and game.status == 0 and game.owners[b] == 0 and (game.active_board == b or game.active_board == -1)
 func _tile_body(r: Rect2, center_color: Color, edge_color: Color):
 	var poly = P.polygon(r,8)
 	var c = r.get_center()+Vector2(0,-r.size.y*.08)
@@ -302,7 +304,7 @@ func _draw_tile(b: int):
 	for c in range(9):
 		var mark: int = game.cells[b*9+c]
 		if mark == 0:
-			if hover_move == Vector2i(b,c) and game.is_legal(b,c):
+			if active_highlights_enabled and hover_move == Vector2i(b,c) and game.is_legal(b,c):
 				P.mark(self,cell_center(b,c),inner.size.x*.115,game.turn,.28)
 			continue
 		var age: float = mark_ages.get(b*9+c,1.0)

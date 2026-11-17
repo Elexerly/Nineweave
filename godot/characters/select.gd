@@ -49,6 +49,7 @@ class Portrait extends Button:
 var selected_id: String = "cryon"
 var display_name: String = "You"
 var heading: String = "CHOOSE YOUR HERO"
+var confirm_caption: String = "LOCK IN"
 var blocked_id: String = ""
 var reduced_motion: bool = false
 var trophy_counts: Dictionary = {}
@@ -90,7 +91,7 @@ func _ready():
 	field.focus_entered.connect(queue_redraw); field.focus_exited.connect(queue_redraw)
 	field.text_changed.connect(func(value): display_name = value; name_changed.emit(value))
 	field.text_submitted.connect(func(_value): _confirm()); add_child(field)
-	confirm_button = ButtonArt.new(); confirm_button.caption = "LOCK IN"; confirm_button.accent = true
+	confirm_button = ButtonArt.new(); confirm_button.caption = confirm_caption; confirm_button.accent = true
 	confirm_button.position = geo.confirm.position; confirm_button.size = geo.confirm.size
 	confirm_button.pressed.connect(_confirm); add_child(confirm_button)
 	if geo.paged:

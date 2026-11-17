@@ -55,7 +55,7 @@ func run():
 	if ui.page != "recovery": ui._online_action("sign_in",""); http = ui.recovery.api._request
 	ok(ui.page == "recovery" and ui.controls.has("recovery_email"),"recovery available without name")
 	var escape = InputEventKey.new(); escape.keycode = KEY_ESCAPE; escape.pressed = true; root.push_input(escape)
-	ok(ui.page == "onboarding" and ui.controls.screen_name.text == "night","Escape returns to retained screen-name draft")
+	ok(ui.page == "onboarding" and ui._onboarding_name == "night" and ui.controls.has("begin_create"),"Escape returns to retained screen-name draft")
 	ui._online_action("sign_in",""); http = ui.recovery.api._request
 	ui.recovery.email = "bad"; ui.recovery.request_code()
 	ok(http.requests.is_empty(),"invalid email stays local")
@@ -99,7 +99,7 @@ func run():
 	ui.recovery.confirm(); http.respond(503,{"error":"offline"})
 	ok(ui.recovery.email == "known@example.com" and not ui.recovery.busy,"failure permits retry preserving email")
 	ui.recovery.confirm(); ui._recovery_action("cancel")
-	ok(ui._onboarding_name == "night" and ui.controls.screen_name.text == "night","cancel preserves typed screen name")
+	ok(ui._onboarding_name == "night" and ui.controls.has("begin_create"),"cancel preserves typed screen name")
 	var player = Store.consent_payload(); player.screen_name = "OriginalPlayer"; player.email = "known@example.com"; player.email_status = "verified"; player.capabilities = {"email":true}
 	http.respond(200,{"token":"nwd_old_late","player":player})
 	ok(ui.page == "onboarding" and ui.account.store.data.device_token.is_empty(),"late reply after cancel ignored")

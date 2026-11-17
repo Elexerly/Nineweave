@@ -76,7 +76,7 @@ func run():
 	ui._confirm_signout(); await frames()
 	ui.account._completed("register",201,{"token":"nwd_old","player":{"screen_name":"Original"}},"")
 	ok(ui.account.store.data.device_token.is_empty(),"late account callback cannot revive signedout identity")
-	ui.controls.new_account.pressed.emit(); ok(ui.page == "onboarding" and not ui.account.store.data.signed_out,"explicit new account starts onboarding")
+	ui.controls.new_account.pressed.emit(); ok(ui.page == "onboarding" and not ui.account.store.data.signed_out and ui.controls.has("screen_name"),"explicit new account starts create form without another choice")
 	ok(requests.back().requests.is_empty(),"choosing new account alone sends no registration")
 	ui.queue_free(); await frames()
 	print("NINEWEAVE_SIGNOUT ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)

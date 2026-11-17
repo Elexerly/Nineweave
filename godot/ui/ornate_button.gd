@@ -43,7 +43,16 @@ func _draw():
 		P.text(self,label,g.text_rect,g.fs,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT if not g.stacked else HORIZONTAL_ALIGNMENT_CENTER)
 	if has_focus(): P.outline(self,r.grow(-7),P.BLUE,.8)
 func _icon(kind: String, center: Vector2, s: float, color: Color):
-	if kind == "x": P.mark(self,center,s*1.1,1)
+	if kind in ["sound_on","sound_off"]:
+		var speaker = PackedVector2Array([center+Vector2(-s,-s*.35),center+Vector2(-s*.45,-s*.35),center+Vector2(s*.1,-s*.85),center+Vector2(s*.1,s*.85),center+Vector2(-s*.45,s*.35),center+Vector2(-s,s*.35)])
+		draw_colored_polygon(speaker,color)
+		if kind == "sound_on":
+			draw_arc(center+Vector2(-s*.05,0),s*.65,-PI*.35,PI*.35,16,color,2,true)
+			draw_arc(center+Vector2(-s*.05,0),s,-PI*.32,PI*.32,16,color,2,true)
+		else:
+			draw_line(center+Vector2(s*.4,-s*.4),center+Vector2(s,s*.4),color,2,true)
+			draw_line(center+Vector2(s*.4,s*.4),center+Vector2(s,-s*.4),color,2,true)
+	elif kind == "x": P.mark(self,center,s*1.1,1)
 	elif kind == "o": P.mark(self,center,s*1.1,2)
 	else: P.icon(self,kind,center,s,color)
 ## Round 3c: geometry for an icon + caption button shorter than 62 px. `ink` is the

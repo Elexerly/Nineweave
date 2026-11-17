@@ -51,6 +51,7 @@ func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP if screen == "onboarding" else Control.MOUSE_FILTER_IGNORE
 	match screen:
 		"onboarding": _onboarding()
+		"account_welcome": _account_welcome()
 		"leaderboard": _leaderboard()
 		"waiting": _waiting()
 		"private": _private_form()
@@ -85,37 +86,55 @@ func _status(rect: Rect2):
 func set_status(value: String):
 	status = value
 	if is_instance_valid(status_label): status_label.text = value
+func _account_welcome():
+	var w = minf(440,size.x-48); var x = (size.x-w)*.5; var y = maxf(24,(size.y-300)*.5)
+	_panel = Rect2(x-12,y-20,w+24,300)
+	_label("ENTER THE NINEWEAVE",Rect2(x,y,w,50),25,P.PALE,true)
+	_label("New challenger or returning player?",Rect2(x,y+54,w,48),18)
+	_button("begin_create","Create Account",Rect2(x,y+118,w,52),"begin_create","",true)
+	_button("sign_in","Sign In",Rect2(x,y+184,w,52),"sign_in")
+
 func _onboarding():
-	# Scroll only on short landscape. Phone body stays 18px and never shrinks to fit.
-	var width = minf(460,size.x-40); var x = (size.x-width)/2
-	var top = maxf(20,(size.y-498)/2)
-	if size.y < 600:
-		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,12); scroll.size = Vector2(width,size.y-24)
-		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; add_child(scroll)
-		var content = get_script().new(); content.screen = "onboarding"; content.screen_name = screen_name; content.status = status
-		content.busy = busy; content.size = Vector2(width-14,600); content.custom_minimum_size = Vector2(width-14,600)
-		content.action.connect(func(kind,value): action.emit(kind,value)); content.draft_changed.connect(func(kind,value): draft_changed.emit(kind,value))
-		scroll.add_child(content); controls = content.controls; agreement = content.agreement; status_label = content.status_label; return
-	_panel = Rect2(x-10,top,width+20,544)
-	_label("ENTER THE NINEWEAVE",Rect2(x+8,top+14,width-16,38),24,P.PALE,true)
-	_label("Choose the name your rivals will remember.",Rect2(x+8,top+58,width-16,48),18)
-	_name_rect = Rect2(x+8,top+118,width-16,64)
-	var field = _field("screen_name","Your screen name",screen_name,_name_rect)
-	var empty = StyleBoxEmpty.new(); empty.content_margin_left = 16; empty.content_margin_right = 16; empty.content_margin_top = 14
-	for state in ["normal","focus","read_only"]: field.add_theme_stylebox_override(state,empty)
-	field.focus_entered.connect(queue_redraw); field.focus_exited.connect(queue_redraw)
-	field.text_submitted.connect(func(value): action.emit("register",value))
+	# Use the same scrollable, standard input pattern as the working sign-in form.
+	# No auto-focus, invisible input overlay or custom-painted field.
+	var width = minf(620,size.x-24)
+	_panel = Rect2((size.x-width)*.5,12,width,size.y-24)
+	var scroll = ScrollContainer.new(); scroll.position = _panel.position+Vector2(18,18)
+	scroll.size = _panel.size-Vector2(36,36); scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; add_child(scroll)
+	var box = VBoxContainer.new(); box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation",14); scroll.add_child(box)
+	_form_label(box,"CREATE ACCOUNT",28)
+	_form_label(box,"Choose the screen name your rivals will remember.",18)
+	_form_label(box,"SCREEN NAME",16)
+	var field = LineEdit.new(); field.name = "screen_name"; field.text = screen_name
+	field.placeholder_text = "Your screen name"; field.max_length = 24; field.custom_minimum_size.y = 52; field.editable = not busy
+	var style = StyleBoxFlat.new(); style.bg_color = Color(1,1,1,.98); style.border_color = Color("8796ad")
+	style.set_border_width_all(1); style.set_corner_radius_all(5); style.content_margin_left = 12; style.content_margin_right = 12
+	for state in ["normal","focus","read_only"]: field.add_theme_stylebox_override(state,style)
+	field.add_theme_color_override("font_color",Color("17243b")); field.add_theme_color_override("font_placeholder_color",Color("53627a"))
+	field.add_theme_color_override("caret_color",Color("17243b")); field.add_theme_font_size_override("font_size",18)
+	field.text_changed.connect(func(value): draft_changed.emit("screen_name",value))
+	field.text_submitted.connect(func(value): if not busy: action.emit("register",value))
+	box.add_child(field); controls.screen_name = field
 	agreement = RichTextLabel.new(); agreement.name = "Agreement"; agreement.bbcode_enabled = true
-	agreement.position = Vector2(x+8,top+196); agreement.size = Vector2(width-16,128)
-	agreement.scroll_active = false; agreement.add_theme_font_override("normal_font",P.SANS)
-	agreement.add_theme_font_size_override("normal_font_size",18); agreement.add_theme_color_override("default_color",P.PALE)
-	agreement.text = "By creating a screen name, you agree to our [url=%s][color=#9deaff]Terms of Service[/color][/url] and [url=%s][color=#9deaff]Privacy Policy[/color][/url] and confirm you are 13 or older or have a parent or guardian's permission." % [TERMS_URL,PRIVACY_URL]
-	agreement.meta_clicked.connect(open_legal)
-	add_child(agreement)
-	var create = _button("create_name","Create Screen Name",Rect2(x+8,top+330,width-16,52),"register","",true)
-	create.disabled = busy
-	_button("sign_in","Already a player? Sign in",Rect2(x+8,top+394,width-16,48),"sign_in").disabled = busy
-	_status(Rect2(x+8,top+452,width-16,76))
+	agreement.fit_content = true; agreement.scroll_active = false; agreement.custom_minimum_size.y = 120
+	agreement.add_theme_font_override("normal_font",P.SANS); agreement.add_theme_font_size_override("normal_font_size",18)
+	agreement.add_theme_color_override("default_color",Color("17243b"))
+	agreement.text = "By creating a screen name, you agree to our [url=%s]Terms of Service[/url] and [url=%s]Privacy Policy[/url] and confirm you are 13 or older or have a parent or guardian's permission." % [TERMS_URL,PRIVACY_URL]
+	agreement.meta_clicked.connect(open_legal); box.add_child(agreement)
+	_form_button(box,"create_name","Create Account","register",true).disabled = busy
+	status_label = _form_label(box,status,18)
+	_form_button(box,"account_back","Back","account_back").disabled = busy
+	_form_button(box,"sign_in","Already a player? Sign In","sign_in").disabled = busy
+
+func _form_label(box: VBoxContainer, value: String, font_size: int) -> Label:
+	var label = Label.new(); label.text = value; label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_override("font",P.SANS); label.add_theme_font_size_override("font_size",font_size)
+	label.add_theme_color_override("font_color",Color("17243b")); box.add_child(label); return label
+func _form_button(box: VBoxContainer, id: String, caption: String, kind: String, accent: bool = false):
+	var button = ButtonArt.new(); button.name = id; button.caption = caption; button.font_size = 18
+	button.custom_minimum_size.y = 56; button.accent = accent
+	button.pressed.connect(func(): action.emit(kind,"")); box.add_child(button); controls[id] = button; return button
 func _lobby():
 	_header("THE CELESTIAL ARENA")
 	_button("leaderboard","Leaderboard",Rect2(size.x-164,12,148,44),"leaderboard")
@@ -289,7 +308,11 @@ func open_legal(link):
 func _draw():
 	if screen != "onboarding":
 		preload("res://ui/readability.gd").draw_panel(self,readability_rect())
-	if _panel.has_area(): P.panel(self,_panel,false,1,true)
+	if screen == "onboarding":
+		for i in range(48):
+			var t = float(i)/48; var color = Color("ffffff").lerp(Color("dbe5f3"),t); color.a = .97
+			draw_rect(Rect2(_panel.position+Vector2(0,_panel.size.y*t),Vector2(_panel.size.x,_panel.size.y/48+1)),color)
+	elif _panel.has_area(): P.panel(self,_panel,false,1,true)
 	if screen == "waiting" and _you_rect.has_area():
 		for r in [_you_rect,_opp_rect]: P.panel(self,r,r == _opp_rect and joined,1,r.size.y >= 120)
 		if not joined and opponent_hero.is_empty():

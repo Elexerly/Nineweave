@@ -99,7 +99,8 @@ func selection(ui):
 	ok(ui.hero_for(1) == p2 and ui.hero_for(2) == p1 and ui.side_name(1) == "PLAYER 2","heroes and names stay with players")
 	ok(ui.cinematic.active and ui.cinematic.kind == "versus","rematch plays versus again")
 	ui.cinematic.advance(3.01); ok(ui.play_cell(4,4) and ui.game.cells[40] == 1,"new X moves first")
-	ui.request_online(); ok(ui.page == "online" and ui.hero_select == null,"online bypasses select")
+	ui.request_online(); ok(ui.page == "character_select" and ui.hero_select != null,"online chooses hero before matchmaking")
+	ui.hero_select._confirm(); ok(ui.page == "online","online confirmation continues to lobby")
 func computer_rematch_turns(ui):
 	ui.settings.values.tutorial_completed = true
 	ui.start_game("computer",1)
@@ -225,7 +226,7 @@ func online_flow(ui):
 		ok(a.seat == 3-initial,"three rematches swap three times")
 		a.leave(); a.free(); b.free()
 	ok(seats.size() == 2,"first assignment random across fixed seeds")
-	Loopback.assignment_rng.seed = 18; ui.request_online(); ui.create_online(true); ui.invite_demo_rival(); await frames(1)
+	Loopback.assignment_rng.seed = 18; ui.request_online(); ui.hero_select._confirm(); ui.create_online(true); ui.invite_demo_rival(); await frames(1)
 	ok(ui.mode == "online" and ui.cinematic.kind == "versus","online enters versus with profile hero")
 	ui.cinematic.advance(3.01); ui.thinking = false
 	var old_mark = ui.human_mark; var room = Loopback.rooms[ui.room_code]

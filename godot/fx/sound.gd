@@ -18,10 +18,7 @@ const CUES = {"unlock":.025,"place_x":.085,"place_o":.1,"invalid":.13,"route":.3
 var enabled: bool = true:
 	set(value):
 		enabled = value
-		if not value:
-			for p in _players: p.stop()
-			if is_instance_valid(_voice): _voice.stop()
-			clear_announcer()
+		if not value: stop_playback()
 var unlocked: bool = false
 var web_unlock: bool = false
 ## Silent unlock plays issued inside gestures: first press and first release (iOS
@@ -82,6 +79,11 @@ func ensure_buses():
 static func _append_bus() -> int:
 	AudioServer.bus_count = AudioServer.bus_count+1
 	return AudioServer.bus_count-1
+## Stop stale gameplay on a screen change without changing the saved mute setting.
+func stop_playback():
+	for p in _players: p.stop()
+	if is_instance_valid(_voice): _voice.stop()
+	clear_announcer()
 func configure(values: Dictionary):
 	enabled = bool(values.get("sound",true))
 	for key in volumes: volumes[key] = clampf(float(values.get(key,volumes[key])),0,1)

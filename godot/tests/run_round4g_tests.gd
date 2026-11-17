@@ -28,7 +28,7 @@ func make_ui(id: String, registered: bool = true, fresh: bool = true):
 		for kind in ["device","settings","profile"]:
 			var file = path_for(id,kind)
 			if FileAccess.file_exists(file): DirAccess.remove_absolute(file)
-	var ui = Main.instantiate()
+	var ui = Main.instantiate(); ui._onboarding_create = true
 	ui.account.store = Store.new(path_for(id,"device"))
 	ui.settings = Settings.new(path_for(id,"settings")); ui.settings.values.sound = false
 	ui.profile = Profile.new(path_for(id,"profile")); ui.profile.data.character_id = "cryon"
@@ -97,8 +97,10 @@ func capability_off():
 	ui.controls.screen_name.text_changed.emit("Weaver"); ui.controls.create_name.pressed.emit()
 	local.http.respond(503,{"error":"Unavailable"}); ui.account.email_capable = true
 	var count = local.http.requests.size(); save(local)
+	ok(local.http.active and local.http.requests.back().url.ends_with("/auth/device") and not local.http.requests.back().body.has("email"),"Save retries registration without sending email before identity exists")
+	local.http.respond(503,{"error":"Unavailable"})
 	ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and ui.account.store.data.pending_sync and ui.account.store.data.device_token.is_empty(),"local-only name explains unavailable verification without a synthetic bearer")
-	ok(local.http.requests.size() == count,"capability plus pending name still sends no address")
+	ok(local.http.requests.size() == count+1,"pending name retries registration once without sending address")
 	ui.free(); await frames()
 func onboarding_flow():
 	var bundle = make_ui("onboarding",false); var ui = bundle.ui
@@ -232,9 +234,9 @@ func layouts():
 		var screen = ui.online_view
 		ok(screen.agreement.get_parsed_text() == CONSENT and NameScreen.AGREEMENT == CONSENT,"consent remains verbatim at "+str(dimensions))
 		ok(not ui.controls.has("offline") and not ui.controls.has("back") and not ui.controls.has("home"),"no Play Offline/Main Menu skip")
-		var gap = screen.status_label.position.y-ui.controls.sign_in.get_rect().end.y
-		ok(gap >= 8 and gap <= 16 and screen._panel.size.y < 560,"status sits near sign-in and name panel stays compact")
-		ok(screen._panel.encloses(screen.status_label.get_rect()),"status remains inside compact card")
+		var gap = screen.status_label.position.y-ui.controls.create_name.get_rect().end.y
+		ok(gap >= 8 and gap <= 16,"status follows submit in scrollable create form")
+		ok(screen.status_label.get_parent() is VBoxContainer and screen.status_label.size.x <= screen._panel.size.x,"status remains inside scrollable form width")
 	finish_name(bundle,player(),player())
 	for dimensions in [Vector2(360,640),Vector2(390,844),Vector2(1366,1024)]:
 		ui.set_view_size(dimensions); await frames()
@@ -310,7 +312,10 @@ func confirmation_navigation():
 			ui.go_home(); ui.page = "email"; ui._rebuild()
 		elif mode == "refresh": ui.account.refresh()
 		bundle.http.respond(200,player("verified","weaver@example.com"))
-		if mode == "online": ok(ui.page == "online","verified onboarding respects requested online destination")
+		if mode == "online":
+			ok(ui.page == "character_select" and ui._pending_game.mode == "online_lobby","verified onboarding respects online hero-selection destination")
+			ui.hero_select._confirm()
+			ok(ui.page == "online","verified player reaches lobby after confirming hero")
 		elif mode == "skip": ok(ui.page == "title","late confirmation after Continue does not steal navigation")
 		else: ok(ui.page == "email","background or interrupted confirmation cannot auto-dismiss a new email screen: "+mode)
 		ok(ui.account.store.data.email_status == "verified","server verification status retained: "+mode)

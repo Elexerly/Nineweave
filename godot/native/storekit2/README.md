@@ -63,3 +63,41 @@ Primary references:
 - https://developer.apple.com/documentation/storekit/transaction/currententitlements
 - https://developer.apple.com/documentation/storekit/appstore/sync()
 - https://docs.godotengine.org/en/stable/tutorials/platform/ios/ios_plugin.html
+
+## Concrete command-line archive build
+
+`../build_ios_bridges.sh` builds static library xcframeworks for device arm64 and both
+simulator architectures using xcrun swiftc/clang++/libtool/lipo/xcodebuild. It requires
+an exact tagged4.7.2 source checkout with generated headers and Poing's pinned UMP3.1.0
+framework. It refuses to overwrite OUT. Example (paths must be local and inspected):
+
+```
+GODOT_SOURCE=/path/to/godot-4.7.2 UMP_XCFRAMEWORK=/path/to/UserMessagingPlatform.xcframework OUT=/new/path/bridges MODE=debug bash godot/native/build_ios_bridges.sh
+```
+
+Generate Godot headers in a dedicated4.7.2 source checkout using its SCons iOS template
+configuration, specifically core/version_generated.gen.h, core/disabled_classes.gen.h,
+modules/modules_enabled.gen.h and core/object/gdvirtual.gen.inc (and any further generated
+header required by that exact tag). This script compiles against them but does not fetch,
+install dependencies or mutate Godot source. Run separately for debug and release to
+match DEBUG_ENABLED ABI. In exported Xcode app link StoreKit, Foundation, existing UMP
+once, and Swift runtime (ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES and a Swift app target
+source or equivalent Swift runtime linker settings). Build/app-link verification is still
+required; shell syntax validation alone is NOT proof of native build success.
+
+### Official source archive and template ABI
+
+The build script also accepts `GODOT_SOURCE_ARCHIVE` and `GODOT_SOURCE_SHA256` instead
+of a Git checkout. Obtain BOTH the `.tar.xz` and its matching checksum from the official
+Godot4.7.2-stable release; do not compute an arbitrary downloaded archive's hash and call
+it verified. The script checks that checksum, safely extracts regular files/directories
+into fresh OUT/source, validates version.py as4.7.2-stable, and checks generated headers.
+It does not use or trust a pre-extracted caller directory in archive mode. Missing headers
+still block compilation; use the Git checkout path with SCons-generated headers if the
+selected official archive lacks them. Identity/checksum is recorded beside artifacts.
+
+Use `MODE=release_debug` for the normal Godot **template_debug** export: DEBUG_ENABLED,
+optimized, without DEBUG_MEMORY_ALLOC. `MODE=debug` is reserved for a custom true-debug
+engine built with that allocation ABI, NOT the ordinary downloaded debug export template.
+Use `MODE=release` for template_release. Match the exact export template's definitions
+before linking; a successful compile alone cannot establish ABI compatibility.

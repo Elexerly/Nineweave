@@ -49,7 +49,7 @@ func run():
 func urls_and_storage():
 	for origin in ["https://elexerly.github.io","http://localhost:8080","http://127.0.0.1:8060","null",""]:
 		ok(HTTP.origin_base(origin) == "https://nineweave.grok.me","live origin for "+origin)
-	ok(HTTP.origin_base("https://nineweave.grok.me") == "","same origin uses relative API path")
+	ok(HTTP.origin_base("https://nineweave.grok.me") == "https://nineweave.grok.me","same origin uses absolute API path")
 	ok(HTTP.LIVE_ORIGIN == API.LIVE_ORIGIN,"transport shares single live-origin constant")
 	var store = clean_store("persist")
 	ok(not store.complete(),"fresh consent missing")
@@ -77,7 +77,7 @@ func json_boundary():
 	var results: Array = []; api.completed.connect(func(op,response,data,problem): results.append([op,response,data,problem]))
 	api.submit("/me",HTTPClient.METHOD_GET,{},"first","nwd_fixture")
 	api.submit("/me",HTTPClient.METHOD_PATCH,{"last_hero_id":"cryon"},"second","nwd_fixture")
-	ok(fake.requests.size() == 1 and fake.requests[0].url == "/api/nineweave/me","relative same-origin URL and single flight")
+	ok(fake.requests.size() == 1 and fake.requests[0].url == "https://nineweave.grok.me/api/nineweave/me","absolute same-origin URL and single flight")
 	fake.respond(200,{"screen_name":"Patrick"})
 	ok(fake.requests.size() == 2 and fake.requests[1].method == HTTPClient.METHOD_PATCH,"pending account writes run after GET")
 	fake.respond(200,{})

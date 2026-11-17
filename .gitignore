@@ -11,3 +11,10 @@ screenshots
 artifacts
 .grok
 .node_modules.lock
+
+# Native build outputs and per-machine Apple signing material
+build/
+*.xcarchive/
+*.ipa
+*.mobileprovision
+*.p12

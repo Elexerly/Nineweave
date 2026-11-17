@@ -220,6 +220,8 @@ func offline_first_play():
 	bundle.http.respond(503,{"error":"Service unavailable"})
 	ok(ui.page == "email" and ui.account.store.complete() and not ui.account.busy,"repeated outage leaves optional email usable")
 	ui.controls.email.text = "offline@example.com"; ui.controls.save_email.pressed.emit()
+	ok(ui.account.busy,"explicit Save retries pending offline registration")
+	bundle.http.respond(503,{"error":"Unavailable"})
 	ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and ui.account.store.data.email == "offline@example.com","optional email explains local-only save during outage")
 	ui.controls.continue_email.pressed.emit()
 	ui.start_game("computer",1,false,true)

@@ -97,8 +97,10 @@ func capability_off():
 	ui.controls.screen_name.text_changed.emit("Weaver"); ui.controls.create_name.pressed.emit()
 	local.http.respond(503,{"error":"Unavailable"}); ui.account.email_capable = true
 	var count = local.http.requests.size(); save(local)
+	ok(ui.account.busy,"explicit Save retries pending registration")
+	local.http.respond(503,{"error":"Unavailable"})
 	ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and ui.account.store.data.pending_sync and ui.account.store.data.device_token.is_empty(),"local-only name explains unavailable verification without a synthetic bearer")
-	ok(local.http.requests.size() == count,"capability plus pending name still sends no address")
+	ok(local.http.requests.size() == count+1,"one registration retry still sends no address")
 	ui.free(); await frames()
 func onboarding_flow():
 	var bundle = make_ui("onboarding",false); var ui = bundle.ui

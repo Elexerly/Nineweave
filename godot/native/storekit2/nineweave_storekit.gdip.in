@@ -1,0 +1,12 @@
+[config]
+name="NineweaveStoreKit"
+binary="NineweaveStoreKit.xcframework"
+initialization="nineweave_storekit_init"
+deinitialization="nineweave_storekit_deinit"
+[dependencies]
+linked=[]
+embedded=[]
+system=["StoreKit.framework","Foundation.framework"]
+capabilities=[]
+files=[]
+[plist]

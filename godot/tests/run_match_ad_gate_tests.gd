@@ -51,6 +51,7 @@ func _initialize(): run.call_deferred()
 func frames(): await process_frame; await process_frame
 func run():
 	await gate_cases()
+	await store_contract()
 	await sdk_cases()
 	await controller_cases()
 	print("NINEWEAVE_MATCH_AD_GATE ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
@@ -111,6 +112,7 @@ func sdk_cases():
 	ok(completed[0] == 2,"show failure completes gate")
 	adapter.preload_ad(); adapter.revoke_consent(); ads.on_interstitial_ad_loaded.emit(4); await frames()
 	ok(not adapter.is_ready(),"consent revocation ignores late load")
+	ok(ads.destroyed.count(4) == 2,"late native allocation after revoked load is released")
 	adapter.free(); mobile.free(); ads.free(); await frames()
 func controller_cases():
 	var ui = Main.instantiate(); ui.test_online_bypass = true
@@ -148,3 +150,18 @@ func controller_cases():
 		ok(not ui.match_ads.busy and AudioServer.is_bus_mute(bus) == muted,"native close restores exact prior mute")
 	AudioServer.set_bus_mute(bus,original_mute)
 	ui.free(); ads.free(); entitlement.free(); await frames()
+
+func store_contract():
+	var gate = Gate.new(); var ads = Provider.new()
+	var store = load("res://native/store_entitlement.gd").new()
+	root.add_child(gate); root.add_child(ads); root.add_child(store)
+	store._product_id = "test.remove_ads"
+	gate.provider = ads; gate.entitlements = store; gate.enabled = true; gate.consent_allowed = func(): return true
+	ok(not gate.can_serve(),"real provider unknown suppresses ads")
+	store._handle_event({"kind":"entitlement","product_id":"test.remove_ads","owned":false,"verified":true})
+	ok(gate.can_serve(),"real provider confirmed non-owner can serve")
+	store._handle_event({"kind":"entitlement","product_id":"test.remove_ads","owned":true,"verified":true})
+	ok(not gate.can_serve(),"real provider verified owner suppresses ads")
+	store._handle_event({"kind":"error","operation":"verification","message":"unconfirmed"})
+	ok(not gate.can_serve(),"real provider unconfirmed snapshot suppresses ads")
+	gate.free(); ads.free(); store.free(); await frames()

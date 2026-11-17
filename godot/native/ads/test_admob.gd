@@ -13,6 +13,7 @@ var _loaded = false
 var _presenting = false
 var _consent = false
 var _platform = ""
+var _retired_loads: Dictionary = {}
 func start(consent_allowed: bool) -> bool:
 	if not consent_allowed or OS.get_name() not in ["iOS","Android"]: return false
 	if _mobile != null:
@@ -43,11 +44,14 @@ func preload_ad():
 	_uid = _ads.create(); _loading = true
 	_ads.load(IOS_TEST_UNIT if _platform == "iOS" else ANDROID_TEST_UNIT,{"extras":{"npa":"1"},"mediation_extras":{},"google_request_agent":"Nineweave-test-Poing-5.1.0"},PackedStringArray(),_uid)
 func _loaded_callback(uid: int):
+	if _retired_loads.has(uid):
+		_ads.destroy(uid); _retired_loads.erase(uid); return
 	if uid != _uid: return
 	_loading = false
 	if not _consent: _destroy(); return
 	_loaded = true
 func _load_failed(uid: int, _error: Dictionary):
+	if _retired_loads.has(uid): _retired_loads.erase(uid); return
 	if uid != _uid: return
 	_loading = false; _destroy()
 func is_ready() -> bool: return _consent and _loaded and not _presenting
@@ -65,6 +69,7 @@ func revoke_consent():
 	# Never pretend a visible native view closed; wait for its dismissal callback.
 	if not _presenting: _destroy()
 func _destroy():
+	if _uid >= 0 and _loading: _retired_loads[_uid] = true
 	if _uid >= 0 and _ads != null: _ads.destroy(_uid)
 	_uid = -1; _loading = false; _loaded = false
 func _exit_tree(): _destroy()

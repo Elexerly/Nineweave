@@ -1,0 +1,199 @@
+{
+  "purpose": "TRANSFER ONLY. Do not merge or deploy this branch wholesale.",
+  "client_source": "8d10a3625181c261a3c909ded30e1e2430e39457",
+  "client_base": "a141e1aceeee0c0c1ccedaa3253431c32604d48b",
+  "backend_source": "b8d91c0142b716456bc06ce05a1624e92300d952",
+  "backend_base": "28f74033815fd2b0476899ddaa9eab9dc0d05b24",
+  "assembled_pack": {
+    "bytes": 16734252,
+    "sha256": "bc22a91c0375acb4915d084ec22ec1b052af5022651cb4ee122d14dd23ca0891"
+  },
+  "files": {
+    "0011_nineweave_account_unlocks.sql": {
+      "bytes": 892,
+      "sha256": "997b1668f0ef1d75380707d2412d9caaf063bad8a3e7fa7558af768166b8f011"
+    },
+    "BUILD_INFO.txt": {
+      "bytes": 2130,
+      "sha256": "a2b98cfa9132a84c06e2ae55e587ea596739458b9ed3c5102e7b99f6f112fd83"
+    },
+    "backend-source.patch": {
+      "bytes": 23349,
+      "sha256": "8e903502408e3daf03d55dc219093d81d1fa6c7aa7de81bedcc06f0e79e2f8bb"
+    },
+    "client-source.patch": {
+      "bytes": 36200,
+      "sha256": "1a219b7f878f6049a5dd32b79be09c71d8cf7d4069996ad68558c6631cecb8ab"
+    },
+    "index.html": {
+      "bytes": 5622,
+      "sha256": "91bc5b63fc93e24d73782e4f97df1e07890dc7cc0a83ff08ae484bf71b7e9ad7"
+    },
+    "integration-tests.patch": {
+      "bytes": 4250,
+      "sha256": "d241dfefe79d83401e2f9f52d7d4444e2228c97bd108df99f2185636f5ff1572"
+    },
+    "index.pck.part-000": {
+      "bytes": 524288,
+      "sha256": "afa4504b7266ca1eca6e4c19a363bc07f0daf3ed74f5d020707d2251c36647a4"
+    },
+    "index.pck.part-001": {
+      "bytes": 524288,
+      "sha256": "4866fc806a68a5ec798e5ca35a11ed1a9c73db0aa24d27825c1953e83c7f2302"
+    },
+    "index.pck.part-002": {
+      "bytes": 524288,
+      "sha256": "6b8f22bb64d462c9aed297333b784beadf6a8bc0519b2cbda469daa94b4e258b"
+    },
+    "index.pck.part-003": {
+      "bytes": 524288,
+      "sha256": "69118a7fcfed492b5aa7efec3154824b2e3960cf7daabe5ea86c605b1e5df3d1"
+    },
+    "index.pck.part-004": {
+      "bytes": 524288,
+      "sha256": "a15d0f389794d4748b6a8dad3e08015bcb62d98776fa474e04f80cc905f775e7"
+    },
+    "index.pck.part-005": {
+      "bytes": 524288,
+      "sha256": "4779e015eba94848e47562118799c2e3a98d452e1c3c9805a6ff67ec310064d0"
+    },
+    "index.pck.part-006": {
+      "bytes": 524288,
+      "sha256": "b46cfad436f120edef9e3ec11e3ae1721bdcdffaed616022eb2be439506d8624"
+    },
+    "index.pck.part-007": {
+      "bytes": 524288,
+      "sha256": "7f0d0c59ec56ef303b5c80a883fee7c8e0a09073dea27769bbe37d32c0e3164d"
+    },
+    "index.pck.part-008": {
+      "bytes": 524288,
+      "sha256": "3e3c41b354d7d58343da3f6055cf95fb4879cb6faafb7ec0ea52a51cccf24388"
+    },
+    "index.pck.part-009": {
+      "bytes": 524288,
+      "sha256": "d9598b060ccfebba34acbd1913276edcc65f7ce207af5d3e94562748b1e86d5b"
+    },
+    "index.pck.part-010": {
+      "bytes": 524288,
+      "sha256": "a0c335df7112870c2199fced938febac44e4ca14bba01160acf35f07c3463a48"
+    },
+    "index.pck.part-011": {
+      "bytes": 524288,
+      "sha256": "5292a3d2ad2bc9c5fe026b731a06db54e2aba5070cd5f9464f250f0d617c8603"
+    },
+    "index.pck.part-012": {
+      "bytes": 524288,
+      "sha256": "bb75c38aa2567a9fc8539fd77336a39759b4c66dd1778d26c68fb434ee726676"
+    },
+    "index.pck.part-013": {
+      "bytes": 524288,
+      "sha256": "4f1d414bbd37f6b308b7a3d41494cf0f89fbb206ba9e07b528326a02c835ed0c"
+    },
+    "index.pck.part-014": {
+      "bytes": 524288,
+      "sha256": "cabc784f4e8a24f84f6ea26f689240896676e31328008dff273c6ae7f9616e45"
+    },
+    "index.pck.part-015": {
+      "bytes": 524288,
+      "sha256": "5ec326bb6aa25ccf0e570d85fc870b060a6ff03de415251c42196ec63e622eef"
+    },
+    "index.pck.part-016": {
+      "bytes": 524288,
+      "sha256": "199bded7470f53864d8b18dc3923035acec8d53d3e9c3b1b8eff6d10f5806392"
+    },
+    "index.pck.part-017": {
+      "bytes": 524288,
+      "sha256": "00ac80cc5ebc17aa49a31f59c772d4035f95beacbe9379acf847428ea2d36f5c"
+    },
+    "index.pck.part-018": {
+      "bytes": 524288,
+      "sha256": "90c4e16b39f807d4c0b85a051140528cc45c89b398b625701d5174e5f4f4219f"
+    },
+    "index.pck.part-019": {
+      "bytes": 524288,
+      "sha256": "7f448b21e7a02f819623c5fd606679f03bb6e0df7655175472c61b266c3438a1"
+    },
+    "index.pck.part-020": {
+      "bytes": 524288,
+      "sha256": "181f8b20004e4332387c6c2856fd7c28154ceea5262be9af79c6485b304010f2"
+    },
+    "index.pck.part-021": {
+      "bytes": 524288,
+      "sha256": "923f80391d897321e7e00dbd5fe04b52c58723599c1e613b12702b56d661fed4"
+    },
+    "index.pck.part-022": {
+      "bytes": 524288,
+      "sha256": "cc06013a4ffdbb6e9b152c1b35b0af40d3c732fefa59c28a465145bee34794ee"
+    },
+    "index.pck.part-023": {
+      "bytes": 524288,
+      "sha256": "fdcd2bbd91e39418df499fa22212de09397d49e5cb51b2e8bf28553e795c48c1"
+    },
+    "index.pck.part-024": {
+      "bytes": 524288,
+      "sha256": "de1ce61727fa93db9bd2fa541ecbe3e1af048e7b22c7d1fdd313ac5c66803dc1"
+    },
+    "index.pck.part-025": {
+      "bytes": 524288,
+      "sha256": "6cb8933966f14eaf0fb70e3f9a40e9935977c0b196b43cd11fe4e6a9d47a2973"
+    },
+    "index.pck.part-026": {
+      "bytes": 524288,
+      "sha256": "74b0d06689510223c6c565833058d2d8b0caf70387b34803946a743c01140671"
+    },
+    "index.pck.part-027": {
+      "bytes": 524288,
+      "sha256": "889b6caa47c26bf3aaa929d4a8d237fe73f17cd2dd39f785c667f9b331392525"
+    },
+    "index.pck.part-028": {
+      "bytes": 524288,
+      "sha256": "c7897ca6edbcd80c7b4409e4b7673f1532d128b0b5b2c2e963a7a9ad949d1867"
+    },
+    "index.pck.part-029": {
+      "bytes": 524288,
+      "sha256": "9d644f7b854cf6d709f6689c3d62e2349419c1324101c03f4c723140477eb539"
+    },
+    "index.pck.part-030": {
+      "bytes": 524288,
+      "sha256": "084b51c09f4c98c7531731c3c89c399c56e1b0af22caf8cadf3c21b2d08c2fda"
+    },
+    "index.pck.part-031": {
+      "bytes": 481324,
+      "sha256": "5438e279bb63b85004816333980fc3ffb43034c02d7533bd457adf94c0ea55ce"
+    }
+  },
+  "pack_parts": [
+    "index.pck.part-000",
+    "index.pck.part-001",
+    "index.pck.part-002",
+    "index.pck.part-003",
+    "index.pck.part-004",
+    "index.pck.part-005",
+    "index.pck.part-006",
+    "index.pck.part-007",
+    "index.pck.part-008",
+    "index.pck.part-009",
+    "index.pck.part-010",
+    "index.pck.part-011",
+    "index.pck.part-012",
+    "index.pck.part-013",
+    "index.pck.part-014",
+    "index.pck.part-015",
+    "index.pck.part-016",
+    "index.pck.part-017",
+    "index.pck.part-018",
+    "index.pck.part-019",
+    "index.pck.part-020",
+    "index.pck.part-021",
+    "index.pck.part-022",
+    "index.pck.part-023",
+    "index.pck.part-024",
+    "index.pck.part-025",
+    "index.pck.part-026",
+    "index.pck.part-027",
+    "index.pck.part-028",
+    "index.pck.part-029",
+    "index.pck.part-030",
+    "index.pck.part-031"
+  ]
+}

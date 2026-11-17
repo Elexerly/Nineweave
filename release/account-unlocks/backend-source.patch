@@ -1,0 +1,501 @@
+diff --git a/docs/ACCOUNT_UNLOCKS.md b/docs/ACCOUNT_UNLOCKS.md
+new file mode 100644
+index 0000000..beae13d
+--- /dev/null
++++ b/docs/ACCOUNT_UNLOCKS.md
+@@ -0,0 +1,47 @@
++# Permanent account unlocks (staged, not deployed)
++
++Base server: `28f7403` (tutorial and idle fairness). No dependency on the separate minimum-version gate. Migration `0011_nineweave_account_unlocks.sql` deliberately leaves `0010` available for that independent change.
++
++## Contract
++
++Authenticated `POST /api/nineweave/me/unlocks`, same Bearer device token as `/me`, body strictly `{ "code": "Blizzard" }`.
++
++Success 200:
++
++```json
++{"ok":true,"unlock":{"kind":"background","id":"blizzard"},"already_owned":false,"unlocked_backgrounds":["blizzard"],"unlocked_heroes":[]}
++```
++
++Replays return 200 and `already_owned:true`; no duplicate rows or consumption. A code is reusable by different accounts. Codes trim surrounding whitespace and normalize ASCII letters to uppercase. Codes do not select or change gameplay. `/me`, registration, and email recovery profiles return both ownership arrays. `account_unlocks:true` is advertised in capabilities.
++
++| Code | Background ID |
++| --- | --- |
++| Blizzard | blizzard |
++| TicTacToe | tictactoe |
++| 010127 | new_year |
++| 0704027 | fourth_july |
++| Patrick | st_patrick |
++
++Reserved character codes: W2026, G2026, J2026, B2026, N2026, E2026, JB2026, T2026, JY2026, GM2026, D2026. These return 409 `{error:<readable explanation>,code:"code_unavailable"}` and **never grant a placeholder character**. Before enabling them, configure actual roster IDs and enforce entitlement checks on hero selection/online seat creation, as well as client selection. The current change grants backgrounds only.
++
++Unknown/malformed codes return 400 `invalid_code`; unauthenticated requests return 401. Per-account SQL quota is ten attempts per minute, shared across server instances and token rotations. All parsed code attempts including duplicate, invalid and reserved codes count. Malformed JSON is rejected before the account quota; the existing per-IP write limiter still applies. Exceeding quota returns 429 `rate_limited`; wait one minute, not an automatic retry loop. Existing best-effort per-IP write limiter also applies. Only one quota row/account is retained. No raw code, token or email is stored in these tables.
++
++Ownership keys are the durable player ID, not screen name or email. Account email recovery rotates tokens on that same player, preserving ownership. The existing authentication system supports one active token per account; this change does not change simultaneous-device login policy. Account deletion cascades both ownership and quota; a newly created account does not inherit deleted ownership.
++
++## Legacy / security
++
++Migration preserves the old `nw_players.unlocks` JSON unchanged but NEVER imports it. The legacy PATCH /me API accepts client-asserted unlocks, so even recognized IDs in that field are untrusted and cannot establish ownership. No local-only prototype grants shipped; do not upload/trust a local ownership list. A user can redeem a recognized code again after signing in. Client attempts to assign the new entitlement arrays with PATCH or a caller-provided player_id are rejected. Legacy PATCH /me {unlocks:[...]} remains compatible but cannot grant or revoke actual entitlements.
++
++## Deployment boundaries
++
++No database, live server, web export, CORS setting, privacy policy, or client was changed by this work. This branch retains its base CORS file; the hosted project's Sitebloc CORS additions must be preserved when transferring the small patch. Apply migration before exposing profile/API code that queries the new tables. The existing build script applies pending migrations; do not run it against production by accident. Test migration on an isolated database branch before production rollout. Existing players need no manual edits. Rollback server code leaves additive tables harmless; do not drop them and erase ownership.
++
++Verification is PGlite/in-memory, not a claim of live Neon deployment. Tests cover authenticated boundaries, case normalization, every background, reserved codes, unknown/forged data, concurrent redemption, cross-instance rate limiting, token rotation, deletion cascade and legacy spoofing and migration reruns.
++
++## Verification result
++
++- Online API suite: 177/177 passed (includes 10 unlock tests).
++- TypeScript typecheck passed.
++- Remaining TypeScript helper suites: 59/59 passed.
++- All migration files applied successfully through the actual deployment SQL splitter in isolated PGlite transactions.
++- Aggregate `npm test` stops in script fixtures: 192/207 pass, 15 fail. The same 15 failures reproduce on unchanged base `28f7403` (missing `.grok` branding/app-env fixture sources); these are not unlock regressions. No production build or database migration was run.
+diff --git a/migrations/0011_nineweave_account_unlocks.sql b/migrations/0011_nineweave_account_unlocks.sql
+new file mode 100644
+index 0000000..d091b00
+--- /dev/null
++++ b/migrations/0011_nineweave_account_unlocks.sql
+@@ -0,0 +1,17 @@
++-- Independent of optional version-gate migration 0010. Account deletion cascades.
++create table if not exists nw_account_unlocks (
++  player_id text not null references nw_players(id) on delete cascade,
++  kind text not null check (kind in ('background', 'hero')),
++  unlock_id text not null,
++  granted_at timestamptz not null default now(),
++  primary key(player_id, kind, unlock_id)
++);
++-- One bounded row per account, shared by every API instance/device.
++create table if not exists nw_unlock_rate (
++  player_id text primary key references nw_players(id) on delete cascade,
++  window_start timestamptz not null,
++  attempts integer not null check (attempts > 0)
++);
++-- nw_players.unlocks is client-asserted legacy data, NOT proof of ownership.
++-- Preserve it unchanged; never backfill permanent entitlements from it.
++-- Existing players redeem a recognized code through the authenticated endpoint.
+diff --git a/package.json b/package.json
+index 16586bb..4172397 100644
+--- a/package.json
++++ b/package.json
+@@ -17,7 +17,7 @@
+     "typecheck": "tsc --noEmit",
+     "check:auth": "node scripts/check-auth-invariant.mjs",
+     "test": "npm run test:online && node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts",
+-    "test:online": "node --experimental-strip-types --test src/lib/nineweave/heroes.test.ts src/lib/nineweave/account-deletion.test.ts src/lib/nineweave/rules.test.ts src/lib/nineweave/online.test.ts src/lib/nineweave/email.test.ts src/lib/nineweave/chat-filter.test.ts src/lib/nineweave/online2.test.ts src/lib/nineweave/tournaments.test.ts src/lib/nineweave/admin-setup.test.ts",
++    "test:online": "node --experimental-strip-types --test src/lib/nineweave/heroes.test.ts src/lib/nineweave/account-deletion.test.ts src/lib/nineweave/rules.test.ts src/lib/nineweave/online.test.ts src/lib/nineweave/email.test.ts src/lib/nineweave/chat-filter.test.ts src/lib/nineweave/online2.test.ts src/lib/nineweave/tournaments.test.ts src/lib/nineweave/admin-setup.test.ts src/lib/nineweave/unlocks.test.ts",
+     "lint": "eslint .",
+     "format": "prettier --write ."
+   },
+diff --git a/src/lib/nineweave/api.ts b/src/lib/nineweave/api.ts
+index 6b4bf96..6bd2d49 100644
+--- a/src/lib/nineweave/api.ts
++++ b/src/lib/nineweave/api.ts
+@@ -13,6 +13,7 @@ import {
+   reportPlayer,
+   unblockPlayer,
+ } from "./chat.ts";
++import { redeemUnlock } from "./unlocks.ts";
+ import { deleteOwnAccount } from "./account-deletion.ts";
+ import { corsHeaders } from "./cors.ts";
+ import {
+@@ -199,6 +200,12 @@ async function route(
+     if (Object.keys(body).length) throw new ApiError(400, "Send an empty object to complete the tutorial");
+     return [200, await completeTutorial(svc, player)];
+   }
++  if (head === "me" && code === "unlocks" && segments.length === 2) {
++    if (method !== "POST") methodNotAllowed();
++    limit(svc, "write", request);
++    const player = await requirePlayer(svc, bearer);
++    return [200, await redeemUnlock(svc, player, await readJson(request))];
++  }
+   if (head === "me" && segments.length === 1) {
+     if (method === "DELETE") {
+       limit(svc, "write", request);
+diff --git a/src/lib/nineweave/chat.ts b/src/lib/nineweave/chat.ts
+index fdc816e..3fc9824 100644
+--- a/src/lib/nineweave/chat.ts
++++ b/src/lib/nineweave/chat.ts
+@@ -357,6 +357,7 @@ export async function reportPlayer(
+ /** GET /capabilities — public, cacheable server feature detection. */
+ export function capabilities() {
+   return {
++    account_unlocks: true,
+     protocol: 2,
+     online2: true,
+     chat: true,
+diff --git a/src/lib/nineweave/email.test.ts b/src/lib/nineweave/email.test.ts
+index de507fa..fc2b8b4 100644
+--- a/src/lib/nineweave/email.test.ts
++++ b/src/lib/nineweave/email.test.ts
+@@ -147,6 +147,7 @@ describe("profile email fields", () => {
+     assert.deepEqual(d.player.capabilities, {
+       email: true,
+       account_deletion: true,
++      account_unlocks: true,
+       tutorial_completion: true,
+       online2: true,
+       chat: true,
+@@ -161,6 +162,7 @@ describe("profile email fields", () => {
+     assert.deepEqual((await me(d.token)).capabilities, {
+       email: true,
+       account_deletion: true,
++      account_unlocks: true,
+       tutorial_completion: true,
+       online2: true,
+       chat: true,
+@@ -174,6 +176,7 @@ describe("profile email fields", () => {
+     assert.deepEqual(patched.body.capabilities, {
+       email: true,
+       account_deletion: true,
++      account_unlocks: true,
+       tutorial_completion: true,
+       online2: true,
+       chat: true,
+diff --git a/src/lib/nineweave/online2.test.ts b/src/lib/nineweave/online2.test.ts
+index e9a7e16..143ac3c 100644
+--- a/src/lib/nineweave/online2.test.ts
++++ b/src/lib/nineweave/online2.test.ts
+@@ -457,6 +457,7 @@ describe("envelope additions", () => {
+     const expected = {
+       email: true,
+       account_deletion: true,
++      account_unlocks: true,
+       tutorial_completion: true,
+       online2: true,
+       chat: true,
+diff --git a/src/lib/nineweave/players.ts b/src/lib/nineweave/players.ts
+index 43e26c6..497f318 100644
+--- a/src/lib/nineweave/players.ts
++++ b/src/lib/nineweave/players.ts
+@@ -6,6 +6,7 @@
+  * attach its `sub` to the caller's device player or re-issue a device token
+  * for the player already holding that `sub`. Nothing reads it yet.
+  */
++import { accountUnlocks } from "./unlocks.ts";
+ import { canonicalHero } from "./heroes.ts";
+ import { validateName } from "./names.ts";
+ import { hashToken, newId, newToken } from "./security.ts";
+@@ -46,6 +47,7 @@ export const CAPABILITIES = {
+   email: true,
+   account_deletion: true,
+   tutorial_completion: true,
++  account_unlocks: true,
+   online2: true,
+   chat: true,
+   tournaments: true,
+@@ -139,6 +141,7 @@ export async function profile(svc: Service, p: PlayerRow) {
+     last_hero_id: p.last_hero_id,
+     purchases: p.purchases,
+     unlocks: p.unlocks,
++    ...(await accountUnlocks(svc, p.id)),
+     matches_won: p.matches_won,
+     matches_played: p.matches_played,
+     matches_lost: p.matches_lost,
+diff --git a/src/lib/nineweave/unlocks.test.ts b/src/lib/nineweave/unlocks.test.ts
+new file mode 100644
+index 0000000..a2386cd
+--- /dev/null
++++ b/src/lib/nineweave/unlocks.test.ts
+@@ -0,0 +1,197 @@
++import { after, before, beforeEach, it } from "node:test";
++import assert from "node:assert/strict";
++import { readdirSync, readFileSync } from "node:fs";
++import { PGlite } from "@electric-sql/pglite";
++import { handleNineweaveRequest } from "./api.ts";
++import { createService, type Service } from "./service.ts";
++import { pgliteDb } from "./store.ts";
++import { hashToken } from "./security.ts";
++const dir = new URL("../../../migrations/", import.meta.url);
++let pg: PGlite, svc: Service, now: number;
++const migration = readFileSync(new URL("0011_nineweave_account_unlocks.sql", dir), "utf8");
++before(async () => {
++  pg = new PGlite();
++  await pg.waitReady;
++  for (const f of readdirSync(dir)
++    .filter((f) => f.endsWith(".sql"))
++    .sort())
++    await pg.exec(readFileSync(new URL(f, dir), "utf8"));
++});
++after(async () => {
++  await pg.close();
++});
++beforeEach(async () => {
++  await pg.exec("truncate nw_players cascade");
++  now = Date.parse("2026-11-17T12:00:00Z");
++  svc = createService({
++    db: pgliteDb(pg),
++    now: () => new Date(now),
++    limits: { write: 1000, device: 1000 },
++  });
++});
++async function call(method: string, path: string, token?: string, body?: unknown, service = svc) {
++  const r = await handleNineweaveRequest(
++    service,
++    new Request("http://localhost/api/nineweave" + path, {
++      method,
++      headers: token ? { authorization: "Bearer " + token } : {},
++      body: body === undefined ? undefined : JSON.stringify(body),
++    }),
++  );
++  return { status: r.status, body: (await r.json()) as any };
++}
++async function device() {
++  const r = await call("POST", "/auth/device", undefined, {});
++  assert.equal(r.status, 201);
++  return r.body;
++}
++const redeem = (token: string, code: unknown) => call("POST", "/me/unlocks", token, { code });
++it("requires real account token; rejects wrong method and forged ownership", async () => {
++  assert.equal((await redeem("", "Blizzard")).status, 401);
++  assert.equal((await redeem("fake", "Blizzard")).status, 401);
++  const d = await device();
++  assert.equal((await call("GET", "/me/unlocks", d.token)).status, 405);
++  assert.equal(
++    (await call("POST", "/me/unlocks", d.token, { code: "Blizzard", player_id: "other" })).status,
++    400,
++  );
++  assert.equal(
++    (await call("PATCH", "/me", d.token, { unlocked_backgrounds: ["blizzard"] })).status,
++    400,
++  );
++});
++it("normalizes codes, persists all backgrounds, exact odd fourth code and no automatic selection", async () => {
++  const d = await device();
++  const codes = [" blIZZaRD ", "TicTacToe", "010127", "0704027", "Patrick"];
++  for (const c of codes) {
++    const r = await redeem(d.token, c);
++    assert.equal(r.status, 200);
++    assert.equal(r.body.already_owned, false);
++    assert.equal(r.body.unlock.kind, "background");
++  }
++  const p = (await call("GET", "/me", d.token)).body;
++  assert.deepEqual(p.unlocked_backgrounds, [
++    "blizzard",
++    "fourth_july",
++    "new_year",
++    "st_patrick",
++    "tictactoe",
++  ]);
++  assert.deepEqual(p.unlocked_heroes, []);
++  assert.equal(p.capabilities.account_unlocks, true);
++  assert.equal((await redeem(d.token, "070427")).status, 400);
++});
++it("duplicate codes idempotent and account isolated", async () => {
++  const a = await device(),
++    b = await device();
++  assert.equal((await redeem(a.token, "Blizzard")).body.already_owned, false);
++  assert.equal((await redeem(a.token, "BLIZZARD")).body.already_owned, true);
++  assert.deepEqual((await call("GET", "/me", b.token)).body.unlocked_backgrounds, []);
++  assert.equal((await redeem(b.token, "Blizzard")).body.already_owned, false);
++});
++it("all eleven reserved codes return readable unavailable with no grants", async () => {
++  const d = await device();
++  for (const code of [
++    "W2026",
++    "G2026",
++    "J2026",
++    "B2026",
++    "N2026",
++    "E2026",
++    "JB2026",
++    "T2026",
++    "JY2026",
++    "GM2026",
++    "D2026",
++  ]) {
++    now += 61000;
++    const r = await redeem(d.token, code);
++    assert.equal(r.status, 409);
++    assert.equal(r.body.code, "code_unavailable");
++    assert.match(r.body.error, /not available yet/);
++  }
++  assert.deepEqual((await call("GET", "/me", d.token)).body.unlocked_heroes, []);
++  assert.equal((await pg.query("select * from nw_account_unlocks")).rows.length, 0);
++});
++it("rejects bad formats and prototype property codes", async () => {
++  const d = await device();
++  for (const code of [
++    null,
++    {},
++    42,
++    "",
++    " ",
++    "x".repeat(65),
++    "B LIZZARD",
++    "__proto__",
++    "constructor",
++  ]) {
++    assert.equal((await redeem(d.token, code)).status, 400);
++  }
++});
++it("concurrent replay grants exactly once", async () => {
++  const d = await device();
++  const rs = await Promise.all(Array.from({ length: 8 }, () => redeem(d.token, "Blizzard")));
++  assert.equal(rs.filter((r) => r.body.already_owned === false).length, 1);
++  assert.ok(rs.every((r) => r.status === 200));
++  assert.equal((await pg.query("select * from nw_account_unlocks")).rows.length, 1);
++});
++it("database quota shared across service instances including invalid and reserved attempts", async () => {
++  const d = await device();
++  const other = createService({ db: pgliteDb(pg), now: () => new Date(now) });
++  const rs = await Promise.all(
++    Array.from({ length: 15 }, (_, i) =>
++      call("POST", "/me/unlocks", d.token, { code: i % 2 ? "bad" : "W2026" }, i % 2 ? svc : other),
++    ),
++  );
++  assert.equal(rs.filter((r) => r.status === 429).length, 5);
++  now += 60000;
++  assert.equal((await redeem(d.token, "Blizzard")).status, 200);
++});
++it("ownership survives token rotation as used by email recovery and service restart", async () => {
++  const d = await device();
++  await redeem(d.token, "Patrick");
++  await pg.query("update nw_players set token_hash=$1 where id=$2", [
++    hashToken("replacement"),
++    d.player_id,
++  ]);
++  const other = createService({ db: pgliteDb(pg) });
++  assert.equal((await call("GET", "/me", d.token)).status, 401);
++  assert.deepEqual(
++    (await call("GET", "/me", "replacement", undefined, other)).body.unlocked_backgrounds,
++    ["st_patrick"],
++  );
++});
++it("account deletion removes entitlements and quota, recreated account owns nothing", async () => {
++  const d = await device();
++  await redeem(d.token, "Blizzard");
++  assert.equal(
++    (await call("DELETE", "/me", d.token, { confirm: "DELETE MY ACCOUNT" })).status,
++    200,
++  );
++  assert.equal((await pg.query("select * from nw_account_unlocks")).rows.length, 0);
++  assert.equal((await pg.query("select * from nw_unlock_rate")).rows.length, 0);
++  assert.equal((await redeem(d.token, "Blizzard")).status, 401);
++  const n = await device();
++  assert.deepEqual((await call("GET", "/me", n.token)).body.unlocked_backgrounds, []);
++});
++it("migration never promotes client-asserted legacy unlocks and preserves verified grants on rerun", async () => {
++  const d = await device();
++  const legacy = ["blizzard", "tictactoe", "new_year", "fourth_july", "st_patrick", "W2026"];
++  // The old /me API deliberately accepts these untrusted legacy assertions.
++  const asserted = await call("PATCH", "/me", d.token, { unlocks: legacy });
++  assert.equal(asserted.status, 200);
++  assert.deepEqual(asserted.body.unlocked_backgrounds, []);
++  // Reproduce first deployment after a client has prefilled the legacy column.
++  await pg.exec("drop table nw_account_unlocks, nw_unlock_rate");
++  await pg.exec(migration);
++  await pg.exec(migration);
++  const p = (await call("GET", "/me", d.token)).body;
++  assert.deepEqual(p.unlocks, legacy);
++  assert.deepEqual(p.unlocked_backgrounds, []);
++  assert.deepEqual(p.unlocked_heroes, []);
++  await redeem(d.token, "Patrick");
++  await call("PATCH", "/me", d.token, { unlocks: ["blizzard"] });
++  await pg.exec(migration);
++  assert.deepEqual((await call("GET", "/me", d.token)).body.unlocked_backgrounds, ["st_patrick"]);
++});
+diff --git a/src/lib/nineweave/unlocks.ts b/src/lib/nineweave/unlocks.ts
+new file mode 100644
+index 0000000..eb75642
+--- /dev/null
++++ b/src/lib/nineweave/unlocks.ts
+@@ -0,0 +1,98 @@
++/** Server-owned cosmetic entitlements. Codes are not credentials or purchases. */
++import { ApiError, type Service } from "./service.ts";
++import type { PlayerRow } from "./players.ts";
++import { pgCode } from "./store.ts";
++
++const BACKGROUND_CODES: Readonly<Record<string, string>> = Object.freeze({
++  BLIZZARD: "blizzard",
++  TICTACTOE: "tictactoe",
++  "010127": "new_year",
++  "0704027": "fourth_july",
++  PATRICK: "st_patrick",
++});
++const RESERVED_HERO_CODES = new Set([
++  "W2026",
++  "G2026",
++  "J2026",
++  "B2026",
++  "N2026",
++  "E2026",
++  "JB2026",
++  "T2026",
++  "JY2026",
++  "GM2026",
++  "D2026",
++]);
++export const UNLOCK_ATTEMPTS_PER_MINUTE = 10;
++
++export async function accountUnlocks(svc: Service, playerId: string) {
++  const rows = await svc.db.query<{ kind: string; unlock_id: string }>(
++    "select kind, unlock_id from nw_account_unlocks where player_id=$1 order by unlock_id",
++    [playerId],
++  );
++  return {
++    unlocked_backgrounds: rows.filter((r) => r.kind === "background").map((r) => r.unlock_id),
++    unlocked_heroes: rows.filter((r) => r.kind === "hero").map((r) => r.unlock_id),
++  };
++}
++
++export async function redeemUnlock(svc: Service, player: PlayerRow, body: Record<string, unknown>) {
++  // Atomic SQL quota, not merely a per-process limiter. Rejected requests count too.
++  // No raw code, IP, email, or token is retained in this table.
++  let quota: { attempts: number }[];
++  try {
++    quota = await svc.db.query<{ attempts: number }>(
++      `
++      insert into nw_unlock_rate(player_id,window_start,attempts) values($1,$2,1)
++      on conflict(player_id) do update set
++        attempts=case when nw_unlock_rate.window_start <= $2::timestamptz - interval '1 minute'
++          then 1 else least(nw_unlock_rate.attempts + 1, 11) end,
++        window_start=case when nw_unlock_rate.window_start <= $2::timestamptz - interval '1 minute'
++          then $2 else nw_unlock_rate.window_start end
++      returning attempts`,
++      [player.id, svc.now()],
++    );
++  } catch (err) {
++    if (pgCode(err) === "23503") throw new ApiError(401, "Account no longer exists");
++    throw err;
++  }
++  if (Number(quota[0].attempts) > UNLOCK_ATTEMPTS_PER_MINUTE)
++    throw new ApiError(429, "Too many code attempts. Wait a minute and try again.", {
++      code: "rate_limited",
++    });
++  if (
++    Object.keys(body).some((k) => k !== "code") ||
++    typeof body.code !== "string" ||
++    body.code.length > 64 ||
++    !/^[a-zA-Z0-9]{1,32}$/.test(body.code.trim())
++  )
++    throw new ApiError(400, "Enter a valid unlock code.", { code: "invalid_code" });
++  const code = body.code.trim().toUpperCase();
++  if (RESERVED_HERO_CODES.has(code))
++    throw new ApiError(
++      409,
++      "This secret character is not available yet. Keep the code and try again when the character arrives.",
++      { code: "code_unavailable" },
++    );
++  const id = Object.hasOwn(BACKGROUND_CODES, code) ? BACKGROUND_CODES[code] : undefined;
++  if (!id)
++    throw new ApiError(400, "That unlock code was not recognized.", { code: "invalid_code" });
++  let granted: { unlock_id: string }[];
++  try {
++    granted = await svc.db.query<{ unlock_id: string }>(
++      `
++      insert into nw_account_unlocks(player_id,kind,unlock_id,granted_at)
++      values($1,'background',$2,$3) on conflict do nothing returning unlock_id`,
++      [player.id, id, svc.now()],
++    );
++  } catch (err) {
++    if (pgCode(err) === "23503") throw new ApiError(401, "Account no longer exists");
++    throw err;
++  }
++  return {
++    ok: true,
++    unlock: { kind: "background", id },
++    already_owned: !granted.length,
++    ...(await accountUnlocks(svc, player.id)),
++  };
++}

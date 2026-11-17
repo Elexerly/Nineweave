@@ -1,0 +1,766 @@
+diff --git a/godot/main/main.gd b/godot/main/main.gd
+index 98ea1dd..cda6140 100644
+--- a/godot/main/main.gd
++++ b/godot/main/main.gd
+@@ -21,6 +21,10 @@ const EmailScreen = preload("res://ui/email_screen.gd")
+ const Tutorial = preload("res://ui/tutorial.gd")
+ const Announcer = preload("res://fx/announcer.gd")
+ const Callout = preload("res://fx/comic_callout.gd")
++var _code_taps: int = 0
++var _code_owner: String = ""
++var _code_pending: bool = false
++var _code_message: String = "Unlock backgrounds for your account. Codes never change match rules."
+ const Themes = preload("res://themes/registry.gd")
+ const Roster = preload("res://characters/roster.gd")
+ const Profile = preload("res://characters/profile.gd")
+@@ -210,7 +214,7 @@ func _ready():
+ 	account.sync_finished.connect(_account_sync_finished)
+ 	account.email_flow_changed.connect(_account_email_flow_changed)
+ 	account.email_verified.connect(_account_email_verified)
+-	account.error.connect(_account_error); add_child(account)
++	account.error.connect(_account_error); account.api.completed.connect(_code_completed); add_child(account)
+ 	deletion.changed.connect(func():
+ 		if overlay in ["delete_account","local_reset"]: _rebuild())
+ 	deletion.store = account.store
+@@ -317,7 +321,7 @@ func _title_geometry() -> Dictionary:
+ func _apply_preferences():
+ 	P.board_theme = str(settings.values.board_theme)
+ 	board._dirty = true
+-	backdrop.background_theme = str(settings.values.background_theme)
++	backdrop.background_theme = str(settings.values.background_theme) if Themes.valid(str(settings.values.background_theme),Themes.available(settings.values.unlocked_backgrounds)) else "crystal"
+ 	board.reduced_motion = bool(settings.values.reduced_motion)
+ 	backdrop.reduced_motion = bool(settings.values.reduced_motion)
+ 	sound.configure(settings.values)
+@@ -467,6 +471,9 @@ func _input(event):
+ 		if not event.pressed: _skip_guard_until = 0
+ 		get_viewport().set_input_as_handled(); return
+ 	var tap = (pointer and event.pressed) or (event is InputEventKey and event.pressed and not event.echo)
++	if tap and overlay == "settings":
++		var difficulty_control = controls.get("difficulty")
++		if pointer and (not is_instance_valid(difficulty_control) or not difficulty_control.get_global_rect().has_point(event.position)): _code_taps = 0
+ 	var result_skip = false
+ 	if tap and cinematic and cinematic.combined_result:
+ 		var g = cinematic.result_geometry(layout.size)
+@@ -702,6 +709,7 @@ func show_settings():
+ 	if cinematic.active and cinematic.kind == "pop": cinematic.clear()
+ 	overlay = "settings"; thinking = false; _rebuild()
+ func _close_overlay():
++	_code_taps = 0
+ 	overlay = ""; _rebuild(); _schedule_ai()
+ func _leave_online():
+ 	if is_instance_valid(demo_rival): demo_rival.leave(); demo_rival.queue_free()
+@@ -968,7 +976,9 @@ func chat_button_rect() -> Rect2:
+ func _chat_button(rect: Rect2, z: int = 0):
+ 	var b = ChatPanel.ChatButton.new(); b.name = "chat"; b.tooltip_text = "Chat"; b.unread = chat_unread
+ 	b.position = rect.position; b.size = rect.size; b.z_index = z
+-	b.pressed.connect(func(): sound.cue("ui")); b.pressed.connect(toggle_chat)
++	b.pressed.connect(func():
++		_code_taps = 0
++		sound.cue("ui")); b.pressed.connect(toggle_chat)
+ 	add_child(b); ui_nodes.append(b); controls["chat"] = b
+ func _build_chat_panel(rect: Rect2, z: int = 40):
+ 	chat_view = ChatPanel.new(); chat_view.position = rect.position; chat_view.size = rect.size; chat_view.z_index = z
+@@ -1237,6 +1247,9 @@ func _new_account_after_signout():
+ func _account_deleted():
+ 	_clear_local_account(true)
+ func _clear_local_account(deletion_confirmed: bool, signed_out: bool = false):
++	_code_pending = false; _code_owner = ""
++	settings.values.unlocked_backgrounds = []
++	if not Themes.valid(str(settings.values.background_theme),Themes.BACKGROUNDS): settings.set_value("background_theme","crystal")
+ 	_tutorial_continue = Callable(); _tutorial_waiting = false
+ 	# Reached after precise server deletion success OR explicit typed local reset.
+ 	# Retire request owners rather than letting late callbacks restore old identity.
+@@ -1253,7 +1266,7 @@ func _clear_local_account(deletion_confirmed: bool, signed_out: bool = false):
+ 	account.onboarding_complete.connect(_account_completed); account.sync_finished.connect(_account_sync_finished)
+ 	account.name_updated.connect(_account_name); account.player_received.connect(_account_player)
+ 	account.rename_flow_changed.connect(_settings_name_status); account.email_flow_changed.connect(_account_email_flow_changed)
+-	account.email_verified.connect(_account_email_verified); account.error.connect(_account_error); add_child(account)
++	account.email_verified.connect(_account_email_verified); account.error.connect(_account_error); account.api.completed.connect(_code_completed); add_child(account)
+ 	recovery.cancel(); online_api.cancel_all(); lobby_timer.stop(); joined_timer.stop()
+ 	var lobby_factory = online_api.request_factory
+ 	_retire_account_client(online_api); remove_child(online_api); online_api.queue_free()
+@@ -1295,6 +1308,10 @@ func _account_name(value: String):
+ 	if overlay == "settings" and controls.has("player_name") and not account.rename_pending():
+ 		controls.player_name.text = value
+ func _account_player(player: Dictionary):
++	settings.values.unlocked_backgrounds = player.get("unlocked_backgrounds",[]) if player.get("unlocked_backgrounds") is Array else []
++	if not Themes.valid(str(settings.values.background_theme),Themes.available(settings.values.unlocked_backgrounds)):
++		settings.set_value("background_theme","crystal")
++	_apply_preferences()
+ 	call_deferred("_tutorial_on_home")
+ 	var pending = account.pending_hero()
+ 	var id = pending if not pending.is_empty() else str(player.get("last_hero_id",""))
+@@ -1518,7 +1535,9 @@ func _button(id: String, caption: String, rect: Rect2, callback: Callable, accen
+ 	b.icon_kind = icon
+ 	b.position = rect.position; b.size = rect.size; b.accent = accent
+ 	b.font_size = int(clampf(rect.size.y*.4,17,26))
+-	b.pressed.connect(func(): sound.cue("ui")); b.pressed.connect(callback); add_child(b); ui_nodes.append(b); controls[id] = b
++	b.pressed.connect(func():
++		if id != "difficulty": _code_taps = 0
++		sound.cue("ui")); b.pressed.connect(callback); add_child(b); ui_nodes.append(b); controls[id] = b
+ 	return b
+ func _field(id: String, placeholder: String, rect: Rect2, value: String = ""):
+ 	var e = LineEdit.new(); e.name = id; e.placeholder_text = placeholder; e.text = value
+@@ -1781,7 +1800,13 @@ func _overlay_controls(s: Vector2):
+ 		for pair in [["sfx_volume","SFX"],["announcer_volume","Announcer"]]:
+ 			_volume_slider(pair[0],pair[1],Rect2(rx,y,sw,44)); y += 50
+ 		_button("difficulty","AI: "+str(settings.values.difficulty),Rect2(rx,y,sw,44),func():
+-			var levels = ["Easy","Medium","Hard"]; settings.set_value("difficulty",levels[(levels.find(settings.values.difficulty)+1)%3]); _rebuild())
++			_code_taps += 1
++			if _code_taps == 7:
++				_code_taps = 0; overlay = "secret_codes"
++				_code_message = "Unlock backgrounds for your account. Codes never change match rules."
++			else:
++				var levels = ["Easy","Medium","Hard"]; settings.set_value("difficulty",levels[(levels.find(settings.values.difficulty)+1)%3])
++			_rebuild())
+ 		y += 52
+ 		var name_x = rx+sw+20 if short else rx
+ 		var name_y = r.position.y+70 if short else y
+@@ -1805,7 +1830,7 @@ func _overlay_controls(s: Vector2):
+ 			overlay = "account_options"; _rebuild())
+ 		_button("replay_tutorial","How to play",Rect2(lx+sw*.52+4,r.end.y-116,sw*.48-4,44),func(): start_tutorial(true))
+ 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
+-		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
++		_button("cosmetics","Appearance",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
+ 		# Round 5a: blocked-player list only when the server advertises chat.
+ 		if social.chat() and not test_online_bypass and account.store.complete():
+ 			_button("blocked_players","Blocked players",Rect2(lx,r.end.y-170,sw,44),open_blocked_players)
+@@ -1845,10 +1870,23 @@ func _overlay_controls(s: Vector2):
+ 		scroll.add_child(copy); controls["signout_copy"] = copy
+ 		_button("confirm_signout","Sign out",Rect2(x,r.end.y-74,w*.48,48),_confirm_signout)
+ 		_button("cancel_signout","Stay signed in",Rect2(x+w*.52,r.end.y-74,w*.48,48),func(): overlay = "account_options"; _rebuild(),true)
++	elif overlay == "secret_codes":
++		var x = r.position.x+24; var y = r.position.y+70; var w = r.size.x-48
++		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,y); scroll.size = Vector2(w,r.size.y-144)
++		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
++		add_child(scroll); ui_nodes.append(scroll)
++		var content = Control.new(); content.custom_minimum_size = Vector2(w-16,208); scroll.add_child(content)
++		var code = _field("secret_code","Enter code",Rect2(0,0,w-16,48))
++		code.reparent(content,false); ui_nodes.erase(code); code.max_length = 32
++		var redeem = _button("redeem_code","Checking…" if _code_pending else "Unlock",Rect2(0,58,w-16,44),func():
++			_redeem_code(str(controls.secret_code.text)))
++		redeem.reparent(content,false); ui_nodes.erase(redeem)
++		var status = _modal_label(_code_message,Rect2(0,110,w-16,90),16,P.PALE); status.reparent(content,false); ui_nodes.erase(status)
++		_button("codes_back","Settings",Rect2(x,r.end.y-62,w,44),func(): overlay = "settings"; _rebuild())
+ 	elif overlay == "cosmetics":
+ 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
+-		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.BACKGROUNDS).name,Rect2(x,y,w,44),func():
+-			settings.set_value("background_theme",Themes.next(settings.values.background_theme,Themes.BACKGROUNDS)); _apply_preferences(); _rebuild())
++		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.available(settings.values.unlocked_backgrounds)).name,Rect2(x,y,w,44),func():
++			settings.set_value("background_theme",Themes.next(settings.values.background_theme,Themes.available(settings.values.unlocked_backgrounds))); _apply_preferences(); _rebuild())
+ 		_button("board_theme","Board: "+Themes.item(settings.values.board_theme,Themes.BOARDS).name,Rect2(x,y+50,w,44),func():
+ 			settings.set_value("board_theme",Themes.next(settings.values.board_theme,Themes.BOARDS)); _apply_preferences(); _rebuild())
+ 		_button("classic","Restore crystal",Rect2(x,y+100,w,44),func():
+@@ -2289,7 +2327,7 @@ func _draw_modal(node: Control):
+ 		_draw_result(node,r,short); return
+ 	node.draw_rect(Rect2(Vector2.ZERO,s),Color(.001,.005,.015,.88))
+ 	P.panel(node,r,false,1,true); P.outline(node,r.grow(-8),P.GOLD.darkened(.4),1)
+-	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
++	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"APPEARANCE","secret_codes":"SECRET CODES","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
+ 	if overlay == "online_end": heading = Clock.cancelled_title(str(transport.room.get("end_reason","")) if transport is HTTP else "")
+ 	P.text(node,heading,Rect2(r.position+Vector2(20,23),Vector2(r.size.x-72,44)),25,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
+ 	if overlay == "setup":
+@@ -2602,3 +2640,30 @@ func debug_seek_cinematic(seconds: float):
+ 	if overlay != want: overlay = want; _rebuild()
+ 	_result_shown = cinematic.kind in ["spotlight","draw"]
+ 	debug_refresh()
++
++func _redeem_code(raw: String):
++	if _code_pending: return
++	if not account.store.online_ready():
++		_code_message = "Sign in and connect to the account server to unlock a code."; _rebuild(); return
++	_code_pending = true; _code_owner = str(account.store.data.device_token)
++	_code_message = "Checking code…"
++	account.api.submit("/me/unlocks",HTTPClient.METHOD_POST,{"code":raw.strip_edges()},"cosmetic_unlock",_code_owner)
++	_rebuild()
++func _code_completed(operation: String, response: int, data: Dictionary, problem: String):
++	if operation != "cosmetic_unlock" or not _code_pending: return
++	_code_pending = false
++	if _code_owner != str(account.store.data.device_token) or not account.store.online_ready(): return
++	_code_owner = ""
++	if not problem.is_empty() or response < 200 or response >= 300:
++		_code_message = problem if not problem.is_empty() else "Unable to unlock. Please try again."
++	else:
++		var unlocked = data.get("unlocked_backgrounds",[])
++		settings.values.unlocked_backgrounds = unlocked if unlocked is Array else []
++		var grant = data.get("unlock",{})
++		var selected = str(grant.get("id","")) if grant is Dictionary and grant.get("kind") == "background" else ""
++		if Themes.valid(selected,Themes.available(settings.values.unlocked_backgrounds)):
++			settings.set_value("background_theme",selected)
++			_code_message = "Unlocked! Choose your background anytime in Appearance."
++		else: _code_message = "Your account unlocks have been refreshed."
++		_apply_preferences()
++	if overlay == "secret_codes": _rebuild()
+diff --git a/godot/net/device_account.gd b/godot/net/device_account.gd
+index aed9d94..5192330 100644
+--- a/godot/net/device_account.gd
++++ b/godot/net/device_account.gd
+@@ -279,6 +279,8 @@ func _sync_tutorial():
+ 	api.submit("/me/tutorial/complete",HTTPClient.METHOD_POST,{},_tutorial_operation,store.data.device_token)
+ 
+ func _completed(operation: String, response: int, data: Dictionary, problem: String):
++	# The code dialog owns this response; do not route reserved/invalid codes into onboarding.
++	if operation == "cosmetic_unlock": return
+ 	# A different tab can sign out while this request is in flight.
+ 	_deletion_blocked()
+ 	if store.data.signed_out:
+diff --git a/godot/settings/store.gd b/godot/settings/store.gd
+index 7ffc9bb..9afccd7 100644
+--- a/godot/settings/store.gd
++++ b/godot/settings/store.gd
+@@ -2,8 +2,8 @@ class_name NineweaveSettings
+ extends RefCounted
+ const Themes = preload("res://themes/registry.gd")
+ var path: String = "user://nineweave.cfg"
+-const DEFAULTS = {"sound":true,"music":false,"reduced_motion":false,"difficulty":"Hard","show_hints":true,"player_name":"You","sfx_volume":.85,"announcer_volume":.9,"music_volume":.45,"audio_version":3,"background_theme":"crystal","board_theme":"crystal","tutorial_completed":false}
+-var values: Dictionary = DEFAULTS.duplicate()
++const DEFAULTS = {"sound":true,"music":false,"reduced_motion":false,"difficulty":"Hard","show_hints":true,"player_name":"You","sfx_volume":.85,"announcer_volume":.9,"music_volume":.45,"audio_version":3,"background_theme":"crystal","board_theme":"crystal","tutorial_completed":false,"unlocked_backgrounds":[]}
++var values: Dictionary = DEFAULTS.duplicate(true)
+ var saved_game = {}
+ func _init(file_path: String = "user://nineweave.cfg"):
+ 	path = file_path
+@@ -18,13 +18,15 @@ func _init(file_path: String = "user://nineweave.cfg"):
+ 		var version = c.get_value("settings","audio_version",0)
+ 		if not (version is int or version is float) or int(version) < 3:
+ 			values.sound = true; values.audio_version = 3; save()
++	values.unlocked_backgrounds = [] # Refresh entitlements from the signed-in account, never local grants.
+ 	_sanitize()
+-	if not Themes.valid(str(values.background_theme),Themes.BACKGROUNDS): values.background_theme = Themes.DEFAULT_BACKGROUND
++	if not Themes.valid(str(values.background_theme),Themes.BACKGROUNDS+Themes.BONUS_BACKGROUNDS): values.background_theme = Themes.DEFAULT_BACKGROUND
+ 	if not Themes.valid(str(values.board_theme),Themes.BOARDS): values.board_theme = Themes.DEFAULT_BOARD
+ 	for key in ["sfx_volume","announcer_volume","music_volume"]: values[key] = clampf(float(values[key]),0,1)
+ func save() -> void:
+ 	var c = ConfigFile.new()
+-	for key in values: c.set_value("settings",key,values[key])
++	for key in values:
++		if key != "unlocked_backgrounds": c.set_value("settings",key,values[key])
+ 	c.set_value("resume","game",saved_game)
+ 	c.save(path)
+ func set_value(key: String, value) -> void:
+@@ -47,9 +49,12 @@ func _sanitize() -> void:
+ 				if is_nan(v) or is_inf(v): v = d
+ 			TYPE_INT:
+ 				v = int(v) if typeof(v) == TYPE_INT or typeof(v) == TYPE_FLOAT else d
++			TYPE_ARRAY:
++				v = v if v is Array else []
+ 			TYPE_STRING:
+ 				v = v if typeof(v) == TYPE_STRING else d
+ 		values[key] = v
++	values.unlocked_backgrounds = values.unlocked_backgrounds.filter(func(id): return id is String and Themes.valid(id,Themes.BONUS_BACKGROUNDS))
+ 	if not values.difficulty in DIFFICULTIES: values.difficulty = DEFAULTS.difficulty
+ 	values.player_name = str(values.player_name).strip_edges().left(24)
+ 	if values.player_name.is_empty(): values.player_name = DEFAULTS.player_name
+diff --git a/godot/tests/run_unlock_contract_tests.gd b/godot/tests/run_unlock_contract_tests.gd
+new file mode 100644
+index 0000000..8c46589
+--- /dev/null
++++ b/godot/tests/run_unlock_contract_tests.gd
+@@ -0,0 +1,48 @@
++extends SceneTree
++const Main = preload("res://main/main.tscn")
++const Settings = preload("res://settings/store.gd")
++const DeviceStore = preload("res://net/device_store.gd")
++const Profile = preload("res://characters/profile.gd")
++const Fake = preload("res://tests/fake_http.gd")
++var checks = 0
++var failures = 0
++func ok(value: bool, label: String):
++	checks += 1
++	if not value: failures += 1; print("FAIL ",label)
++func _initialize(): run.call_deferred()
++func run():
++	var fixture = JSON.parse_string(FileAccess.get_file_as_string("res://tests/unlock_contract_fixture.json"))
++	var ui = Main.instantiate(); ui.test_online_bypass = true
++	ui.settings = Settings.new("user://contract-settings.cfg"); ui.settings.values.sound = false
++	ui.profile = Profile.new("user://contract-profile.cfg"); ui.profile.data.onboarded = true
++	ui.account.store = DeviceStore.new("user://contract-device.cfg")
++	ui.account.store.accept_consent("Tester",DeviceStore.consent_payload()); ui.account.store.keep_device("nwd_contract","Tester")
++	var fake = Fake.new(); ui.account.api.request_factory = func(): return fake
++	root.add_child(ui); await process_frame; await process_frame
++	ui.account.api.cancel_all()
++	ui.overlay = "secret_codes"; ui._rebuild()
++	for step in fixture.steps:
++		var previous = ui.settings.values.unlocked_backgrounds.duplicate()
++		ui._redeem_code(step.code)
++		var request = fake.requests.back()
++		ok(request.url.ends_with("/me/unlocks") and request.body == {"code":step.code},"correct authenticated request "+step.code)
++		ok("Authorization: Bearer nwd_contract" in request.headers,"account token "+step.code)
++		fake.respond(int(step.status),step.body)
++		if int(step.status) == 200:
++			ok(ui.settings.values.background_theme == step.body.unlock.id,"selected server grant "+step.code)
++			ok(ui.settings.values.unlocked_backgrounds == step.body.unlocked_backgrounds,"server ownership "+step.code)
++		else:
++			ok(ui.settings.values.unlocked_backgrounds == previous,"failed code grants nothing "+step.code)
++			ok(ui._code_message == step.body.error,"readable server error "+step.code)
++		ok(not ui._code_pending,"request released "+step.code)
++	ui._account_player(fixture.me.body)
++	ok(ui.settings.values.unlocked_backgrounds.size() == 5,"server profile restores all five")
++	ui._account_player(fixture.other.body)
++	ok(ui.settings.values.unlocked_backgrounds.is_empty(),"other account owns none")
++	ok(ui.settings.values.background_theme == "crystal","account switch removes unavailable selection")
++	for dimensions in [Vector2(320,568),Vector2(390,844),Vector2(844,390),Vector2(1024,768)]:
++		ui.set_view_size(dimensions); ui.overlay = "secret_codes"; ui._rebuild(); await process_frame
++		ok(ui.controls.secret_code.get_parent().get_parent() is ScrollContainer,"scrollable dialog "+str(dimensions))
++		ok(ui.controls.codes_back.get_global_rect().end.y <= dimensions.y,"back button visible "+str(dimensions))
++	ui.queue_free(); await process_frame
++	print("UNLOCK_CONTRACT checks=",checks," failures=",failures); quit(1 if failures else 0)
+diff --git a/godot/tests/run_unlock_tests.gd b/godot/tests/run_unlock_tests.gd
+new file mode 100644
+index 0000000..8dda127
+--- /dev/null
++++ b/godot/tests/run_unlock_tests.gd
+@@ -0,0 +1,47 @@
++extends SceneTree
++const Main = preload("res://main/main.tscn")
++const Store = preload("res://settings/store.gd")
++const DeviceStore = preload("res://net/device_store.gd")
++const Fake = preload("res://tests/fake_http.gd")
++const Themes = preload("res://themes/registry.gd")
++var failures = 0
++var checks = 0
++func ok(value: bool, label: String):
++	checks += 1
++	if not value: failures += 1; print("FAIL ",label)
++func _initialize(): run.call_deferred()
++func run():
++	ok(Themes.BACKGROUND_CODES["0704027"] == "fourth_july","exact July code")
++	ok(Themes.RESERVED_HERO_CODES.size() == 11,"eleven reserved hero codes")
++	ok(Themes.available([]).size() == 3,"locked backgrounds absent")
++	ok(Themes.available(["blizzard","blizzard","unknown"]).size() == 4,"available whitelist unique")
++	var store = Store.new("user://unlock-test.cfg")
++	store.values.unlocked_backgrounds = ["blizzard"]; store.save()
++	ok(Store.new("user://unlock-test.cfg").values.unlocked_backgrounds.is_empty(),"local cache cannot grant ownership")
++	var ui = Main.instantiate(); ui.test_online_bypass = true; ui.settings = store
++	ui.account.store = DeviceStore.new("user://unlock-device.cfg")
++	ui.account.api.request_factory = func(): return Fake.new()
++	store.values.unlocked_backgrounds = []
++	ui.settings.values.sound = false; ui.profile.data.onboarded = true
++	root.add_child(ui); await process_frame; await process_frame
++	ui.overlay = "settings"; ui._rebuild()
++	for i in range(6): ui.controls.difficulty.pressed.emit()
++	ok(ui.overlay == "settings","six taps do not open")
++	ui.controls.difficulty.pressed.emit()
++	ok(ui.overlay == "secret_codes" and ui.controls.has("secret_code"),"seventh tap opens code entry")
++	ui.controls.codes_back.pressed.emit()
++	for i in range(4): ui.controls.difficulty.pressed.emit()
++	ui.controls.cosmetics.pressed.emit(); ui.controls.done.pressed.emit()
++	for i in range(3): ui.controls.difficulty.pressed.emit()
++	ok(ui.overlay == "settings","other button breaks consecutive sequence")
++	ui.account.store.accept_consent("Tester",DeviceStore.consent_payload()); ui.account.store.keep_device("nwd_test","Tester"); ui.account.store.data.signed_out = false
++	ui._code_pending = true; ui._code_owner = "nwd_old"
++	ui._code_completed("cosmetic_unlock",200,{"unlocked_backgrounds":["blizzard"],"unlock":{"kind":"background","id":"blizzard"}},"")
++	ok(not "blizzard" in ui.settings.values.unlocked_backgrounds,"old identity response ignored")
++	ui._code_pending = true; ui._code_owner = "nwd_test"
++	ui._code_completed("cosmetic_unlock",200,{"unlocked_backgrounds":["blizzard"],"unlock":{"kind":"background","id":"blizzard"}},"")
++	ok(ui.settings.values.background_theme == "blizzard","server grant selected")
++	ui._account_player({"unlocked_backgrounds":[]})
++	ok(ui.settings.values.background_theme == "crystal","new account restores allowed background")
++	ui.queue_free(); await process_frame
++	print("Unlock checks: ",checks," failures: ",failures); quit(1 if failures else 0)
+diff --git a/godot/tests/unlock_contract_fixture.json b/godot/tests/unlock_contract_fixture.json
+new file mode 100644
+index 0000000..7e0f04c
+--- /dev/null
++++ b/godot/tests/unlock_contract_fixture.json
+@@ -0,0 +1,312 @@
++{
++  "steps": [
++    {
++      "code": "Blizzard",
++      "status": 200,
++      "body": {
++        "ok": true,
++        "unlock": {
++          "kind": "background",
++          "id": "blizzard"
++        },
++        "already_owned": false,
++        "unlocked_backgrounds": [
++          "blizzard"
++        ],
++        "unlocked_heroes": []
++      }
++    },
++    {
++      "code": "TicTacToe",
++      "status": 200,
++      "body": {
++        "ok": true,
++        "unlock": {
++          "kind": "background",
++          "id": "tictactoe"
++        },
++        "already_owned": false,
++        "unlocked_backgrounds": [
++          "blizzard",
++          "tictactoe"
++        ],
++        "unlocked_heroes": []
++      }
++    },
++    {
++      "code": "010127",
++      "status": 200,
++      "body": {
++        "ok": true,
++        "unlock": {
++          "kind": "background",
++          "id": "new_year"
++        },
++        "already_owned": false,
++        "unlocked_backgrounds": [
++          "blizzard",
++          "new_year",
++          "tictactoe"
++        ],
++        "unlocked_heroes": []
++      }
++    },
++    {
++      "code": "0704027",
++      "status": 200,
++      "body": {
++        "ok": true,
++        "unlock": {
++          "kind": "background",
++          "id": "fourth_july"
++        },
++        "already_owned": false,
++        "unlocked_backgrounds": [
++          "blizzard",
++          "fourth_july",
++          "new_year",
++          "tictactoe"
++        ],
++        "unlocked_heroes": []
++      }
++    },
++    {
++      "code": "Patrick",
++      "status": 200,
++      "body": {
++        "ok": true,
++        "unlock": {
++          "kind": "background",
++          "id": "st_patrick"
++        },
++        "already_owned": false,
++        "unlocked_backgrounds": [
++          "blizzard",
++          "fourth_july",
++          "new_year",
++          "st_patrick",
++          "tictactoe"
++        ],
++        "unlocked_heroes": []
++      }
++    },
++    {
++      "code": "Blizzard",
++      "status": 200,
++      "body": {
++        "ok": true,
++        "unlock": {
++          "kind": "background",
++          "id": "blizzard"
++        },
++        "already_owned": true,
++        "unlocked_backgrounds": [
++          "blizzard",
++          "fourth_july",
++          "new_year",
++          "st_patrick",
++          "tictactoe"
++        ],
++        "unlocked_heroes": []
++      }
++    },
++    {
++      "code": "W2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "G2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "J2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "B2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "N2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "E2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "JB2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "T2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "JY2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "GM2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "D2026",
++      "status": 409,
++      "body": {
++        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
++        "code": "code_unavailable"
++      }
++    },
++    {
++      "code": "wrong",
++      "status": 400,
++      "body": {
++        "error": "That unlock code was not recognized.",
++        "code": "invalid_code"
++      }
++    }
++  ],
++  "me": {
++    "status": 200,
++    "body": {
++      "player_id": "p_Lp28Os9ELjdzs2IW",
++      "screen_name": null,
++      "last_hero_id": null,
++      "purchases": [],
++      "unlocks": [],
++      "unlocked_backgrounds": [
++        "blizzard",
++        "fourth_july",
++        "new_year",
++        "st_patrick",
++        "tictactoe"
++      ],
++      "unlocked_heroes": [],
++      "matches_won": 0,
++      "matches_played": 0,
++      "matches_lost": 0,
++      "boards_won": 0,
++      "tournament_wins": 0,
++      "tos_version": null,
++      "privacy_version": null,
++      "accepted_at": null,
++      "age_confirmed": null,
++      "tutorial_completed": false,
++      "email": null,
++      "email_status": "none",
++      "email_verified_at": null,
++      "capabilities": {
++        "email": true,
++        "account_deletion": true,
++        "tutorial_completion": true,
++        "account_unlocks": true,
++        "online2": true,
++        "chat": true,
++        "tournaments": true,
++        "tournament_sizes": [
++          4,
++          8
++        ],
++        "tournament_min_players": 3,
++        "tournament_start_options": [
++          2,
++          5,
++          10,
++          15,
++          30,
++          60
++        ]
++      },
++      "rank": 1
++    }
++  },
++  "other": {
++    "status": 200,
++    "body": {
++      "player_id": "p_X1rFUANhz_Ia2CJd",
++      "screen_name": null,
++      "last_hero_id": null,
++      "purchases": [],
++      "unlocks": [],
++      "unlocked_backgrounds": [],
++      "unlocked_heroes": [],
++      "matches_won": 0,
++      "matches_played": 0,
++      "matches_lost": 0,
++      "boards_won": 0,
++      "tournament_wins": 0,
++      "tos_version": null,
++      "privacy_version": null,
++      "accepted_at": null,
++      "age_confirmed": null,
++      "tutorial_completed": false,
++      "email": null,
++      "email_status": "none",
++      "email_verified_at": null,
++      "capabilities": {
++        "email": true,
++        "account_deletion": true,
++        "tutorial_completion": true,
++        "account_unlocks": true,
++        "online2": true,
++        "chat": true,
++        "tournaments": true,
++        "tournament_sizes": [
++          4,
++          8
++        ],
++        "tournament_min_players": 3,
++        "tournament_start_options": [
++          2,
++          5,
++          10,
++          15,
++          30,
++          60
++        ]
++      },
++      "rank": 1
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/godot/themes/registry.gd b/godot/themes/registry.gd
+index 18d2aa6..bf05280 100644
+--- a/godot/themes/registry.gd
++++ b/godot/themes/registry.gd
+@@ -11,6 +11,20 @@ const BOARDS = [
+ 	{"id":"crystal","name":"Crystal Classic","description":"Original Round 2 crystal marks and navy tiles."},
+ 	{"id":"sandstone","name":"Sandstone Marble","description":"Warm veined stone, copper and turquoise pieces."}
+ ]
++const BONUS_BACKGROUNDS = [
++	{"id":"blizzard","name":"Blizzard","description":"Snowfall over ice-blue mountain silhouettes."},
++	{"id":"tictactoe","name":"Tic Tac Toe","description":"Neon crosses and rings in a midnight grid."},
++	{"id":"new_year","name":"New Year's Eve","description":"Gold fireworks and midnight confetti."},
++	{"id":"fourth_july","name":"Fourth of July","description":"Red, white and blue starbursts."},
++	{"id":"st_patrick","name":"St Patrick's Day","description":"Emerald shamrocks and golden sparks."}
++]
++const BACKGROUND_CODES = {"BLIZZARD":"blizzard","TICTACTOE":"tictactoe","010127":"new_year","0704027":"fourth_july","PATRICK":"st_patrick"}
++const RESERVED_HERO_CODES = ["W2026","G2026","J2026","B2026","N2026","E2026","JB2026","T2026","JY2026","GM2026","D2026"]
++static func available(unlocked: Array) -> Array:
++	var result = BACKGROUNDS.duplicate(true)
++	for entry in BONUS_BACKGROUNDS:
++		if entry.id in unlocked: result.append(entry)
++	return result
+ static func valid(id: String, collection: Array) -> bool:
+ 	for item in collection:
+ 		if item.id == id: return true
+diff --git a/godot/ui/backdrop.gd b/godot/ui/backdrop.gd
+index 1633ee3..4f7b848 100644
+--- a/godot/ui/backdrop.gd
++++ b/godot/ui/backdrop.gd
+@@ -83,6 +83,9 @@ func _draw():
+ 	if background_theme != "crystal":
+ 		var top_theme = Color("0c2236") if background_theme == "tidal" else Color("372c4c")
+ 		var low_theme = Color("235869") if background_theme == "tidal" else Color("94654f")
++		if background_theme in ["blizzard","tictactoe","new_year","fourth_july","st_patrick"]:
++			top_theme = Color("03121f"); low_theme = Color("123e56") if background_theme == "blizzard" else Color("151938")
++			if background_theme == "st_patrick": low_theme = Color("104c37")
+ 		draw_polygon(PackedVector2Array([Vector2.ZERO,Vector2(w,0),Vector2(w,h),Vector2(0,h)]),PackedColorArray([top_theme,top_theme,low_theme,low_theme]))
+ 		return
+ 	var top = Color("030a1d"); var mid = Color("0a2048"); var low = Color("061330")
+@@ -170,6 +173,8 @@ func _draw_art(n: Control):
+ 
+ ## Cheap alternate skies, deliberately separate from the original art path.
+ func _draw_local_theme(n: Control):
++	if background_theme in ["blizzard","tictactoe","new_year","fourth_july","st_patrick"]:
++		_draw_bonus_theme(n); return
+ 	var w = size.x; var h = size.y
+ 	var sun = Vector2(w*.78,h*.26)
+ 	if background_theme == "tidal":
+@@ -198,3 +203,39 @@ func _draw_local_theme(n: Control):
+ 	for i in range(18):
+ 		var pos = Vector2(fmod(i*97.37+23,w),fmod(i*157.73+13,h*.4))
+ 		n.draw_circle(pos,.9,Color(.8,.9,1,.35))
++
++## Lightweight procedural backgrounds, no downloaded art or gameplay changes.
++func _draw_bonus_theme(n: Control):
++	var w = size.x; var h = size.y
++	var t = 0.0 if reduced_motion else clock
++	if background_theme == "blizzard":
++		for layer in range(3):
++			var points = PackedVector2Array([Vector2(0,h)])
++			for i in range(9): points.append(Vector2(w*i/8.0,h*(.55+layer*.1)-sin(i*2.4+layer)*h*.11))
++			points.append(Vector2(w,h)); n.draw_colored_polygon(points,Color("476e86").darkened(layer*.23))
++		for i in range(70):
++			var point = Vector2(fposmod(i*97.3+t*11,w),fposmod(i*151.7+t*(12+i%9),h))
++			n.draw_circle(point,1.0+i%3,Color(.8,.94,1,.35))
++	elif background_theme == "tictactoe":
++		for row in range(7):
++			for col in range(8):
++				var at = Vector2((col+.5)*w/8,(row+.5)*h/7); var radius = minf(w/8,h/7)*.17
++				var ink = Color(.2,.8,1,.18) if (row+col)%2 == 0 else Color(1,.7,.22,.18)
++				if (row+col)%2 == 0: n.draw_arc(at,radius,0,TAU,24,ink,2,true)
++				else:
++					n.draw_line(at-Vector2.ONE*radius,at+Vector2.ONE*radius,ink,2,true)
++					n.draw_line(at+Vector2(-radius,radius),at+Vector2(radius,-radius),ink,2,true)
++	elif background_theme == "st_patrick":
++		for i in range(17):
++			var at = Vector2(fposmod(i*137.1+40,w),fposmod(i*193.2+40,h)); var r = 10.0+i%6
++			for a in [0.0,TAU/3,TAU*2/3]: n.draw_circle(at+Vector2.from_angle(a)*r*.65,r*.65,Color(.15,.65,.35,.24))
++			n.draw_line(at,at+Vector2(r,r*1.8),Color(.4,.8,.35,.22),2,true)
++	else:
++		for i in range(9):
++			var at = Vector2(fposmod(i*173.7+40,w),fposmod(i*233.1+20,h))
++			var ink = Color(1,.77,.3,.3)
++			if background_theme == "fourth_july": ink = [Color(1,.2,.3,.28),Color(.85,.95,1,.28),Color(.25,.5,1,.3)][i%3]
++			var radius = (24+i%4*10)*(1.0+sin(t*.5+i)*.1)
++			for ray in range(12):
++				var direction = Vector2.from_angle(ray*TAU/12)
++				n.draw_line(at+direction*radius*.3,at+direction*radius,ink,2,true)

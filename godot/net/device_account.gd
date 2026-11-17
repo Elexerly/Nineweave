@@ -50,9 +50,16 @@ func save_email(value: String) -> bool:
 	_email_waiting_for_account = true; _email_setup_elapsed = 0.0
 	email_busy = true; email_message = "Setting up your account…"
 	email_flow_changed.emit()
+	_retry_unavailable_account()
 	_resume_email_save()
 	if _email_waiting_for_account and not busy and not _refreshing: refresh()
 	return true
+func _retry_unavailable_account():
+	# An earlier outage must not fail this Save (or a Settings retry) instantly:
+	# try registration or /me again so EMAIL_SETUP_TIMEOUT covers a real attempt.
+	if not _account_unavailable or busy or _refreshing: return
+	_account_unavailable = false; refresh()
+	if not busy and not _refreshing: _account_unavailable = true
 func _process(delta: float):
 	_hero_retry_elapsed += delta
 	if _hero_retry_elapsed >= 30.0:

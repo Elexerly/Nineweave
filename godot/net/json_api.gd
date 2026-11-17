@@ -10,7 +10,12 @@ var _request
 var _queue: Array = []
 var _current: Dictionary = {}
 static func origin_base(origin: String) -> String:
-	return "" if origin == LIVE_ORIGIN else LIVE_ORIGIN
+	# HTTPRequest rejects scheme-less URLs (ERR_INVALID_PARAMETER), so the live
+	# page must use its absolute origin, never "" or a relative path.
+	return LIVE_ORIGIN
+static func request_url(base: String, path: String) -> String:
+	var absolute = base if base.begins_with("https://") or base.begins_with("http://") else LIVE_ORIGIN
+	return absolute+API_PATH+path
 static func authorization(credential: String) -> PackedStringArray:
 	var headers = PackedStringArray(["Content-Type: application/json"])
 	if not credential.is_empty(): headers.append("Authorization: Bearer "+credential)
@@ -32,8 +37,10 @@ func _start_next():
 	if not is_instance_valid(_request) or not _current.is_empty() or _queue.is_empty(): return
 	_current = _queue.pop_front()
 	var item = _current
-	var result = _request.request(base_url+API_PATH+item.path,authorization(item.credential),item.method,JSON.stringify(item.body) if item.method != HTTPClient.METHOD_GET else "")
-	if result != OK: _finish(0,{},"Online server not available. Can't reach the server.")
+	var result = _request.request(request_url(base_url,item.path),authorization(item.credential),item.method,JSON.stringify(item.body) if item.method != HTTPClient.METHOD_GET else "")
+	if result != OK:
+		printerr("Nineweave API request could not be sent (error %d): %s" % [result,str(item.get("operation",""))])
+		_finish(0,{},"Online server not available. Request could not be sent (error %d)." % result)
 func _complete(result: int, response: int, _headers: PackedStringArray, body: PackedByteArray):
 	if _current.is_empty(): return
 	if result != HTTPRequest.RESULT_SUCCESS or response == 0:

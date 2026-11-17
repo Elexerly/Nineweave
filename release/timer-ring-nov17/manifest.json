@@ -1,0 +1,30 @@
+{
+  "client_source": "a141e1aceeee0c0c1ccedaa3253431c32604d48b",
+  "base_client_source": "48beb0f625bc6be188d1afbe61c26b6d0b8b8f78",
+  "assembled_pack": {
+    "bytes": 16728444,
+    "sha256": "45f8f33bbf011bba214d8ddb9badbff02a0d924c69b03bb0f085dda0d9c144a8"
+  },
+  "files": {
+    "index.pck.part-b": {
+      "bytes": 8339836,
+      "sha256": "f1155aa930088cfe2783dd74b242b92f06d38538afc9d514eea496c5045eeba0"
+    },
+    "BUILD_INFO.txt": {
+      "bytes": 371,
+      "sha256": "fa1d5afe0508f0b9000000ede08b982a0632ffd53d503d0c7968f80b556824b7"
+    },
+    "client-source.patch": {
+      "bytes": 9610,
+      "sha256": "a2e853824fac7c0887f2f458427daffe8979a09e68be8498f366755a69df2a44"
+    },
+    "index.html": {
+      "bytes": 5622,
+      "sha256": "bd37899258c0777039a85e70a7baf11ff0377f4075bc325db18173c54b028080"
+    },
+    "index.pck.part-a": {
+      "bytes": 8388608,
+      "sha256": "b162a23ea599335eaef56571c03c1487e9c7db6cf99ed1482f62b257217f151a"
+    }
+  }
+}

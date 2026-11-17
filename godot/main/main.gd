@@ -55,6 +55,8 @@ class Layer extends Control:
 
 var match_ads = MatchAdGate.new()
 var test_admob = TestAdMob.new()
+var ad_report_reason = "Inappropriate content"
+var ad_report_details = ""
 var _ad_prior_mute = false
 var game = Rules.new()
 var settings = Store.new()
@@ -166,6 +168,7 @@ var _you_name: String = ""
 
 func _ready():
 	add_child(match_ads); add_child(test_admob)
+	test_admob.report_context_changed.connect(func(): ad_report_reason = "Inappropriate content"; ad_report_details = "")
 	match_ads.provider = test_admob
 	# Disabled until native consent + verified StoreKit provider are integrated.
 	# Never derive entitlement from backend purchases or a local settings flag.
@@ -1686,6 +1689,11 @@ func _overlay_controls(s: Vector2):
 		_button("replay_tutorial","How to play",Rect2(lx+sw*.52+4,r.end.y-116,sw*.48-4,44),func(): start_tutorial(true))
 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
 		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
+		if OS.get_name() in ["iOS","Android"]:
+			var third = (sw-16)/3
+			controls.done.size.x = third
+			controls.cosmetics.position.x = lx+third+8; controls.cosmetics.size.x = third
+			_button("report_last_ad","Report ad",Rect2(lx+2*(third+8),r.end.y-62,third,44),func(): overlay = "ad_report"; _rebuild())
 		# Round 5a: blocked-player list only when the server advertises chat.
 		if social.chat() and not test_online_bypass and account.store.complete():
 			_button("blocked_players","Blocked players",Rect2(lx,r.end.y-170,sw,44),open_blocked_players)
@@ -1699,6 +1707,25 @@ func _overlay_controls(s: Vector2):
 				else:
 					controls.account_email.size.x = (sw-8)*.5
 					controls.blocked_players.position = Vector2(name_x+(sw+8)*.5,r.position.y+120); controls.blocked_players.size = Vector2((sw-8)*.5,44)
+	elif overlay == "ad_report" and OS.get_name() in ["iOS","Android"]:
+		var x = r.position.x+24; var w = r.size.x-48
+		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,r.position.y+66); scroll.size = Vector2(w,r.size.y-136)
+		add_child(scroll); ui_nodes.append(scroll)
+		var box = VBoxContainer.new(); box.size_flags_horizontal = Control.SIZE_EXPAND_FILL; box.add_theme_constant_override("separation",12); scroll.add_child(box)
+		var notice = Label.new(); notice.text = "Prepare a local report. Nothing is sent automatically. You can also use the ad's AdChoices reporting control."; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(notice)
+		var reason = OptionButton.new(); reason.custom_minimum_size.y = 48
+		for choice in TestAdMob.Report.REASONS: reason.add_item(choice)
+		reason.select(TestAdMob.Report.REASONS.find(ad_report_reason)); box.add_child(reason)
+		var detail = TextEdit.new(); detail.custom_minimum_size.y = 100; detail.placeholder_text = "Optional details. Avoid personal information."; detail.text = ad_report_details; box.add_child(detail)
+		var preview = Label.new(); preview.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(preview)
+		var update_preview = func(): preview.text = test_admob.last_report.draft(ad_report_reason,ad_report_details)
+		reason.item_selected.connect(func(index): ad_report_reason = TestAdMob.Report.REASONS[index]; update_preview.call())
+		detail.text_changed.connect(func(): ad_report_details = detail.text.left(1000); update_preview.call())
+		update_preview.call()
+		var copied = Label.new(); copied.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(copied)
+		var copy = Button.new(); copy.text = "Copy report (not sent)"; copy.custom_minimum_size.y = 48; copy.disabled = not test_admob.last_report.available(); box.add_child(copy)
+		copy.pressed.connect(func(): DisplayServer.clipboard_set(test_admob.last_report.draft(ad_report_reason,ad_report_details)); copied.text = "Copied. No report has been sent.")
+		_button("ad_report_back","Back",Rect2(x,r.end.y-62,w,44),func(): overlay = "settings"; _rebuild())
 	elif overlay == "account_options":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
 		_button("edit_account_email","Account email",Rect2(x,y,w,48),open_account_email)
@@ -2158,7 +2185,7 @@ func _draw_modal(node: Control):
 		_draw_result(node,r,short); return
 	node.draw_rect(Rect2(Vector2.ZERO,s),Color(.001,.005,.015,.88))
 	P.panel(node,r,false,1,true); P.outline(node,r.grow(-8),P.GOLD.darkened(.4),1)
-	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
+	var heading = {"settings":"SETTINGS","ad_report":"REPORT LAST AD","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
 	if overlay == "online_end": heading = Clock.cancelled_title(str(transport.room.get("end_reason","")) if transport is HTTP else "")
 	P.text(node,heading,Rect2(r.position+Vector2(20,23),Vector2(r.size.x-72,44)),25,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
 	if overlay == "setup":

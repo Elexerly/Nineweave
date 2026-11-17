@@ -31,6 +31,7 @@ class Mobile extends Node:
 	func initialize(): calls += 1
 class Ads extends Node:
 	signal on_interstitial_ad_loaded(uid: int)
+	signal on_interstitial_ad_showed_full_screen_content(uid: int)
 	signal on_interstitial_ad_failed_to_load(uid: int, error: Dictionary)
 	signal on_interstitial_ad_dismissed_full_screen_content(uid: int)
 	signal on_interstitial_ad_failed_to_show_full_screen_content(uid: int, error: Dictionary)
@@ -41,6 +42,7 @@ class Ads extends Node:
 	func create(): next_id += 1; return next_id
 	func load(unit, request, keywords, uid): loads.append([unit,request,keywords,uid])
 	func show(uid): shown.append(uid)
+	func get_response_info(_uid): return {"response_id":"test-response", "email":"private@example.test", "device_token":"secret"}
 	func destroy(uid): destroyed.append(uid)
 var checks = 0
 var failures = 0
@@ -50,6 +52,7 @@ func ok(value: bool, label: String):
 func _initialize(): run.call_deferred()
 func frames(): await process_frame; await process_frame
 func run():
+	await pacing_and_report_cases()
 	await gate_cases()
 	await store_contract()
 	await sdk_cases()
@@ -57,7 +60,7 @@ func run():
 	print("NINEWEAVE_MATCH_AD_GATE ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)
 func gate_cases():
-	var gate = Gate.new(); var ads = Provider.new(); var entitlement = Entitlement.new()
+	var gate = Gate.new(); gate.minimum_match_seconds = 0; gate.minimum_ad_interval_seconds = 0; var ads = Provider.new(); var entitlement = Entitlement.new()
 	root.add_child(gate); root.add_child(ads); root.add_child(entitlement)
 	gate.provider = ads; gate.entitlements = entitlement; gate.enabled = true; gate.consent_allowed = func(): return true
 	var calls = [0]; var proceed = func(): calls[0] += 1
@@ -102,6 +105,9 @@ func sdk_cases():
 	ads.on_interstitial_ad_loaded.emit(1); await frames(); ok(adapter.is_ready(),"loaded callback enables show")
 	var completed = [0]; adapter.completed.connect(func(): completed[0] += 1)
 	ok(adapter.show_interstitial() and not adapter.show_interstitial(),"loaded ad single use")
+	ok(not adapter.last_report.available(),"show attempt alone does not fabricate report evidence")
+	ads.on_interstitial_ad_showed_full_screen_content.emit(1); await frames()
+	ok(adapter.last_report.available() and adapter.last_report.draft("Misleading ad").contains("test-response"),"SDK showed callback captures allowlisted report context")
 	ads.on_interstitial_ad_dismissed_full_screen_content.emit(1); await frames()
 	ads.on_interstitial_ad_dismissed_full_screen_content.emit(1); await frames()
 	ok(completed[0] == 1 and ads.destroyed == [1],"dismiss destroys ad and completes once")
@@ -122,7 +128,9 @@ func controller_cases():
 	ui.http_request_factory = func(): return FakeHTTP.new()
 	ui.account.api.request_factory = func(): return FakeHTTP.new()
 	ui.online_api.request_factory = func(): return FakeHTTP.new()
-	root.add_child(ui); ui.set_process(false); await frames()
+	root.add_child(ui); ui.ad_report_details = "Old ad details"; ui.ad_report_reason = "Misleading ad"; ui.test_admob.report_context_changed.emit()
+	ok(ui.ad_report_details.is_empty() and ui.ad_report_reason == "Inappropriate content","new ad clears old report text and reason")
+	ui.match_ads.minimum_match_seconds = 0; ui.match_ads.minimum_ad_interval_seconds = 0; ui.set_process(false); await frames()
 	ok(not ui.match_ads.enabled,"shipping/web default remains ad-disabled")
 	var ads = Provider.new(); var entitlement = Entitlement.new(); root.add_child(ads); root.add_child(entitlement)
 	ui.match_ads.provider = ads; ui.match_ads.entitlements = entitlement; ui.match_ads.enabled = true; ui.match_ads.consent_allowed = func(): return true
@@ -152,7 +160,7 @@ func controller_cases():
 	ui.free(); ads.free(); entitlement.free(); await frames()
 
 func store_contract():
-	var gate = Gate.new(); var ads = Provider.new()
+	var gate = Gate.new(); gate.minimum_match_seconds = 0; gate.minimum_ad_interval_seconds = 0; var ads = Provider.new()
 	var store = load("res://native/store_entitlement.gd").new()
 	root.add_child(gate); root.add_child(ads); root.add_child(store)
 	store._product_id = "test.remove_ads"
@@ -165,3 +173,27 @@ func store_contract():
 	store._handle_event({"kind":"error","operation":"verification","message":"unconfirmed"})
 	ok(not gate.can_serve(),"real provider unconfirmed snapshot suppresses ads")
 	gate.free(); ads.free(); store.free(); await frames()
+
+func pacing_and_report_cases():
+	var gate = Gate.new(); var ads = Provider.new(); var entitlement = Entitlement.new()
+	root.add_child(gate); root.add_child(ads); root.add_child(entitlement)
+	gate.provider = ads; gate.entitlements = entitlement; gate.enabled = true; gate.consent_allowed = func(): return true
+	var clock = [100.0]; gate.time_source = func(): return clock[0]
+	var calls = [0]; var next = func(): calls[0] += 1
+	gate.begin_match(); clock[0] += 10; gate.match_completed(); gate.before_next(next)
+	ok(ads.shown == 0 and calls[0] == 1,"short match does not trigger ad")
+	gate.begin_match(); clock[0] += 31; gate.match_completed(); gate.before_next(next)
+	ok(ads.shown == 1 and gate.busy,"meaningful match eligible for one ad")
+	clock[0] += 150 # Long ad must not consume the next cooldown.
+	ads.completed.emit(); gate.begin_match(); clock[0] += 31; gate.match_completed(); gate.before_next(next)
+	ok(ads.shown == 1 and calls[0] == 3,"cooldown continues gameplay without back-to-back ads")
+	clock[0] += 120; gate.begin_match(); clock[0] += 31; gate.match_completed(); gate.before_next(next)
+	ok(ads.shown == 2,"later meaningful match eligible after cooldown")
+	ads.completed.emit()
+	var report = Adapter.Report.new()
+	ok(not report.available() and report.draft("Misleading ad").contains("No ad"),"no invented ad report")
+	report.capture({"response_id":"abc", "email":"secret@example.test", "device_token":"private"},"between_matches")
+	var draft = report.draft("Misleading ad","User explanation")
+	ok(draft.contains("abc") and draft.contains("not sent") and not draft.contains("secret") and not draft.contains("private"),"report allowlist excludes account fields and is honestly unsent")
+	ok(report.draft("invalid").contains("Choose"),"report requires known reason")
+	gate.free(); ads.free(); entitlement.free(); await frames()

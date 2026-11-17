@@ -3,7 +3,10 @@ extends Node
 ## Optional native binaries are deliberately not installed/enabled by this source.
 const IOS_TEST_UNIT = "ca-app-pub-3940256099942544/4411468910"
 const ANDROID_TEST_UNIT = "ca-app-pub-3940256099942544/1033173712"
+const Report = preload("res://native/ads/ad_report.gd")
 signal completed
+signal report_context_changed
+var last_report = Report.new()
 var _mobile
 var _ads
 var _uid: int = -1
@@ -35,6 +38,8 @@ func attach_plugins(mobile, ads, platform: String, consent_allowed: bool) -> boo
 	_ads.on_interstitial_ad_failed_to_load.connect(_load_failed,CONNECT_DEFERRED)
 	_ads.on_interstitial_ad_dismissed_full_screen_content.connect(_dismissed,CONNECT_DEFERRED)
 	_ads.on_interstitial_ad_failed_to_show_full_screen_content.connect(_show_failed,CONNECT_DEFERRED)
+	if _ads.has_signal("on_interstitial_ad_showed_full_screen_content"):
+		_ads.on_interstitial_ad_showed_full_screen_content.connect(_shown,CONNECT_DEFERRED)
 	_mobile.initialize()
 	return true
 func _initialized_callback(_status: Dictionary):
@@ -60,6 +65,11 @@ func show_interstitial() -> bool:
 	_loaded = false; _presenting = true
 	_ads.show(_uid)
 	return true
+func _shown(uid: int):
+	if uid != _uid or not _presenting: return
+	var response = _ads.get_response_info(uid) if _ads.has_method("get_response_info") else {}
+	last_report.capture(response if response is Dictionary else {}, "between_matches")
+	report_context_changed.emit()
 func _dismissed(uid: int):
 	if uid != _uid or not _presenting: return
 	_presenting = false; _destroy(); completed.emit()

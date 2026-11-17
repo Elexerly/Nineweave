@@ -7,16 +7,27 @@ var consent_allowed: Callable
 var enabled = false
 var due = false
 var busy = false
+# Product safeguards, not claims of a policy-prescribed interval.
+var minimum_match_seconds = 30.0
+var minimum_ad_interval_seconds = 120.0
+var time_source: Callable
+var _match_started = -1.0
+var _last_attempt = -1.0
 var _marked = false
 var _generation = 0
 var _continuation: Callable
 var _callback: Callable
+func _now() -> float:
+	return float(time_source.call()) if time_source.is_valid() else Time.get_ticks_msec()/1000.0
+func _cooled_down() -> bool:
+	return _last_attempt < 0 or _now()-_last_attempt >= minimum_ad_interval_seconds
 func begin_match():
+	_match_started = _now()
 	_marked = false
 	if can_serve(): provider.preload_ad()
 func match_completed():
 	if _marked: return
-	_marked = true; due = true
+	_marked = true; due = minimum_match_seconds <= 0 or (_match_started >= 0 and _now()-_match_started >= minimum_match_seconds)
 func can_serve() -> bool:
 	return enabled and is_instance_valid(provider) and is_instance_valid(entitlements) and entitlements.entitlement_ready() and not entitlements.ads_removed() and consent_allowed.is_valid() and bool(consent_allowed.call())
 func before_next(continuation: Callable):
@@ -24,8 +35,9 @@ func before_next(continuation: Callable):
 	if not due:
 		continuation.call(); return
 	due = false
-	if not can_serve() or not provider.is_ready():
+	if not _cooled_down() or not can_serve() or not provider.is_ready():
 		continuation.call(); return
+	_last_attempt = _now()
 	busy = true; _generation += 1; _continuation = continuation
 	var generation = _generation
 	_callback = func(): _finish(generation)
@@ -34,6 +46,7 @@ func before_next(continuation: Callable):
 	if not provider.show_interstitial(): _finish(generation)
 func _finish(generation: int):
 	if not busy or generation != _generation: return
+	_last_attempt = _now() # Cooldown also restarts at dismissal/failure, including long ads.
 	var continuation = _continuation
 	_disconnect(); busy = false; _continuation = Callable()
 	presenting_changed.emit(false)

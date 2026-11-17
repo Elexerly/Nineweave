@@ -1,0 +1,73 @@
+{
+  "backend_base": "1e22629c7abf258b053452437700567de90406e4",
+  "backend_tip": "28f74033815fd2b0476899ddaa9eab9dc0d05b24",
+  "client_source": "48beb0f625bc6be188d1afbe61c26b6d0b8b8f78",
+  "assembled_pack": {
+    "bytes": 16727388,
+    "sha256": "8baf6963b1ad89488de42c3a228989e5806e8bc60541a27e8475b65cd8a9881d"
+  },
+  "files": {
+    "index.pck.part-b": {
+      "bytes": 8338780,
+      "sha256": "a412f127e1126b3ab1626f288375e473cd89693c53fde7ea9a0566ecabdcf851"
+    },
+    "backend-changes.patch": {
+      "bytes": 39696,
+      "sha256": "7b03525695da7c3a206acffe1bf8e616d0ddf0a51e8f7670c5b2c4dda42fc1d3"
+    },
+    "BUILD_INFO.txt": {
+      "bytes": 368,
+      "sha256": "5415db0cc27a218cc509498f78119e6a877a3674f261adf7cb7102525b3abdcd"
+    },
+    "client-source.patch": {
+      "bytes": 64090,
+      "sha256": "07a624b8efd1bd52997cc79bdf451dd0329691d0a8e2e2ca4ddd846818b9eb9c"
+    },
+    "index.html": {
+      "bytes": 5622,
+      "sha256": "a5336cc694d9c6810fa34949333b5e4c3a56d52e6a74a6c73878108847ffb663"
+    },
+    "index.pck.part-a": {
+      "bytes": 8388608,
+      "sha256": "dec7ffb5405600e24e20dde461b88a00a888d93c75b2fd3a1cfebb150b37c5f0"
+    }
+  },
+  "backend_paths": {
+    "ONLINE_API.md": {
+      "base_sha256": "0dc4fc888201a1e620360c767ce8436c758c8f2863656baa4397e2b73347d4de",
+      "proposed_sha256": "cb7b955b2ea0d9821a00f47ecfa06c4b334a62aa3682526d20d81fa075e437fa"
+    },
+    "migrations/0008_nineweave_tutorial_idle.sql": {
+      "base_sha256": null,
+      "proposed_sha256": "fea8f7f51b5e605820192181a2bdd09afe84594ed247a86986b54155750528e3"
+    },
+    "migrations/0009_nineweave_late_turn_streak.sql": {
+      "base_sha256": null,
+      "proposed_sha256": "49cbaa6abe578d47539b776aca3bc7419a29225da501aaecd6714b585d2fe019"
+    },
+    "src/lib/nineweave/api.ts": {
+      "base_sha256": "36496191b9f50b20b9a2881fd50943ceedae797e79e73d5f79845ac4f2ae734c",
+      "proposed_sha256": "b3f7e45453cfd83321667287987949f4772c0036c477c957737a6cae04e7fd2c"
+    },
+    "src/lib/nineweave/email.test.ts": {
+      "base_sha256": "16f99db309fc368efa8a59db6754188dd46ea4701ba5ee4116f8e09dbb06aad8",
+      "proposed_sha256": "08e7f00321b54249ec9683b10fc0f4dc5186f8ae8a2e2cedd13f16c611f0b2ff"
+    },
+    "src/lib/nineweave/online2.test.ts": {
+      "base_sha256": "fc1aea95ecbc5aeba1168dda1a3c1646b8cdbe3b8681ab133a81b14719ed7c38",
+      "proposed_sha256": "56af204df749890d191bba7c13eba721e8917d02eaff1326f5404aa0161b1710"
+    },
+    "src/lib/nineweave/players.ts": {
+      "base_sha256": "affe50d2db204bf0e309fe0b459724e3ea28142921508e3b7808f4a002cbe224",
+      "proposed_sha256": "7c9c1a8b857eb9edc0710760eb46de0871149b48c0a7d707bc0847db18e27d00"
+    },
+    "src/lib/nineweave/rooms.ts": {
+      "base_sha256": "8774b84375fe63e831504a952bf4e812572010c32b4ef7f9cc9ccc425420059c",
+      "proposed_sha256": "c7b2aadc7c1880911be4b2d6e08a3e4c8a3a8e96a6587a0905e2f015467b11f7"
+    },
+    "src/lib/nineweave/tournaments.test.ts": {
+      "base_sha256": "429fb2141c56aa95f8dca039eb516e5c3d15d16c322d8f8efcb003f382634dd2",
+      "proposed_sha256": "70e8a34b4888861499b9aca25fa8ca1c573d19c2393c5b8addaebd603f4b9f5e"
+    }
+  }
+}

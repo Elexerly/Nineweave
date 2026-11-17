@@ -1,0 +1,10 @@
+Nineweave tutorial and online idle fairness (November 17)
+engine: 4.7.2.stable.official.ed1daf0bf
+preset: Web / Compatibility / variant/thread_support=false
+mode: --export-release
+built: 2026-11-17T16:10:37Z
+source SHA: 48beb0f625bc6be188d1afbe61c26b6d0b8b8f78
+branch: plax/tutorial-idle-nov17
+tag: pending
+tree: 
+notices: THIRD_PARTY_NOTICES.md and LICENSES/*OFL.txt

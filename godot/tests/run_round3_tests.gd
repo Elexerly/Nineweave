@@ -111,9 +111,9 @@ func run():
 	ok(Paint.themed_mesh(1) == standard_x,"restoring crystal preserves source")
 	Loopback.reset_service()
 	var host = Loopback.new(); var guest = Loopback.new(); root.add_child(host); root.add_child(guest)
-	host.character_id = "nyx_thread"; guest.character_id = "kite_hollow"
+	host.character_id = "nyx_thread"; guest.character_id = "patrick_laquin"
 	host.create_room(); guest.join_room(host.code)
-	ok(host.remote_character_id == "kite_hollow" and guest.remote_character_id == "nyx_thread","loopback shares both characters")
+	ok(host.remote_character_id == "patrick_laquin" and guest.remote_character_id == "nyx_thread","loopback shares both characters")
 	ok(host.character_payload() == {"character_id":"nyx_thread"},"shared cosmetic payload only character id")
 	var room_json = JSON.stringify(Loopback.rooms[host.code].characters)
 	ok(not "theme" in room_json and not "background" in room_json and not "sandstone" in room_json,"room metadata excludes local cosmetics")

@@ -72,9 +72,9 @@ func assets():
 	for i in range(R.AUDIO_IDS.size()): ok(R.audio_index(R.AUDIO_IDS[i]) == i,"original motif unchanged")
 	for pair in [["cryon",0],["aurelia",1],["ryan_blaze",4],["tempest_vega",9]]: ok(R.audio_index(pair[0]) == pair[1],"Round 4 mascot motif unchanged")
 func aliases():
-	var expected = {"erik_comet":"erick_comet","ak_shade":"simon_shade","derrick_torque":"devin_torque","nova_sable":"aiden_vortex","mateo_ricochet":"ethan_ricochet"}
-	var motifs = {"erik_comet":0,"ak_shade":2,"derrick_torque":4,"nova_sable":11,"mateo_ricochet":5}
-	ok(R.ALIASES == expected,"exact five backwards-compatible roster aliases")
+	var expected = {"kite_hollow":"patrick_laquin","erik_comet":"erick_comet","ak_shade":"simon_shade","derrick_torque":"devin_torque","nova_sable":"aiden_vortex","mateo_ricochet":"ethan_ricochet"}
+	var motifs = {"kite_hollow":9,"erik_comet":0,"ak_shade":2,"derrick_torque":4,"nova_sable":11,"mateo_ricochet":5}
+	ok(R.ALIASES == expected,"exact six backwards-compatible roster aliases")
 	var net = Net.new(); net.seat = 1
 	var received: Array = []; net.character_received.connect(func(seat,id): received.append([seat,id]))
 	for old in expected:

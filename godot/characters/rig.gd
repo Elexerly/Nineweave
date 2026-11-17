@@ -18,7 +18,7 @@ const STANCES = [
 	[-.62,.35,-.8,.6,-.18,-.14,.34,.35], # Jack: balancing on glass
 	[-1.15,-.5,.75,1.0,.17,.16,.24,.8], # Beth Solstice (madame_solstice): fan flourish
 	[-.13,-.2,.12,.38,.07,-.07,.12,.3], # Ox: relaxed massive guardian
-	[-1.9,.45,.6,.8,-.15,.13,.28,.9], # Kite: windward salute
+	[-.65,-.35,.28,.6,-.08,-.06,.18,.1], # Patrick: wrist-crossbow ready, grounded stance
 	[-.5,1.0,.25,-.55,.19,-.12,.17,-.5], # Gilt: inspecting a watch
 	[.15,1.05,-.25,-.7,-.13,.08,.12,-1.2] # Siren: conch to the heart
 ]
@@ -125,7 +125,7 @@ func _ready():
 	_build(); resized.connect(_fit)
 func configure(id: String, portrait: bool = false):
 	var changed = hero_id != id
-	hero_id = id; bust = portrait
+	hero_id = R.canonical_id(id); bust = portrait
 	if is_inside_tree() and (changed or not _built): _build()
 	_fit()
 func _part(id: String, at: Vector2, parent: Node2D = null) -> Cutout:
@@ -144,13 +144,13 @@ func _build():
 			part.chromatic = bust and entry.id in ["head","cape"] and not reduced_motion
 			part.queue_redraw()
 		_built = true; expression = ""; _set_expression("neutral"); _fit(); pose(0); return
-	var h = R.get_hero(hero_id); var index = R.index_of(hero_id)
+	var h = R.get_hero(hero_id); var index = R.audio_index(hero_id)
 	var col = Color(h.palette[0]); var dark = Color(h.palette[1]); var trim = Color(h.palette[2]); var skin = [Color("c8a6a0"),Color("bb8057"),Color("af93b8"),Color("91b4c8"),Color("d6a078"),Color("92604e"),Color("ac786c"),Color("d6b8af"),Color("967f69"),Color("c7927f"),Color("bda18c"),Color("7cbaaf")][index]
 	var heavy = index in [3,8]; var width = 72.0 if heavy else (53.0 if index in [1,7] else 42.0)
 	var cape = _part("cape",Vector2(-5,153))
 	if index == 9:
-		cape.curve([-28,0,-92,14,-124,80,-134,151,-73,129,-21,213,17,118,102,147,86,67,32,1],col)
-		cape.line([-96,28,-18,206,78,20],trim,3); cape.line([-112,133,-2,67,96,139],trim,2)
+		cape.curve([-30,0,-59,25,-67,92,-64,183,-29,206,0,190,39,205,64,178,52,70,29,0],col)
+		cape.line([-45,32,-48,112,-29,184],dark,4)
 	else:
 		cape.curve([-width+5,-2,-width-30,26,-width-52,104,-width-65,207,-47,223,-12,202,35,224,width+24,205,width+8,73,width-2,0],dark)
 		cape.curve([-width+3,5,-width-21,38,-width-37,108,-width-48,194,-width+2,155,-20,32],col.darkened(.27))
@@ -212,10 +212,10 @@ func _build():
 		8: # Heavy vine harness.
 			torso.line([-56,-6,-31,25,-18,61,0,86,27,53,55,2],trim,5)
 			for j in range(3): torso.curve([-18+j*17,22+j*12,-27+j*17,13+j*12,-34+j*17,26+j*12,-23+j*17,34+j*12],col.lightened(.2))
-		9: # Sky courier's double-breasted bolero.
-			torso.curve([-37,-10,-17,-19,-6,5,4,35,-23,41,-35,22],trim)
+		9: # Patrick's layered black cowl and bounty-hunter harness.
+			torso.curve([-37,-10,-17,-19,0,-4,26,-18,36,-7,17,14,-9,18,-35,7],dark)
 			torso.curve([20,-18,35,-8,27,28,13,33,6,8],dark)
-			for y in [12,26]: torso.dot(Vector2(-12,y),2.7,col)
+			torso.line([-28,14,23,61],trim.darkened(.3),3)
 		10: # Brass waistcoat and deep turned lapels.
 			torso.curve([-32,-12,-14,-23,-4,8,-12,34,-28,16],trim)
 			torso.curve([15,-20,34,-9,28,18,9,37,3,11],trim)
@@ -316,8 +316,7 @@ func _build():
 		9:
 			head.shape([-35,7,-39,-33,-21,-61,16,-57,39,-33,26,-1,13,-20,-8,-29,-27,23],dark)
 			head.shape([-40,-31,-29,-53,27,-51,40,-29],col)
-			for x in [-17,15]:
-				head.dot(Vector2(x,-36),13,trim); head.dot(Vector2(x,-36),9,Color("3d6c85")); head.line([x-5,-41,x+4,-38],P.WHITE,2)
+			head.shape([-12,24,0,29,12,24,10,41,0,47,-10,40],dark) # Goatee only.
 		10:
 			head.shape([-35,-18,-41,-38,-24,-59,-10,-54,-4,-68,7,-48,28,-55,37,-31,26,-15,16,-32,-8,-27,-25,-3],trim)
 			for x in [-17,15]:
@@ -367,8 +366,9 @@ func _build():
 			var bird = _part("bird",Vector2(-46,23))
 			bird.shape([-14,0,-4,-9,9,-8,16,0,26,3,14,6,6,12,-7,9,-16,15],trim)
 		9:
-			prop.line([0,0,16,-48,45,-86],trim,2); prop.shape([34,-91,48,-119,66,-95,55,-62],col)
-			prop.line([53,-63,61,-41,48,-26,66,-6],trim,3)
+			prop.shape([-9,8,-9,-28,9,-28,9,8],dark)
+			prop.line([-28,-20,0,-31,28,-20],trim,5); prop.line([-28,-20,28,-20],dark,2)
+			prop.line([0,9,18,30,5,49,21,66],trim,2); prop.dot(Vector2(21,69),8,dark)
 		10:
 			prop.line([0,-26,11,-36,23,-20,18,1,4,17],trim,2); prop.dot(Vector2(4,27),24,col); prop.dot(Vector2(4,27),19,dark)
 			prop.line([4,11,4,27,14,32],trim,3)
@@ -428,7 +428,7 @@ func pose(at: float):
 	var power = clip in ["idle_power","victory","score_flash","mark_push"]
 	var attack = clip in ["lock_in","board_pop","hover_react","victory","score_flash","mark_push"]
 	var blend = smoothstep(0,.22,clip_age)
-	var index = R.index_of(hero_id)
+	var index = R.audio_index(hero_id)
 	var react = smoothstep(0,.6,clip_age)
 	for key in bones:
 		var rot = 0.0; var pos: Vector2 = rest[key]; var scl = Vector2.ONE
@@ -522,7 +522,7 @@ func _make_face(id: String) -> Dictionary:
 	for part in ["eyes","pupils","brows","mouth","symbols"]: parts[part] = Cutout.new()
 	var eye: Cutout = parts.eyes; var pupil: Cutout = parts.pupils; var brow: Cutout = parts.brows
 	var mouth: Cutout = parts.mouth; var symbol: Cutout = parts.symbols
-	var index = R.index_of(hero_id); var h = R.DATA[index]; var iris = Color(h.palette[0]).lightened(.2)
+	var index = R.audio_index(hero_id); var h = R.get_hero(hero_id); var iris = Color(h.palette[0]).lightened(.2)
 	var dialect: Array = Reactions.DIALECTS[index]; var white = Color("f4f5ee")
 	for side_value in [-1,1]:
 		var x = side_value*14.0*float(dialect[0]); var asym = side_value*float(dialect[2])

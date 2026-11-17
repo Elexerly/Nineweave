@@ -39,7 +39,7 @@ func run():
 	print("NINEWEAVE_ROUND4 ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)
 func roster_assets():
-	var order = ["cryon","aurelia","vesper_vale","auric_rex","nyx_thread","cobalt_bastion","ember_quill","lumen_pike","shard_jack","madame_solstice","bramble_ox","kite_hollow","professor_gilt","siren_coil","ryan_blaze","tempest_vega"]
+	var order = ["cryon","aurelia","vesper_vale","auric_rex","nyx_thread","cobalt_bastion","ember_quill","lumen_pike","shard_jack","madame_solstice","bramble_ox","patrick_laquin","professor_gilt","siren_coil","ryan_blaze","tempest_vega"]
 	var ids = {}
 	ok(R.DATA.size() == 32,"32 heroes")
 	for i in range(R.DATA.size()):
@@ -54,7 +54,7 @@ func roster_assets():
 	for i in range(R.AUDIO_IDS.size()): ok(R.audio_index(R.AUDIO_IDS[i]) == i,"original audio motif retained "+R.AUDIO_IDS[i])
 	for id in ["cryon","aurelia","ryan_blaze","tempest_vega"]: ok(R.audio_index(id) in range(12),"new hero reuses existing audio "+id)
 	ok(ids.size() == 32 and R.get_hero("shard_jack").name == "Jack Sovereign","unique stable IDs and Jack rename")
-	ok(not "she" in R.get_hero("kite_hollow").defeat and R.get_hero("siren_coil").body == "diver","updated concepts")
+	ok(not "she" in R.get_hero("patrick_laquin").defeat and R.get_hero("siren_coil").body == "diver","updated concepts")
 	ok(R.valid(R.get_hero("bad-id").id) and Art.get_texture("bad-id","head_neutral") != null,"unknown renderer ID safe fallback")
 	var path = "user://r4-corrupt-profile.cfg"; var cfg = ConfigFile.new()
 	cfg.set_value("profile","character_id","removed-hero"); cfg.save(path)

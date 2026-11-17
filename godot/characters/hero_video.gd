@@ -4,6 +4,19 @@ const Roster = preload("res://characters/roster.gd")
 const Cache = preload("res://characters/hero_video_cache.gd")
 const MANIFEST = "res://assets/hero_video/manifest.json"
 const KINDS = ["intro","victory"]
+# Revision query prevents an old browser/CDN sidecar from shadowing replaced media.
+const MEDIA_REVISIONS = {
+	"kellen_byte/intro":"60713ca", "professor_gilt/intro":"fd1c7e0",
+	"nyx_thread/intro":"d1e7b84", "cobalt_bastion/intro":"d1e7b84",
+	"sara/intro":"d1e7b84", "pope_slam/intro":"d1e7b84",
+	"jason_danger/victory":"d1e7b84", "max_granite/victory":"d1e7b84",
+	"alex_wilder/victory":"d1e7b84", "rose_valor/victory":"d1e7b84",
+	"devin_torque/victory":"d1e7b84", "patrick_laquin/intro":"d1e7b84",
+	"patrick_laquin/victory":"d1e7b84"
+}
+static func versioned_relative_path(relative: String) -> String:
+	var key = relative.trim_prefix("hero_video/").trim_suffix(".ogv")
+	return relative + ("?v=" + str(MEDIA_REVISIONS[key]) if MEDIA_REVISIONS.has(key) else "")
 # -1 = actual platform; 0/1 are explicit test seams, never saved settings.
 var bundled_override: int = -1
 var catalog: Dictionary = {}
@@ -36,7 +49,7 @@ func sidecar_url(relative: String) -> String:
 	# HTTPRequest needs an absolute URL. Resolve the relative sidecar beside index.html,
 	# preserving project-pages subdirectories; never use the online API origin.
 	if OS.has_feature("web"):
-		return str(JavaScriptBridge.eval("new URL("+JSON.stringify(relative+("?v=60713ca" if relative == "hero_video/kellen_byte/intro.ogv" else "?v=fd1c7e0" if relative == "hero_video/professor_gilt/intro.ogv" else ""))+", document.baseURI).href"))
+		return str(JavaScriptBridge.eval("new URL("+JSON.stringify(versioned_relative_path(relative))+", document.baseURI).href"))
 	return relative # fake HTTP on native tests receives the portable relative URL.
 func prefetch_hero(hero_id: String):
 	var id = Roster.canonical_id(hero_id)

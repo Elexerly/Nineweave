@@ -43,6 +43,9 @@ func run():
 	Input.parse_input_event(tap); await frames()
 	ok(not c.active and not ui.board.frozen and not v._waiting_for_intros,"touch skips preloader through real input dispatch")
 	ok(ui._skip_guard_until > Time.get_ticks_msec(),"skip tap cannot leak onto board")
+	# Finish the gesture: otherwise a later synthetic press races the 350ms guard.
+	var release = InputEventScreenTouch.new(); release.pressed = false; release.position = tap.position
+	Input.parse_input_event(release); await frames()
 	v._process(20); ok(not v.visible,"late load cannot reopen skipped preloader")
 	ui._begin_versus(); c.advance(.7)
 	var key = InputEventKey.new(); key.pressed = true; key.keycode = KEY_ESCAPE

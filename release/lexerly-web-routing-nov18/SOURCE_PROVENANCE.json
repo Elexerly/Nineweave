@@ -1,0 +1,16 @@
+{
+  "purpose": "Review-only source/export provenance backup. Not a deployable host branch.",
+  "export_repository": "Elexerly/nineweave-web-test",
+  "export_commit": "1e37d0716a47eb28659e624886633524adce58eb",
+  "declared_local_source": "f161c4b16a2ffcab6c20774ab6e92d3912e02eaa",
+  "backed_up_source_commit": "ae427ca7270c9f8633d555219c5437eb4999095c",
+  "backed_up_source_branch": "review/lexerly-integration-nov18",
+  "identical_godot_tree": "d55381183289e223cf495c998796a61b79821404",
+  "source_equivalence": "The original local source f161c4b and public-safe local d2a9b28 have exactly the same godot subtree. GitHub ae427ca has the exact complete tree of d2a9b28. Only documentation differs from f161c4b, replacing private file identifiers with names and checksums.",
+  "pack_sha256": "963bf9fbe11cfccb3a7cb6c38471bdedc038fa539bca54dbbe75cc760c68f22a",
+  "pack_bytes": 18155036,
+  "final_web_api": "https://nineweave.grok.me",
+  "routing_note": "Final export explicitly opts into shared live accounts through LEXERLY_TEST_API_URL. The custom lexerly_test client uses that HTTPS override; isolated Neon default from earlier test preparation is not the final routing. Backup only: no account/API operations executed.",
+  "transport": "Export HTML preloads three existing GitHub pack chunks of 7000000,7000000,4155036 bytes and verifies the combined SHA256. Other export files remain in the export repository at the pinned commit.",
+  "caution": "Source branch inherited backend/public are stale. Never deploy this whole branch; this backup does not change main, the live site, database, or iPhone."
+}

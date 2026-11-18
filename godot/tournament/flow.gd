@@ -37,7 +37,9 @@ func build(size: Vector2):
 	screen.action.connect(_action)
 	main.add_child(screen); main.ui_nodes.append(screen); main.controls.merge(screen.controls)
 	screen.video_overlay.audio_active.connect(main.sound.set_hero_video_audio)
-func play():
+func play(ad_checked: bool = false):
+	if not ad_checked:
+		main.match_ads.before_next(func(): play(true)); return
 	if session.current().is_empty() or match_active: return
 	if is_instance_valid(screen) and is_instance_valid(screen.bracket) and not screen.bracket.settled(): return
 	main.profile.choose(str(session.active.hero),str(main.profile.data.display_name))

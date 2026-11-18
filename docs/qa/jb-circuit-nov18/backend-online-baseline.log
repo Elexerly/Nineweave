@@ -1,0 +1,1132 @@
+
+> test:online
+> node --experimental-strip-types --test src/lib/nineweave/account-deletion.test.ts src/lib/nineweave/rules.test.ts src/lib/nineweave/online.test.ts src/lib/nineweave/email.test.ts src/lib/nineweave/chat-filter.test.ts src/lib/nineweave/online2.test.ts src/lib/nineweave/tournaments.test.ts src/lib/nineweave/admin-setup.test.ts
+
+TAP version 13
+# (node:53006) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: own account deletion
+    # Subtest: requires own valid device authentication and exact explicit confirmation
+    ok 1 - requires own valid device authentication and exact explicit confirmation
+      ---
+      duration_ms: 79.76725
+      type: 'test'
+      ...
+    # Subtest: erases identifying account data and reports while preserving unlinked shared results/opponent stats
+    ok 2 - erases identifying account data and reports while preserving unlinked shared results/opponent stats
+      ---
+      duration_ms: 66.765875
+      type: 'test'
+      ...
+    # Subtest: blocks waiting room without modifying data
+    ok 3 - blocks waiting room without modifying data
+      ---
+      duration_ms: 45.378292
+      type: 'test'
+      ...
+    # Subtest: blocks active room without modifying data
+    ok 4 - blocks active room without modifying data
+      ---
+      duration_ms: 24.902792
+      type: 'test'
+      ...
+    # Subtest: blocks registering tournament without awarding or cancelling
+    ok 5 - blocks registering tournament without awarding or cancelling
+      ---
+      duration_ms: 46.389292
+      type: 'test'
+      ...
+    # Subtest: blocks starting tournament without awarding or cancelling
+    ok 6 - blocks starting tournament without awarding or cancelling
+      ---
+      duration_ms: 64.38825
+      type: 'test'
+      ...
+    # Subtest: blocks running tournament without awarding or cancelling
+    ok 7 - blocks running tournament without awarding or cancelling
+      ---
+      duration_ms: 56.566708
+      type: 'test'
+      ...
+    # Subtest: fences an already authorized rematch commit after deletion
+    ok 8 - fences an already authorized rematch commit after deletion
+      ---
+      duration_ms: 42.571125
+      type: 'test'
+      ...
+    # Subtest: cannot restore a deleted seat from a stale tournament envelope
+    ok 9 - cannot restore a deleted seat from a stale tournament envelope
+      ---
+      duration_ms: 294.56575
+      type: 'test'
+      ...
+    # Subtest: rechecks a cached seat token and rejects rotated sessions
+    ok 10 - rechecks a cached seat token and rejects rotated sessions
+      ---
+      duration_ms: 30.502583
+      type: 'test'
+      ...
+    # Subtest: rolls back all scrubbing when a later statement fails
+    ok 11 - rolls back all scrubbing when a later statement fails
+      ---
+      duration_ms: 48.947333
+      type: 'test'
+      ...
+    # Subtest: rechecks rotated credentials inside the locked transaction
+    ok 12 - rechecks rotated credentials inside the locked transaction
+      ---
+      duration_ms: 68.501125
+      type: 'test'
+      ...
+    1..12
+ok 1 - own account deletion
+  ---
+  duration_ms: 6052.292958
+  type: 'suite'
+  ...
+# (node:53007) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: temporary admin setup
+    # Subtest: flag off and UNSET return 404 for page and all API requests without touching DB
+    ok 1 - flag off and UNSET return 404 for page and all API requests without touching DB
+      ---
+      duration_ms: 20.173958
+      type: 'test'
+      ...
+    # Subtest: valid page has no-store and a malformed hash is unavailable
+    ok 2 - valid page has no-store and a malformed hash is unavailable
+      ---
+      duration_ms: 85.8325
+      type: 'test'
+      ...
+    # Subtest: allows five failed attempts per IP, blocks the sixth and expires the rolling window
+    ok 3 - allows five failed attempts per IP, blocks the sixth and expires the rolling window
+      ---
+      duration_ms: 215.125583
+      type: 'test'
+      ...
+    # Subtest: enforces twenty global failures across instances and rolling-hour expiry
+    ok 4 - enforces twenty global failures across instances and rolling-hour expiry
+      ---
+      duration_ms: 636.198583
+      type: 'test'
+      ...
+    # Subtest: serializes concurrent failures and does not charge successful authentication
+    ok 5 - serializes concurrent failures and does not charge successful authentication
+      ---
+      duration_ms: 326.491167
+      type: 'test'
+      ...
+    # Subtest: resolves env > saved config > host/none, with a sixty-second cache
+    ok 6 - resolves env > saved config > host/none, with a sixty-second cache
+      ---
+      duration_ms: 9.633417
+      type: 'test'
+      ...
+    # Subtest: migrates Neon before saving, records files once, excludes auth and copies no players
+    ok 7 - migrates Neon before saving, records files once, excludes auth and copies no players
+      ---
+      duration_ms: 106.673416
+      type: 'test'
+      ...
+    # Subtest: does not save either setting after connection/migration errors, and redacts all errors/logs
+    ok 8 - does not save either setting after connection/migration errors, and redacts all errors/logs
+      ---
+      duration_ms: 40.718833
+      type: 'test'
+      ...
+    # Subtest: rolls back the failing migration and never saves an unverified target
+    ok 9 - rolls back the failing migration and never saves an unverified target
+      ---
+      duration_ms: 39.252125
+      type: 'test'
+      ...
+    # Subtest: saves fields separately, masks status and never returns submitted secrets
+    ok 10 - saves fields separately, masks status and never returns submitted secrets
+      ---
+      duration_ms: 100.213458
+      type: 'test'
+      ...
+    # Subtest: test mail is fixed-recipient, optional key yields 503, mailer exceptions are sanitized
+    ok 11 - test mail is fixed-recipient, optional key yields 503, mailer exceptions are sanitized
+      ---
+      duration_ms: 124.40875
+      type: 'test'
+      ...
+    # Subtest: rejects invalid URLs, malformed bodies and cross-origin attempts
+    ok 12 - rejects invalid URLs, malformed bodies and cross-origin attempts
+      ---
+      duration_ms: 164.96225
+      type: 'test'
+      ...
+    # Subtest: clears only named test accounts on the ACTIVE DB with counts and dependent rows
+    ok 13 - clears only named test accounts on the ACTIVE DB with counts and dependent rows
+      ---
+      duration_ms: 97.01425
+      type: 'test'
+      ...
+    1..13
+ok 2 - temporary admin setup
+  ---
+  duration_ms: 9006.034542
+  type: 'suite'
+  ...
+# Subtest: admin same-site check works behind a proxy with an internal request.url
+ok 3 - admin same-site check works behind a proxy with an internal request.url
+  ---
+  duration_ms: 7.915875
+  type: 'test'
+  ...
+# (node:53008) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: chat filter
+    # Subtest: normalizes to a single trimmed line without control characters
+    ok 1 - normalizes to a single trimmed line without control characters
+      ---
+      duration_ms: 0.586417
+      type: 'test'
+      ...
+    # Subtest: enforces non-empty and the 120-character cap after trimming
+    ok 2 - enforces non-empty and the 120-character cap after trimming
+      ---
+      duration_ms: 3.66
+      type: 'test'
+      ...
+    # Subtest: masks profanity with same-length asterisks, including leetspeak and obfuscation
+    ok 3 - masks profanity with same-length asterisks, including leetspeak and obfuscation
+      ---
+      duration_ms: 4.08975
+      type: 'test'
+      ...
+    # Subtest: leaves ordinary words alone
+    ok 4 - leaves ordinary words alone
+      ---
+      duration_ms: 1.288792
+      type: 'test'
+      ...
+    # Subtest: hard-blocks slurs and hate phrases
+    ok 5 - hard-blocks slurs and hate phrases
+      ---
+      duration_ms: 0.180375
+      type: 'test'
+      ...
+    # Subtest: hard-blocks URLs, email addresses, phone numbers and messaging handles
+    ok 6 - hard-blocks URLs, email addresses, phone numbers and messaging handles
+      ---
+      duration_ms: 0.16525
+      type: 'test'
+      ...
+    # Subtest: exposes the quick-chat presets
+    ok 7 - exposes the quick-chat presets
+      ---
+      duration_ms: 0.095375
+      type: 'test'
+      ...
+    1..7
+ok 4 - chat filter
+  ---
+  duration_ms: 10.663292
+  type: 'suite'
+  ...
+# (node:53009) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: profile email fields
+    # Subtest: advertises capabilities.email on register, GET /me and PATCH /me
+    ok 1 - advertises capabilities.email on register, GET /me and PATCH /me
+      ---
+      duration_ms: 56.472375
+      type: 'test'
+      ...
+    # Subtest: PATCH stores a trimmed, lowercased email as unverified; null and empty clear it
+    ok 2 - PATCH stores a trimmed, lowercased email as unverified; null and empty clear it
+      ---
+      duration_ms: 50.087417
+      type: 'test'
+      ...
+    # Subtest: changing the address resets verification; re-sending the same one keeps it
+    ok 3 - changing the address resets verification; re-sending the same one keeps it
+      ---
+      duration_ms: 60.014833
+      type: 'test'
+      ...
+    # Subtest: rejects invalid emails and keeps rejecting unknown fields
+    ok 4 - rejects invalid emails and keeps rejecting unknown fields
+      ---
+      duration_ms: 146.737083
+      type: 'test'
+      ...
+    # Subtest: never puts email on the leaderboard
+    ok 5 - never puts email on the leaderboard
+      ---
+      duration_ms: 107.54575
+      type: 'test'
+      ...
+    1..5
+ok 5 - profile email fields
+  ---
+  duration_ms: 5813.683958
+  type: 'suite'
+  ...
+# Subtest: verification
+    # Subtest: request + confirm marks the email verified and stores only a hash
+    ok 1 - request + confirm marks the email verified and stores only a hash
+      ---
+      duration_ms: 16.26
+      type: 'test'
+      ...
+    # Subtest: request with a new email stores it unverified and clears prior verification
+    ok 2 - request with a new email stores it unverified and clears prior verification
+      ---
+      duration_ms: 15.545792
+      type: 'test'
+      ...
+    # Subtest: accepts a code sent as a number or with spaces
+    ok 3 - accepts a code sent as a number or with spaces
+      ---
+      duration_ms: 23.031667
+      type: 'test'
+      ...
+    # Subtest: wrong codes burn attempts and the 6th attempt is locked even with the right code
+    ok 4 - wrong codes burn attempts and the 6th attempt is locked even with the right code
+      ---
+      duration_ms: 15.733583
+      type: 'test'
+      ...
+    # Subtest: the right code on the 5th attempt still works
+    ok 5 - the right code on the 5th attempt still works
+      ---
+      duration_ms: 18.372959
+      type: 'test'
+      ...
+    # Subtest: expires codes after 10 minutes
+    ok 6 - expires codes after 10 minutes
+      ---
+      duration_ms: 27.756459
+      type: 'test'
+      ...
+    # Subtest: a new request supersedes the previous code
+    ok 7 - a new request supersedes the previous code
+      ---
+      duration_ms: 33.739958
+      type: 'test'
+      ...
+    # Subtest: changing the address with PATCH kills open codes
+    ok 8 - changing the address with PATCH kills open codes
+      ---
+      duration_ms: 16.165667
+      type: 'test'
+      ...
+    # Subtest: validates the confirm body and scopes challenges to their player
+    ok 9 - validates the confirm body and scopes challenges to their player
+      ---
+      duration_ms: 62.06825
+      type: 'test'
+      ...
+    # Subtest: requires a device token
+    ok 10 - requires a device token
+      ---
+      duration_ms: 10.438625
+      type: 'test'
+      ...
+    1..10
+ok 6 - verification
+  ---
+  duration_ms: 239.549583
+  type: 'suite'
+  ...
+# Subtest: throttling
+    # Subtest: enforces a 60 s resend cooldown per player
+    ok 1 - enforces a 60 s resend cooldown per player
+      ---
+      duration_ms: 14.625792
+      type: 'test'
+      ...
+    # Subtest: caps requests at 5 per player per hour
+    ok 2 - caps requests at 5 per player per hour
+      ---
+      duration_ms: 24.869667
+      type: 'test'
+      ...
+    # Subtest: caps requests at 5 per email per hour across players
+    ok 3 - caps requests at 5 per email per hour across players
+      ---
+      duration_ms: 35.291083
+      type: 'test'
+      ...
+    # Subtest: rate-limits the email endpoints per IP
+    ok 4 - rate-limits the email endpoints per IP
+      ---
+      duration_ms: 23.591875
+      type: 'test'
+      ...
+    1..4
+ok 7 - throttling
+  ---
+  duration_ms: 98.612167
+  type: 'suite'
+  ...
+# Subtest: uniqueness
+    # Subtest: returns 409 when the email is verified on another account
+    ok 1 - returns 409 when the email is verified on another account
+      ---
+      duration_ms: 224.019916
+      type: 'test'
+      ...
+    # Subtest: first confirm wins; the other account's open code is dead
+    ok 2 - first confirm wins; the other account's open code is dead
+      ---
+      duration_ms: 219.653625
+      type: 'test'
+      ...
+    # Subtest: the unique index returns 409 if two confirms race past the pre-check
+    ok 3 - the unique index returns 409 if two confirms race past the pre-check
+      ---
+      duration_ms: 39.38825
+      type: 'test'
+      ...
+    # Subtest: the database refuses two verified players with one email
+    ok 4 - the database refuses two verified players with one email
+      ---
+      duration_ms: 74.642584
+      type: 'test'
+      ...
+    1..4
+ok 8 - uniqueness
+  ---
+  duration_ms: 557.875
+  type: 'suite'
+  ...
+# Subtest: mailer
+    # Subtest: answers 503 when no mailer / API key is configured, without storing anything
+    ok 1 - answers 503 when no mailer / API key is configured, without storing anything
+      ---
+      duration_ms: 19.669208
+      type: 'test'
+      ...
+    # Subtest: answers 502 and kills the challenge when the provider fails
+    ok 2 - answers 502 and kills the challenge when the provider fails
+      ---
+      duration_ms: 19.458125
+      type: 'test'
+      ...
+    # Subtest: posts to Resend with the right shape and never logs the key, body or code
+    ok 3 - posts to Resend with the right shape and never logs the key, body or code
+      ---
+      duration_ms: 10.6725
+      type: 'test'
+      ...
+    # Subtest: builds a branded email with no secrets, links or tracking
+    ok 4 - builds a branded email with no secrets, links or tracking
+      ---
+      duration_ms: 8.621916
+      type: 'test'
+      ...
+    # Subtest: handler logs never contain the code
+    ok 5 - handler logs never contain the code
+      ---
+      duration_ms: 36.310875
+      type: 'test'
+      ...
+    1..5
+ok 9 - mailer
+  ---
+  duration_ms: 94.919166
+  type: 'suite'
+  ...
+# Subtest: recovery
+    # Subtest: issues a new device token for a verified email and retires the old one
+    ok 1 - issues a new device token for a verified email and retires the old one
+      ---
+      duration_ms: 23.543833
+      type: 'test'
+      ...
+    # Subtest: looks identical for unknown and unverified emails and sends nothing
+    ok 2 - looks identical for unknown and unverified emails and sends nothing
+      ---
+      duration_ms: 13.400958
+      type: 'test'
+      ...
+    # Subtest: a verification code can't be used to recover, and vice versa
+    ok 3 - a verification code can't be used to recover, and vice versa
+      ---
+      duration_ms: 22.561667
+      type: 'test'
+      ...
+    # Subtest: is throttled silently and locks after 5 wrong codes
+    ok 4 - is throttled silently and locks after 5 wrong codes
+      ---
+      duration_ms: 22.1145
+      type: 'test'
+      ...
+    # Subtest: stops working once the address is changed
+    ok 5 - stops working once the address is changed
+      ---
+      duration_ms: 43.410166
+      type: 'test'
+      ...
+    # Subtest: answers 503 without a mailer
+    ok 6 - answers 503 without a mailer
+      ---
+      duration_ms: 19.255292
+      type: 'test'
+      ...
+    1..6
+ok 10 - recovery
+  ---
+  duration_ms: 144.479125
+  type: 'suite'
+  ...
+# (node:53010) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: device auth and profile
+    # Subtest: registers a device, returns the token once and stores only its hash
+    ok 1 - registers a device, returns the token once and stores only its hash
+      ---
+      duration_ms: 40.792125
+      type: 'test'
+      ...
+    # Subtest: enforces unique, clean screen names and persists profile fields
+    ok 2 - enforces unique, clean screen names and persists profile fields
+      ---
+      duration_ms: 66.73425
+      type: 'test'
+      ...
+    # Subtest: can register with a screen name in one call
+    ok 3 - can register with a screen name in one call
+      ---
+      duration_ms: 22.502916
+      type: 'test'
+      ...
+    # Subtest: stores consent on PATCH /me and on registration
+    ok 4 - stores consent on PATCH /me and on registration
+      ---
+      duration_ms: 40.708042
+      type: 'test'
+      ...
+    1..4
+ok 11 - device auth and profile
+  ---
+  duration_ms: 5496.764625
+  type: 'suite'
+  ...
+# Subtest: lobby
+    # Subtest: creates a public room, lists it without secrets, and joins
+    ok 1 - creates a public room, lists it without secrets, and joins
+      ---
+      duration_ms: 74.514125
+      type: 'test'
+      ...
+    # Subtest: randomly assigns X/O on the first match
+    ok 2 - randomly assigns X/O on the first match
+      ---
+      duration_ms: 244.162458
+      type: 'test'
+      ...
+    # Subtest: validates character ids and defaults to the legacy hero
+    ok 3 - validates character ids and defaults to the legacy hero
+      ---
+      duration_ms: 60.42475
+      type: 'test'
+      ...
+    # Subtest: hides private rooms and requires the password
+    ok 4 - hides private rooms and requires the password
+      ---
+      duration_ms: 174.274583
+      type: 'test'
+      ...
+    # Subtest: lets the host cancel a waiting room
+    ok 5 - lets the host cancel a waiting room
+      ---
+      duration_ms: 17.695083
+      type: 'test'
+      ...
+    # Subtest: expires waiting rooms after 10 idle minutes, but not while the host polls
+    ok 6 - expires waiting rooms after 10 idle minutes, but not while the host polls
+      ---
+      duration_ms: 110.646625
+      type: 'test'
+      ...
+    # Subtest: rejects bad auth and malformed requests
+    ok 7 - rejects bad auth and malformed requests
+      ---
+      duration_ms: 28.967959
+      type: 'test'
+      ...
+    1..7
+ok 12 - lobby
+  ---
+  duration_ms: 711.21075
+  type: 'suite'
+  ...
+# Subtest: authoritative play
+    # Subtest: plays a full game to a win and updates records only at match end
+    ok 1 - plays a full game to a win and updates records only at match end
+      ---
+      duration_ms: 652.204875
+      type: 'test'
+      ...
+    # Subtest: records a draw as played-only, with no board-count tiebreak
+    ok 2 - records a draw as played-only, with no board-count tiebreak
+      ---
+      duration_ms: 158.934292
+      type: 'test'
+      ...
+    # Subtest: makes move retries idempotent and rejects stale, future, wrong-seat and illegal moves
+    ok 3 - makes move retries idempotent and rejects stale, future, wrong-seat and illegal moves
+      ---
+      duration_ms: 30.183125
+      type: 'test'
+      ...
+    # Subtest: serializes concurrent duplicate moves into one accepted move
+    ok 4 - serializes concurrent duplicate moves into one accepted move
+      ---
+      duration_ms: 24.052459
+      type: 'test'
+      ...
+    # Subtest: refuses moves before the opponent joins
+    ok 5 - refuses moves before the opponent joins
+      ---
+      duration_ms: 18.264
+      type: 'test'
+      ...
+    1..5
+ok 13 - authoritative play
+  ---
+  duration_ms: 883.9335
+  type: 'suite'
+  ...
+# Subtest: rematch
+    # Subtest: requires both players, is idempotent, swaps seats and resets state
+    ok 1 - requires both players, is idempotent, swaps seats and resets state
+      ---
+      duration_ms: 66.776875
+      type: 'test'
+      ...
+    # Subtest: is rejected after the opponent leaves
+    ok 2 - is rejected after the opponent leaves
+      ---
+      duration_ms: 66.054458
+      type: 'test'
+      ...
+    1..2
+ok 14 - rematch
+  ---
+  duration_ms: 132.975708
+  type: 'suite'
+  ...
+# Subtest: forfeits and timeouts
+    # Subtest: leaving an active match forfeits it to the opponent
+    ok 1 - leaving an active match forfeits it to the opponent
+      ---
+      duration_ms: 30.862166
+      type: 'test'
+      ...
+    # Subtest: forfeits the player due to move 35 s into a turn once both players moved
+    ok 2 - forfeits the player due to move 35 s into a turn once both players moved
+      ---
+      duration_ms: 31.066709
+      type: 'test'
+      ...
+    # Subtest: the global sweep resolves timeouts even when nobody polls the room
+    ok 3 - the global sweep resolves timeouts even when nobody polls the room
+      ---
+      duration_ms: 19.849
+      type: 'test'
+      ...
+    1..3
+ok 15 - forfeits and timeouts
+  ---
+  duration_ms: 81.914583
+  type: 'suite'
+  ...
+# Subtest: CORS and limits
+    # Subtest: answers preflight for allowed origins only
+    ok 1 - answers preflight for allowed origins only
+      ---
+      duration_ms: 9.771792
+      type: 'test'
+      ...
+    # Subtest: rate-limits room creation per client
+    ok 2 - rate-limits room creation per client
+      ---
+      duration_ms: 10.85275
+      type: 'test'
+      ...
+    1..2
+ok 16 - CORS and limits
+  ---
+  duration_ms: 20.694542
+  type: 'suite'
+  ...
+# (node:53011) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: both_moved and pre-match cancellation
+    # Subtest: both_moved turns true only after each seat has moved this round
+    ok 1 - both_moved turns true only after each seat has moved this round
+      ---
+      duration_ms: 99.371
+      type: 'test'
+      ...
+    # Subtest: leaving before both moved cancels with no records
+    ok 2 - leaving before both moved cancels with no records
+      ---
+      duration_ms: 73.710458
+      type: 'test'
+      ...
+    # Subtest: a first-turn no-show after 35 s cancels with no records
+    ok 3 - a first-turn no-show after 35 s cancels with no records
+      ---
+      duration_ms: 29.684917
+      type: 'test'
+      ...
+    # Subtest: O's no-show after X's first move is also a no-show
+    ok 4 - O's no-show after X's first move is also a no-show
+      ---
+      duration_ms: 42.397459
+      type: 'test'
+      ...
+    1..4
+ok 17 - both_moved and pre-match cancellation
+  ---
+  duration_ms: 5522.733458
+  type: 'suite'
+  ...
+# Subtest: turn clock
+    # Subtest: exposes the clock fields and server_now
+    ok 1 - exposes the clock fields and server_now
+      ---
+      duration_ms: 38.278709
+      type: 'test'
+      ...
+    # Subtest: a move at 34 s is accepted
+    ok 2 - a move at 34 s is accepted
+      ---
+      duration_ms: 152.30625
+      type: 'test'
+      ...
+    # Subtest: after both moved, a 35 s expiry is a recorded timeout loss
+    ok 3 - after both moved, a 35 s expiry is a recorded timeout loss
+      ---
+      duration_ms: 64.369625
+      type: 'test'
+      ...
+    # Subtest: still-here inside the window restarts the clock once; a second confirm is 409
+    ok 4 - still-here inside the window restarts the clock once; a second confirm is 409
+      ---
+      duration_ms: 37.836958
+      type: 'test'
+      ...
+    # Subtest: still-here after expiry or in a non-active room is rejected; a move resets the allowance
+    ok 5 - still-here after expiry or in a non-active room is rejected; a move resets the allowance
+      ---
+      duration_ms: 30.778167
+      type: 'test'
+      ...
+    1..5
+ok 18 - turn clock
+  ---
+  duration_ms: 324.162834
+  type: 'suite'
+  ...
+# Subtest: disconnect grace
+    # Subtest: a seat silent for 60 s while not due to move abandons (recorded) after both moved
+    ok 1 - a seat silent for 60 s while not due to move abandons (recorded) after both moved
+      ---
+      duration_ms: 56.89075
+      type: 'test'
+      ...
+    # Subtest: reconnecting inside the grace continues normally
+    ok 2 - reconnecting inside the grace continues normally
+      ---
+      duration_ms: 45.892916
+      type: 'test'
+      ...
+    # Subtest: before both moved, a lost grace is a no-show
+    ok 3 - before both moved, a lost grace is a no-show
+      ---
+      duration_ms: 23.101
+      type: 'test'
+      ...
+    1..3
+ok 19 - disconnect grace
+  ---
+  duration_ms: 126.038167
+  type: 'suite'
+  ...
+# Subtest: leave and rematch
+    # Subtest: leaving after both moved is a forfeit
+    ok 1 - leaving after both moved is a forfeit
+      ---
+      duration_ms: 36.624292
+      type: 'test'
+      ...
+    # Subtest: a rematch starts a fresh both_moved check and clock
+    ok 2 - a rematch starts a fresh both_moved check and clock
+      ---
+      duration_ms: 126.217042
+      type: 'test'
+      ...
+    1..2
+ok 20 - leave and rematch
+  ---
+  duration_ms: 163.010041
+  type: 'suite'
+  ...
+# Subtest: envelope additions
+    # Subtest: returns poll_after_ms hints for each situation
+    ok 1 - returns poll_after_ms hints for each situation
+      ---
+      duration_ms: 29.350209
+      type: 'test'
+      ...
+    # Subtest: names you, players and the opponent without exposing ids
+    ok 2 - names you, players and the opponent without exposing ids
+      ---
+      duration_ms: 245.862792
+      type: 'test'
+      ...
+    # Subtest: serves public capabilities and advertises them on player objects
+    ok 3 - serves public capabilities and advertises them on player objects
+      ---
+      duration_ms: 89.956959
+      type: 'test'
+      ...
+    # Subtest: keeps round4g-style clients working (no chat_since, ignoring new fields)
+    ok 4 - keeps round4g-style clients working (no chat_since, ignoring new fields)
+      ---
+      duration_ms: 93.338084
+      type: 'test'
+      ...
+    1..4
+ok 21 - envelope additions
+  ---
+  duration_ms: 458.677375
+  type: 'suite'
+  ...
+# Subtest: chat
+    # Subtest: delivers messages on the poll with chat_since paging
+    ok 1 - delivers messages on the poll with chat_since paging
+      ---
+      duration_ms: 93.175541
+      type: 'test'
+      ...
+    # Subtest: validates presets, text length, newlines and control characters
+    ok 2 - validates presets, text length, newlines and control characters
+      ---
+      duration_ms: 73.083208
+      type: 'test'
+      ...
+    # Subtest: masks profanity, blocks contact info and slurs
+    ok 3 - masks profanity, blocks contact info and slurs
+      ---
+      duration_ms: 35.778292
+      type: 'test'
+      ...
+    # Subtest: rate-limits 5 per 10 s and 30 per 5 minutes per player
+    ok 4 - rate-limits 5 per 10 s and 30 per 5 minutes per player
+      ---
+      duration_ms: 91.412083
+      type: 'test'
+      ...
+    # Subtest: requires a screen name and an opponent; closed rooms refuse chat
+    ok 5 - requires a screen name and an opponent; closed rooms refuse chat
+      ---
+      duration_ms: 59.867459
+      type: 'test'
+      ...
+    1..5
+ok 22 - chat
+  ---
+  duration_ms: 353.532584
+  type: 'suite'
+  ...
+# Subtest: blocks and reports
+    # Subtest: block hides the blocked player's chat and keeps them out of the blocker's rooms
+    ok 1 - block hides the blocked player's chat and keeps them out of the blocker's rooms
+      ---
+      duration_ms: 41.505375
+      type: 'test'
+      ...
+    # Subtest: unblocks by room + seat and validates requests
+    ok 2 - unblocks by room + seat and validates requests
+      ---
+      duration_ms: 24.474208
+      type: 'test'
+      ...
+    # Subtest: report stores a chat snapshot and is rate-limited
+    ok 3 - report stores a chat snapshot and is rate-limited
+      ---
+      duration_ms: 36.5595
+      type: 'test'
+      ...
+    1..3
+ok 23 - blocks and reports
+  ---
+  duration_ms: 102.697
+  type: 'suite'
+  ...
+# Subtest: retention
+    # Subtest: deletes chat after 24 h and 1 h after the room closed; reports after 30 days
+    ok 1 - deletes chat after 24 h and 1 h after the room closed; reports after 30 days
+      ---
+      duration_ms: 36.601792
+      type: 'test'
+      ...
+    1..1
+ok 24 - retention
+  ---
+  duration_ms: 36.66025
+  type: 'suite'
+  ...
+# (node:53012) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: rules kernel (parity with rules.gd)
+    # Subtest: masks match the line definitions
+    ok 1 - masks match the line definitions
+      ---
+      duration_ms: 1.126209
+      type: 'test'
+      ...
+    # Subtest: starts empty with X to move anywhere
+    ok 2 - starts empty with X to move anywhere
+      ---
+      duration_ms: 0.636125
+      type: 'test'
+      ...
+    # Subtest: rejects out-of-range, occupied and wrong-board moves
+    ok 3 - rejects out-of-range, occupied and wrong-board moves
+      ---
+      duration_ms: 0.178292
+      type: 'test'
+      ...
+    # Subtest: sends the opponent to the board matching the cell
+    ok 4 - sends the opponent to the board matching the cell
+      ---
+      duration_ms: 0.121875
+      type: 'test'
+      ...
+    # Subtest: claims a small board on three in a row and grants a free move when sent there
+    ok 5 - claims a small board on three in a row and grants a free move when sent there
+      ---
+      duration_ms: 0.706958
+      type: 'test'
+      ...
+    # Subtest: marks a full board with no line as drawn and frees the next move
+    ok 6 - marks a full board with no line as drawn and frees the next move
+      ---
+      duration_ms: 0.935375
+      type: 'test'
+      ...
+    # Subtest: wins the match with three claimed boards in a line
+    ok 7 - wins the match with three claimed boards in a line
+      ---
+      duration_ms: 0.538958
+      type: 'test'
+      ...
+    # Subtest: is a draw when no boards remain open — no board-count tiebreak
+    ok 8 - is a draw when no boards remain open — no board-count tiebreak
+      ---
+      duration_ms: 0.6765
+      type: 'test'
+      ...
+    # Subtest: serializes to 81 chars and round-trips through deserialize
+    ok 9 - serializes to 81 chars and round-trips through deserialize
+      ---
+      duration_ms: 0.5095
+      type: 'test'
+      ...
+    # Subtest: rejects inconsistent snapshots
+    ok 10 - rejects inconsistent snapshots
+      ---
+      duration_ms: 0.598667
+      type: 'test'
+      ...
+    # Subtest: fromHistory replays authoritatively
+    ok 11 - fromHistory replays authoritatively
+      ---
+      duration_ms: 0.218709
+      type: 'test'
+      ...
+    1..11
+ok 25 - rules kernel (parity with rules.gd)
+  ---
+  duration_ms: 8.3105
+  type: 'suite'
+  ...
+# (node:53013) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: create, join, leave and list
+    # Subtest: creates a tournament with the creator joined and validates input
+    ok 1 - creates a tournament with the creator joined and validates input
+      ---
+      duration_ms: 99.154416
+      type: 'test'
+      ...
+    # Subtest: lists public tournaments newest first, hiding private and full ones
+    ok 2 - lists public tournaments newest first, hiding private and full ones
+      ---
+      duration_ms: 106.738083
+      type: 'test'
+      ...
+    # Subtest: checks the password of a private tournament and hides it from non-entrants
+    ok 3 - checks the password of a private tournament and hides it from non-entrants
+      ---
+      duration_ms: 325.369166
+      type: 'test'
+      ...
+    # Subtest: leaving before the start frees the slot and hands the host on
+    ok 4 - leaving before the start frees the slot and hands the host on
+      ---
+      duration_ms: 39.54225
+      type: 'test'
+      ...
+    1..4
+ok 26 - create, join, leave and list
+  ---
+  duration_ms: 5919.692542
+  type: 'suite'
+  ...
+# Subtest: start
+    # Subtest: a full 8/8 bracket starts 10 s after filling, with no byes and 3 rounds
+    ok 1 - a full 8/8 bracket starts 10 s after filling, with no byes and 3 rounds
+      ---
+      duration_ms: 72.755
+      type: 'test'
+      ...
+    # Subtest: 6 of 8: two byes to the top seeds, who advance to round 2; play to a champion
+    ok 2 - 6 of 8: two byes to the top seeds, who advance to round 2; play to a champion
+      ---
+      duration_ms: 1140.556958
+      type: 'test'
+      ...
+    # Subtest: 5 of 8: three byes, and two bye winners meet at once in round 2
+    ok 3 - 5 of 8: three byes, and two bye winners meet at once in round 2
+      ---
+      duration_ms: 46.708917
+      type: 'test'
+      ...
+    # Subtest: 3 of 4: one bye in a 4 bracket of 2 rounds
+    ok 4 - 3 of 4: one bye in a 4 bracket of 2 rounds
+      ---
+      duration_ms: 23.41375
+      type: 'test'
+      ...
+    # Subtest: 2 joined at the start time: cancelled, nobody penalized
+    ok 5 - 2 joined at the start time: cancelled, nobody penalized
+      ---
+      duration_ms: 22.874
+      type: 'test'
+      ...
+    # Subtest: the list sweep starts due tournaments
+    ok 6 - the list sweep starts due tournaments
+      ---
+      duration_ms: 24.828209
+      type: 'test'
+      ...
+    # Subtest: starts exactly once under concurrent polls
+    ok 7 - starts exactly once under concurrent polls
+      ---
+      duration_ms: 44.555917
+      type: 'test'
+      ...
+    1..7
+ok 27 - start
+  ---
+  duration_ms: 1376.169833
+  type: 'suite'
+  ...
+# Subtest: matches
+    # Subtest: your_match token works with room endpoints; live score; one game; champion recorded
+    ok 1 - your_match token works with room endpoints; live score; one game; champion recorded
+      ---
+      duration_ms: 235.145917
+      type: 'test'
+      ...
+    # Subtest: no-show: the player who opened the room advances, no records
+    ok 2 - no-show: the player who opened the room advances, no records
+      ---
+      duration_ms: 36.860167
+      type: 'test'
+      ...
+    # Subtest: no-show: when neither opens the room, the higher seed advances
+    ok 3 - no-show: when neither opens the room, the higher seed advances
+      ---
+      duration_ms: 23.473333
+      type: 'test'
+      ...
+    # Subtest: leaving after both moved is a recorded forfeit that eliminates
+    ok 4 - leaving after both moved is a recorded forfeit that eliminates
+      ---
+      duration_ms: 45.733459
+      type: 'test'
+      ...
+    # Subtest: a turn timeout after both moved eliminates the slow player
+    ok 5 - a turn timeout after both moved eliminates the slow player
+      ---
+      duration_ms: 47.889333
+      type: 'test'
+      ...
+    # Subtest: leaving before the first move: the opponent advances on a no-show
+    ok 6 - leaving before the first move: the opponent advances on a no-show
+      ---
+      duration_ms: 38.671
+      type: 'test'
+      ...
+    # Subtest: leaving while waiting for the next round forfeits that match
+    ok 7 - leaving while waiting for the next round forfeits that match
+      ---
+      duration_ms: 140.267458
+      type: 'test'
+      ...
+    # Subtest: a draw replays when boards are level and is decided by small boards otherwise
+    ok 8 - a draw replays when boards are level and is decided by small boards otherwise
+      ---
+      duration_ms: 266.03025
+      type: 'test'
+      ...
+    # Subtest: tournament rooms can't be joined, cancelled or listed
+    ok 9 - tournament rooms can't be joined, cancelled or listed
+      ---
+      duration_ms: 30.504708
+      type: 'test'
+      ...
+    1..9
+ok 28 - matches
+  ---
+  duration_ms: 864.919166
+  type: 'suite'
+  ...
+# Subtest: privacy and capabilities
+    # Subtest: envelopes carry no player ids or hashes, and only your own seat token
+    ok 1 - envelopes carry no player ids or hashes, and only your own seat token
+      ---
+      duration_ms: 39.352084
+      type: 'test'
+      ...
+    # Subtest: advertises tournaments in capabilities
+    ok 2 - advertises tournaments in capabilities
+      ---
+      duration_ms: 9.135458
+      type: 'test'
+      ...
+    # Subtest: purges ended tournaments after 7 days
+    ok 3 - purges ended tournaments after 7 days
+      ---
+      duration_ms: 16.703292
+      type: 'test'
+      ...
+    1..3
+ok 29 - privacy and capabilities
+  ---
+  duration_ms: 65.292542
+  type: 'suite'
+  ...
+1..29
+# tests 151
+# suites 28
+# pass 151
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9710.2725

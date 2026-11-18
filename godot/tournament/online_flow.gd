@@ -165,6 +165,7 @@ func _process(delta):
 		if _auto_return <= 0: _auto_return = -1; return_to_bracket()
 	if is_instance_valid(screen) and main.page == "online_tournament": screen.tick()
 func enter_match():
+	main.match_ads.skip_unsafe_boundary()
 	if _pending_match.is_empty() or match_active: return
 	var next = _pending_match; _pending_match = {}; countdown = -1; match_active = true
 	entered_room = str(next.get("room_code","")); timer.stop(); api.cancel_all(); _inflight = ""; busy = false

@@ -19,6 +19,13 @@ func run():
 	inspect(Vector2(669,787),Rect2(323.5,0,22,787),"duo_landscape")
 	var normal = L.compute(Vector2(867,553)); var large = L.compute(Vector2(2601,1659))
 	ok(normal.board == large.board,"DPR3 same logical composition")
+	# Native Retina size must use actual scale, not the legacy 2400px threshold.
+	for logical in [Vector2(390,844),Vector2(430,932),Vector2(669,787),Vector2(787,669),Vector2(867,553),Vector2(768,1024)]:
+		for density in [2.0,3.0]:
+			var measured = L.native_logical_size(logical*density,density)
+			ok(measured.is_equal_approx(logical),"native Retina points "+str(logical)+" @"+str(density))
+			ok(L.compute(measured).board == L.compute(logical).board,"native board point geometry preserved")
+	ok(L.native_logical_size(Vector2(390,844),0) == Vector2(390,844),"invalid native density safe fallback")
 	# Producer-reported cases, pinned explicitly.
 	var ipad = L.compute(Vector2(1366,1024))
 	ok(ipad.hero_player.size.y == 0 and ipad.hero_opponent.size.y == 0,"1366x1024 no bust over the scorecards (live scorecard figures)")

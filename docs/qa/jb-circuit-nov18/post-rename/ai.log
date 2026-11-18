@@ -1,0 +1,7 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+AI incremental slices=74 max_slice_ms=2.86
+AI_STRENGTH Medium vs Easy N=30 wins=29 draws=1 losses=0 rate=96.6666666666667% moves=1194 node_limit=700
+AI_STRENGTH Hard vs Easy N=30 wins=30 draws=0 losses=0 rate=100.0% moves=1091 node_limit=700
+AI_TIMING Hard samples=45 mean_ms=139.15 max_ms=205.18 hard_ceiling_ms=450
+NINEWEAVE_AI PASS checks=2566 failures=0

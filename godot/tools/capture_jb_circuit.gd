@@ -13,16 +13,13 @@ func run():
 	var main = Main.instantiate(); main.test_online_bypass = true
 	main.settings = Settings.new("user://jb-capture-settings.cfg"); main.settings.values.sound = false
 	main.settings.values.tutorial_completed = true
-	main.settings.values.unlocked_heroes = ["nick","professor_gilt","jb_rocker"]
 	main.profile = Profile.new("user://jb-capture-profile.cfg"); main.profile.choose(args[2] if args.size() > 2 else "jb_circuit","Weaver")
 	main.account.store = DeviceStore.new("user://jb-capture-device.cfg")
 	main.http_request_factory = func(): return Fake.new()
 	main.account.api.request_factory = func(): return Fake.new()
 	root.add_child(main); main.set_view_size(Vector2(root.size)); main.set_process(false)
 	main.online_tournament.set_process(false); main._apply_preferences(); main.rival_character = "james_ii"
-	if scenario == "title":
-		main.page = "title"; main._rebuild()
-	elif scenario == "expressions":
+	if scenario == "expressions":
 		main.visible = false
 		for i in range(7):
 			var key = ["neutral","smug","panic","doubletake","eyeroll","cheer","pout"][i]
@@ -30,7 +27,6 @@ func run():
 			a.position = Vector2((i%4)*210+8,int(i/4)*245+12); a.size = Vector2(200,210); root.add_child(a)
 			var label = Label.new(); label.text = key; label.position = a.position+Vector2(10,208); label.add_theme_font_size_override("font_size",22);root.add_child(label)
 	elif scenario in ["selection","professor_unlocked"]:
-		main.settings.values.unlocked_heroes = ["nick","professor_gilt","jb_rocker"]
 		if scenario == "professor_unlocked": main.settings.values.unlocked_heroes = ["nick","professor_gilt"]
 		main.page = "character_select"; main._rebuild()
 		main.hero_select.focus_hero("professor_gilt" if scenario == "professor_unlocked" else main.profile.data.character_id)

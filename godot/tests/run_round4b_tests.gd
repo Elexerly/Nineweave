@@ -53,7 +53,7 @@ func lazy_selection():
 	ok(not Art.textures.has("res://assets/heroes/cryon/head_neutral.webp"),"unvisited pages remain unloaded")
 	select.queue_free(); await frames()
 func assets():
-	ok(R.DATA.size() == 35 and R.selectable_indices().size() == 32,"32 public plus secret Nick and Professor")
+	ok(R.DATA.size() == 35 and R.selectable_indices().size() == 32,"32 public plus secret Nick, Professor and JB")
 	var unique = {}; var count = 0
 	for i in range(R.DATA.size()):
 		var h = R.DATA[i]; unique[h.id] = true

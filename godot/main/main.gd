@@ -1,5 +1,7 @@
 extends Control
 ## Scene/controller. Rules, AI, layout and networking remain independently testable.
+const MatchAdGate = preload("res://native/ads/match_gate.gd")
+const TestAdMob = preload("res://native/ads/test_admob.gd")
 const Rules = preload("res://kernel/rules.gd")
 const AI = preload("res://ai/strategist.gd")
 const Layout = preload("res://ui/layout.gd")
@@ -55,6 +57,11 @@ class Layer extends Control:
 	func _draw():
 		if painter.is_valid(): painter.call(self)
 
+var match_ads = MatchAdGate.new()
+var test_admob = TestAdMob.new()
+var ad_report_reason = "Inappropriate content"
+var ad_report_details = ""
+var _ad_prior_mute = false
 var game = Rules.new()
 var settings = Store.new()
 var profile = Profile.new()
@@ -168,6 +175,12 @@ var _moved_turn: String = ""
 var _you_name: String = ""
 
 func _ready():
+	add_child(match_ads); add_child(test_admob)
+	test_admob.report_context_changed.connect(func(): ad_report_reason = "Inappropriate content"; ad_report_details = "")
+	match_ads.provider = test_admob
+	# Disabled until native consent + verified StoreKit provider are integrated.
+	# Never derive entitlement from backend purchases or a local settings flag.
+	match_ads.presenting_changed.connect(_ad_presentation_changed)
 	# Handle close/Android back ourselves so first-run onboarding cannot dismiss.
 	get_tree().auto_accept_quit = false; get_tree().quit_on_go_back = false
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -271,6 +284,8 @@ func set_hinge_rect(rect: Rect2):
 func _relayout():
 	var physical = _manual_size if _manual_size != Vector2.ZERO else Vector2(get_window().size)
 	var logical = Layout.logical_size(physical)
+	if OS.has_feature("ios") and _manual_size == Vector2.ZERO:
+		logical = Layout.native_logical_size(physical, DisplayServer.screen_get_scale())
 	if OS.has_feature("web") and _manual_size == Vector2.ZERO:
 		var css = Vector2(float(JavaScriptBridge.eval("window.innerWidth")),float(JavaScriptBridge.eval("window.innerHeight")))
 		if css.x > 0 and css.y > 0: logical = css
@@ -487,6 +502,7 @@ func _input(event):
 func hero_for(mark: int) -> String:
 	return str(profile.data.character_id) if mark == human_mark else rival_character
 func _show_spotlight():
+	if not _debug_capture and game.status != 0: match_ads.match_completed()
 	var winner = game.status if game.status in [1,2] else human_mark
 	cinematic.winner_name = side_name(winner); cinematic.loser_name = side_name(3-winner)
 	cinematic.result_title = _victory_title()
@@ -502,7 +518,26 @@ func _begin_versus():
 		var speech_length = sound.play_versus_prelude()
 		cinematic.video_overlay.minimum_lead = maxf(cinematic.video_overlay.INTRO_LEAD_SECONDS,speech_length+.12 if speech_length > 0 else 0)
 	if not cinematic.video_playing(): sound.cue("route"); sound.stinger(Roster.audio_index(hero_for(human_mark)),"tag",-.35)
-func rematch():
+func configure_native_test_ads(entitlements, consent_check: Callable):
+	# Called only by a native build's reviewed StoreKit/consent composition layer.
+	# Native binaries, consent UI and real App IDs are not enabled in this branch.
+	match_ads.entitlements = entitlements; match_ads.consent_allowed = consent_check
+	match_ads.enabled = OS.get_name() in ["iOS","Android"]
+	if is_instance_valid(entitlements) and not entitlements.entitlement_changed.is_connected(refresh_native_test_ads):
+		entitlements.entitlement_changed.connect(refresh_native_test_ads)
+	refresh_native_test_ads()
+func refresh_native_test_ads():
+	if match_ads.can_serve(): test_admob.start(true)
+	else: test_admob.revoke_consent()
+func _ad_presentation_changed(active: bool):
+	var bus = AudioServer.get_bus_index("Master")
+	if active:
+		_ad_prior_mute = AudioServer.is_bus_mute(bus)
+		AudioServer.set_bus_mute(bus,true)
+	else: AudioServer.set_bus_mute(bus,_ad_prior_mute)
+func rematch(ad_checked: bool = false):
+	if not ad_checked and not online_tournament.match_active:
+		match_ads.before_next(func(): rematch(true)); return
 	if online_tournament.match_active: online_tournament.return_to_bracket(); return
 	if mode == "online":
 		message = ""
@@ -520,7 +555,10 @@ func _result_controls_refresh():
 
 ## `rematch` (Play Again) keeps the same rival hero; a new game from the menu/setup
 ## re-rolls. Round 3c product default, reversible: pass rematch=false to always re-roll.
-func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false, present: bool = false):
+func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = false, present: bool = false, ad_checked: bool = false):
+	if not ad_checked and not tournament.starting:
+		match_ads.before_next(func(): start_game(new_mode,mark,rematch,present,true)); return
+	match_ads.begin_match()
 	if _require_screen_name(): return
 	if not tournament.starting: tournament.match_active = false
 	if new_mode == "online" and not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
@@ -693,6 +731,7 @@ func resume_game():
 	_refresh_labels(); _rebuild()
 	_schedule_ai()
 func go_home():
+	match_ads.cancel()
 	if _require_screen_name(): return
 	if tutorial.active: tutorial.skip()
 	_pending_game = {}; _select_player = 0
@@ -791,7 +830,9 @@ func _attach_transport(t):
 		_rebuild())
 	t.error.connect(func(msg): message = msg; _rebuild())
 	if t is HTTP: t.room_updated.connect(_online_room_update)
-func create_online(demo: bool = false, private_game: bool = false, password: String = ""):
+func create_online(demo: bool = false, private_game: bool = false, password: String = "", ad_checked: bool = false):
+	if not ad_checked:
+		match_ads.before_next(func(): create_online(demo,private_game,password,true)); return
 	if _require_screen_name("online"): return
 	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
 	if private_game and (password.is_empty() or password.length() > 64):
@@ -799,7 +840,9 @@ func create_online(demo: bool = false, private_game: bool = false, password: Str
 	_attach_transport(Loopback.new() if demo else _new_http())
 	if transport is HTTP: transport.private_room = private_game; transport.password = password
 	transport.create_room()
-func join_online(code: String, demo: bool = false, password: String = ""):
+func join_online(code: String, demo: bool = false, password: String = "", ad_checked: bool = false):
+	if not ad_checked:
+		match_ads.before_next(func(): join_online(code,demo,password,true)); return
 	if _require_screen_name("online"): return
 	if not demo and not test_online_bypass and not account.store.online_ready(): open_online(); return
 	_attach_transport(Loopback.new() if demo else _new_http())
@@ -1098,6 +1141,7 @@ func game_back():
 		chat_open = false; callout.callout = ""; overlay = "leave_confirm"; _rebuild(); return
 	go_home()
 func _reset_online_match():
+	match_ads.begin_match()
 	if _require_screen_name("online"): return
 	if not test_online_bypass and not _debug_capture and not transport is Loopback and not account.store.online_ready(): open_online(); return
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
@@ -1749,6 +1793,18 @@ func _title_controls(s: Vector2):
 			_button(item[0],item[1],Rect2(x,y,bw,bh),item[2],item[3]); y += gap
 		_button("settings","Settings",Rect2(x,y,bw*.48,44),show_settings)
 		_button("how","How to Play",Rect2(x+bw*.52,y,bw*.48,44),func(): start_tutorial(true))
+func _layout_settings_footer(r: Rect2, native: bool):
+	# Apply once after responsive content layout: never mix one-column and modal widths.
+	if native and not controls.has("report_last_ad"):
+		_button("report_last_ad","Report ad",Rect2(0,0,100,44),func(): overlay = "ad_report"; _rebuild())
+	var ids = ["done","cosmetics","report_last_ad"] if native else ["done","cosmetics"]
+	var gap = 8.0
+	var width = (r.size.x-48-gap*(ids.size()-1))/ids.size()
+	for i in range(ids.size()):
+		var button = controls[ids[i]]
+		button.position = Vector2(r.position.x+24+i*(width+gap),r.end.y-62)
+		button.size = Vector2(width,44)
+		button.font_size = P.fit_box(button.caption,Rect2(Vector2.ZERO,button.size-Vector2(14,8)),17)
 func _create_history(rect: Rect2):
 	history_label = RichTextLabel.new(); history_label.position = rect.position+Vector2(10,24); history_label.size = rect.size-Vector2(20,30)
 	history_label.add_theme_font_override("normal_font",P.SANS); history_label.add_theme_font_size_override("normal_font_size",15)
@@ -1792,6 +1848,7 @@ func _overlay_controls(s: Vector2):
 		_button("choose_x","Play first",Rect2(r.position.x+24,y+(60 if short else 88),pw-48,48 if short else 56),func(): request_game("computer",1),true,"x")
 		_button("choose_o","Play second",Rect2(r.position.x+24,y+(118 if short else 156),pw-48,48 if short else 56),func(): request_game("computer",2),false,"o")
 	elif overlay == "settings":
+		var settings_nodes_start = ui_nodes.size()
 		var sw = (pw-88)/3 if short else pw-48
 		var lx = r.position.x+24
 		var rx = lx+sw+20 if short else lx
@@ -1841,13 +1898,56 @@ func _overlay_controls(s: Vector2):
 		if short:
 			controls.account_email.position = Vector2(name_x,r.position.y+120); controls.account_email.size = Vector2(sw,44)
 			controls.replay_tutorial.position = Vector2(name_x,r.position.y+170); controls.replay_tutorial.size = Vector2(sw,44)
-			controls.done.size.x = (pw-48)*.48
-			controls.cosmetics.position.x = lx+(pw-48)*.52; controls.cosmetics.size.x = (pw-48)*.48
 			if controls.has("blocked_players"):
-				if r.position.y+264 <= r.end.y-62: controls.blocked_players.position = Vector2(name_x,r.position.y+220); controls.blocked_players.size = Vector2(sw,44)
-				else:
-					controls.account_email.size.x = (sw-8)*.5
-					controls.blocked_players.position = Vector2(name_x+(sw+8)*.5,r.position.y+120); controls.blocked_players.size = Vector2((sw-8)*.5,44)
+				controls.blocked_players.position = Vector2(name_x,r.position.y+220); controls.blocked_players.size = Vector2(sw,44)
+			if controls.has("name_status"): controls.name_status.position.y = r.position.y+270
+		else:
+			# Account actions follow the name/status instead of rising into them on short phones.
+			var action_y = name_y+90
+			controls.account_email.position.y = action_y
+			controls.replay_tutorial.position.y = action_y
+			if controls.has("blocked_players"): controls.blocked_players.position.y = action_y+54
+		# Keep a fixed, full-width footer and scroll only settings content above it.
+		var content_nodes = ui_nodes.slice(settings_nodes_start)
+		var scroll = ScrollContainer.new(); scroll.name = "settings_scroll"
+		scroll.position = Vector2(lx,r.position.y+70); scroll.size = Vector2(pw-36,r.size.y-144)
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		var content = Control.new(); content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		add_child(scroll); ui_nodes.append(scroll); scroll.add_child(content); controls["settings_scroll"] = scroll
+		var content_bottom = 0.0
+		for node in content_nodes:
+			if node in [controls.done,controls.cosmetics]: continue
+			var local_position = node.position-scroll.position
+			remove_child(node); ui_nodes.erase(node); content.add_child(node); node.position = local_position
+			content_bottom = maxf(content_bottom,node.position.y+node.size.y)
+		content.custom_minimum_size = Vector2(0,content_bottom+4)
+		_layout_settings_footer(r,OS.get_name() in ["iOS","Android"])
+
+	elif overlay == "ad_report" and OS.get_name() in ["iOS","Android"]:
+		var x = r.position.x+24; var w = r.size.x-48
+		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,r.position.y+66); scroll.size = Vector2(w,r.size.y-136)
+		add_child(scroll); ui_nodes.append(scroll)
+		var box = VBoxContainer.new(); box.size_flags_horizontal = Control.SIZE_EXPAND_FILL; box.add_theme_constant_override("separation",12); scroll.add_child(box)
+		var notice = Label.new(); notice.text = "Review your report below. Email support: escapetheavalanchedeux@gmail.com. Nothing is sent automatically; you choose Send in your email app. You can also use the ad's AdChoices reporting control."; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(notice)
+		var reason = OptionButton.new(); reason.custom_minimum_size.y = 48
+		for choice in TestAdMob.Report.REASONS: reason.add_item(choice)
+		reason.select(TestAdMob.Report.REASONS.find(ad_report_reason)); box.add_child(reason)
+		var detail = TextEdit.new(); detail.custom_minimum_size.y = 100; detail.placeholder_text = "Optional details. Avoid personal information."; detail.text = ad_report_details; box.add_child(detail)
+		var preview = Label.new(); preview.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(preview)
+		var update_preview = func(): preview.text = test_admob.last_report.draft(ad_report_reason,ad_report_details)
+		reason.item_selected.connect(func(index): ad_report_reason = TestAdMob.Report.REASONS[index]; update_preview.call())
+		detail.text_changed.connect(func(): ad_report_details = detail.text.left(1000); update_preview.call())
+		update_preview.call()
+		var copied = Label.new(); copied.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(copied)
+		var copy = Button.new(); copy.text = "Copy report (not sent)"; copy.custom_minimum_size.y = 48; copy.disabled = not test_admob.last_report.available(); box.add_child(copy)
+		copy.pressed.connect(func(): DisplayServer.clipboard_set(test_admob.last_report.draft(ad_report_reason,ad_report_details)); copied.text = "Copied. No report has been sent.")
+		var email = Button.new(); email.text = "Open email draft"; email.custom_minimum_size.y = 48; email.disabled = not test_admob.last_report.available(); box.add_child(email)
+		email.pressed.connect(func():
+			var uri = test_admob.last_report.email_draft_uri(ad_report_reason,ad_report_details)
+			if uri.is_empty(): return
+			var result = OS.shell_open(uri)
+			copied.text = "Email app requested. Review and tap Send there. Delivery has not been confirmed. If no email app opens, copy this report and email support yourself." if result == OK else "Could not open an email app. Copy this report and email it to escapetheavalanchedeux@gmail.com. Nothing has been sent.")
+		_button("ad_report_back","Back",Rect2(x,r.end.y-62,w,44),func(): overlay = "settings"; _rebuild())
 	elif overlay == "account_options":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
 		_button("edit_account_email","Account email",Rect2(x,y,w,48),open_account_email)
@@ -2331,7 +2431,7 @@ func _draw_modal(node: Control):
 		_draw_result(node,r,short); return
 	node.draw_rect(Rect2(Vector2.ZERO,s),Color(.001,.005,.015,.88))
 	P.panel(node,r,false,1,true); P.outline(node,r.grow(-8),P.GOLD.darkened(.4),1)
-	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"APPEARANCE","secret_codes":"SECRET CODES","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
+	var heading = {"settings":"SETTINGS","ad_report":"REPORT LAST AD","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"APPEARANCE","secret_codes":"SECRET CODES","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
 	if overlay == "online_end": heading = Clock.cancelled_title(str(transport.room.get("end_reason","")) if transport is HTTP else "")
 	P.text(node,heading,Rect2(r.position+Vector2(20,23),Vector2(r.size.x-72,44)),25,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
 	if overlay == "setup":

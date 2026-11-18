@@ -8,15 +8,19 @@ export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/nineweave-tests/cache}
 LOGS=${LOGS:-/tmp/nineweave-test-logs}
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$LOGS"
 failed=0
-for suite in rules ai layout ui round3 round3b round3c audio round3e round4 round4b round4c hero_video round4e round4g round5a round5b round5c round5d rename recovery versus_flow deletion signout hero_audio_playback hero_sync selector_readability comic_prelude recovery_layout result_spacing hero_redo account_entry online_turn online_character online_audio tutorial_account idle_warning nick unlock unlock_contract intro_duration; do
+total=0
+for suite in rules ai layout ui round3 round3b round3c audio round3e round4 round4b round4c hero_video round4e round4g round5a round5b round5c round5d rename recovery versus_flow deletion signout hero_audio_playback hero_sync selector_readability comic_prelude recovery_layout result_spacing hero_redo native_readiness match_ad_gate store_entitlement consent_snapshot account_entry online_turn online_character online_audio tutorial_account idle_warning settings_responsive unlock unlock_contract nick intro_duration jb_circuit lexerly; do
+  total=$((total+1))
   status=0
-  "$GODOT" --headless --path "$ROOT" --script "res://tests/run_${suite}_tests.gd" >"$LOGS/$suite.log" 2>&1 || status=$?
+  script="res://tests/run_${suite}_tests.gd"
+  if [ "$suite" = "store_entitlement" ]; then script="res://tests/test_store_entitlement.gd"; fi
+  "$GODOT" --headless --path "$ROOT" --script "$script" >"$LOGS/$suite.log" 2>&1 || status=$?
   cat "$LOGS/$suite.log"
   if [ "$status" -ne 0 ] || rg -q 'SCRIPT ERROR|Parse Error|^ERROR:|^WARNING:|NINEWEAVE_.* FAIL' "$LOGS/$suite.log"; then failed=$((failed+1)); fi
 done
 if [ "$failed" -eq 0 ]; then
-  printf 'NINEWEAVE ROUND5S TEST SUMMARY: PASS (41/41 suites; rules, AI, layout, UI, Round 3, Round 3b, Round 3c, audio, Round 3e, Round 4, Round 4b, Round 4c, hero video, Round 4e, Round 4g, Round 5a, Round 5b, Round 5c, Round 5d, rename, recovery, versus flow, deletion, signout, hero audio playback, hero sync, selector readability, comic prelude, recovery layout, result spacing, hero redo, account entry, online turn, online character, online audio, account tutorial, idle warning)\n'
+  printf 'NINEWEAVE TEST SUMMARY: PASS (%s/%s suites)\n' "$total" "$total"
 else
-  printf 'NINEWEAVE ROUND5S TEST SUMMARY: FAIL (%s of 41 suites failed)\n' "$failed"
+  printf 'NINEWEAVE TEST SUMMARY: FAIL (%s of %s suites failed)\n' "$failed" "$total"
 fi
 exit "$failed"

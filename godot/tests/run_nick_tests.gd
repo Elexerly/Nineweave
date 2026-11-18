@@ -13,7 +13,7 @@ func ok(value: bool, label: String):
 	if not value: failures += 1; print("FAIL ",label)
 func _initialize(): run.call_deferred()
 func run():
-	ok(R.DATA.size() == 35 and R.selectable_indices().size() == 32,"32 default heroes plus Nick and hidden Professor")
+	ok(R.DATA.size() == 35 and R.selectable_indices().size() == 32,"32 default heroes plus Nick, hidden Professor and JB")
 	ok(not R.selectable("nick",[]) and R.selectable("nick",["nick"]),"Nick requires entitlement")
 	ok(R.selectable_indices(["nick","nick","fake"]).size() == 33,"duplicate/unknown grants cannot add roster entries")
 	for size in [Vector2(390,844),Vector2(867,553)]:

@@ -6,6 +6,10 @@ static func logical_size(physical: Vector2) -> Vector2:
 	if physical.x >= 2400 and physical.y >= 1400 and physical.x/physical.y < 1.8:
 		return physical/3.0
 	return physical
+static func native_logical_size(pixels: Vector2, screen_scale: float) -> Vector2:
+	# UIKit reports drawable pixels; all game UI uses points, including fold/rotation.
+	# Do not infer density from pixel dimensions (small Retina screens missed that).
+	return pixels / maxf(screen_scale, 1.0)
 static func mode_for(s: Vector2) -> String:
 	var ratio = s.x/s.y
 	if s.x > s.y:

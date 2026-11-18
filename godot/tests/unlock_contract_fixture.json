@@ -372,5 +372,5 @@
       "rank": 1
     }
   },
-  "_fixture_note": "Synthetic offline Fake HTTP test responses. No real account identifiers, emails, tokens, purchases or match records."
+  "_fixture_note": "Synthetic offline test fixture. No real player identifiers or account data."
 }

@@ -1,0 +1,44 @@
+{
+  "intro": {
+    "source_name": "Intro - JBTech.mp4",
+    "source_sha256": "fe625bae7580079c8ceb4958dc96002071a62b1a5b27f2031b540730051794ca",
+    "source_bytes": 12992110,
+    "video_dimensions": [
+      540,
+      810
+    ],
+    "video_frames": 144,
+    "video_duration_seconds": 6,
+    "output_bytes": 3420478,
+    "output_sha256": "0a74117673947100f386f5cb075d4fef24f10fff1144e8694a1c3beb18b0c98f",
+    "audio_samples_per_channel": 264600,
+    "audio_duration_seconds": 6.0,
+    "peak_amplitude": 0.7096725702285767,
+    "nonfinite_samples": 0,
+    "source_to_vorbis_rmse": 0.0051232074906234285,
+    "standalone_audio_matches_runtime_demux": true,
+    "sidecar_bytes": 82794,
+    "sidecar_sha256": "5a020d0f1b5f2ed3c5ff46778a6af20018357e20f2ce3deab32afa5750351b98"
+  },
+  "victory": {
+    "source_name": "JBCheckmate - Finishing.mp4",
+    "source_sha256": "09852c57ef6f3ef7e53c0a2537e9a53186a757489424b44cd79a8b751a1a94f0",
+    "source_bytes": 13391157,
+    "video_dimensions": [
+      540,
+      810
+    ],
+    "video_frames": 145,
+    "video_duration_seconds": 6.041666666666667,
+    "output_bytes": 3749840,
+    "output_sha256": "48ca5708ec4bc384553baa700ba69c480c567cedac240245a7f651cc611c86cb",
+    "audio_samples_per_channel": 266409,
+    "audio_duration_seconds": 6.0410204081632655,
+    "peak_amplitude": 0.7094516754150391,
+    "nonfinite_samples": 0,
+    "source_to_vorbis_rmse": 0.007002676581879363,
+    "standalone_audio_matches_runtime_demux": true,
+    "sidecar_bytes": 85581,
+    "sidecar_sha256": "ce1e1edd0566f2e633f97d426477cae1b1cd0856a09e1212c39d0a01a3ca003f"
+  }
+}

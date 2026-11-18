@@ -1,0 +1,67 @@
+TAP version 13
+# (node:71429) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: JB Circuit and Professor account contract
+    # Subtest: keeps 32 public heroes, canonical Professor ID, and Nick
+    ok 1 - keeps 32 public heroes, canonical Professor ID, and Nick
+      ---
+      duration_ms: 7.081875
+      type: 'test'
+      ...
+    # Subtest: keeps old James II records distinct from the new tech hero
+    ok 2 - keeps old James II records distinct from the new tech hero
+      ---
+      duration_ms: 1.962041
+      type: 'test'
+      ...
+    # Subtest: accepts mixed-case Prof26 and idempotently stores one permanent grant
+    ok 3 - accepts mixed-case Prof26 and idempotently stores one permanent grant
+      ---
+      duration_ms: 16.036583
+      type: 'test'
+      ...
+    # Subtest: retains N2026 in either redemption order and across restored sessions
+    ok 4 - retains N2026 in either redemption order and across restored sessions
+      ---
+      duration_ms: 8.3015
+      type: 'test'
+      ...
+    # Subtest: rejects unowned Professor and Nick for guests and other accounts
+    ok 5 - rejects unowned Professor and Nick for guests and other accounts
+      ---
+      duration_ms: 5.651458
+      type: 'test'
+      ...
+    # Subtest: does not allow spoofing the owner or unlock kind in request payloads
+    ok 6 - does not allow spoofing the owner or unlock kind in request payloads
+      ---
+      duration_ms: 4.634458
+      type: 'test'
+      ...
+    # Subtest: continues background codes and preserves reserved JB2026
+    ok 7 - continues background codes and preserves reserved JB2026
+      ---
+      duration_ms: 3.29575
+      type: 'test'
+      ...
+    # Subtest: cascades account deletion and never reuses the removed account grant
+    ok 8 - cascades account deletion and never reuses the removed account grant
+      ---
+      duration_ms: 4.626875
+      type: 'test'
+      ...
+    1..8
+ok 1 - JB Circuit and Professor account contract
+  ---
+  duration_ms: 1155.974625
+  type: 'suite'
+  ...
+1..1
+# tests 8
+# suites 1
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1306.225458

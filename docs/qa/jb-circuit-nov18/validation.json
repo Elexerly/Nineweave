@@ -1,0 +1,49 @@
+{
+  "native_suites": 47,
+  "initial_pass": 44,
+  "initial_fail": 3,
+  "corrected_failures": [
+    "unique board-mark ID",
+    "texture import quality .85",
+    "native media-pair count 68"
+  ],
+  "affected_rerun_suites": [
+    "round3",
+    "round4",
+    "round4b",
+    "native_readiness",
+    "hero_redo",
+    "hero_video",
+    "jb_circuit",
+    "nick",
+    "intro_duration",
+    "hero_audio_playback",
+    "unlock_contract"
+  ],
+  "affected_rerun_pass": 11,
+  "new_jb_checks": 80,
+  "sql_regression_tests_pass": 8,
+  "older_baseline_online_tests_pass": 151,
+  "typecheck": "PASS in fresh offline reconstruction after two-identity correction",
+  "current_live_web_full_validation": "BLOCKED: source fa059ed is not available from GitHub; direct fetch returned not our ref",
+  "old_JB_rename": "IMPLEMENTED: original james_ii displays Sevryn; new jb_circuit displays James II; no alias between them",
+  "production_db_writes": false,
+  "published": false,
+  "phone_installed": false,
+  "names": {
+    "james_ii": "Sevryn",
+    "jb_circuit": "James II"
+  },
+  "final_native_sweep": {
+    "pass": 47,
+    "fail": 0,
+    "names": {
+      "james_ii": "Sevryn",
+      "jb_circuit": "James II"
+    }
+  },
+  "visual_names_verified": [
+    "James II (jb_circuit)",
+    "Sevryn (james_ii)"
+  ]
+}

@@ -78,6 +78,7 @@ func run():
 	await honest_fallbacks()
 	await delivery_failures()
 	await bounded_recovery()
+	await retry_after_outage()
 	print("NINEWEAVE_ROUND5D ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)
 func stale_me():
@@ -237,3 +238,25 @@ func delivery_failures():
 		ui.controls.change_email.pressed.emit()
 		ok(ui.controls.email.text == ADDRESS and ui.controls.save_email.visible,"change email preserves address for editing")
 		ui.free(); await frames()
+
+func retry_after_outage():
+	var b = make_ui("retry-outage"); var ui = b.ui
+	ok(b.http.timeout == 8.0,"account transport uses bounded longer timeout")
+	b.http.respond(0,{},HTTPRequest.RESULT_TIMEOUT)
+	ok(ui.account._account_unavailable,"initial read timeout marks account unavailable")
+	save(b)
+	request_is(b,"/me",HTTPClient.METHOD_GET,"nwd_stale",{})
+	ok(b.http.requests.size() == 2 and ui.account.email_busy,"explicit Save retries stale outage once")
+	ui.account.save_email(ADDRESS)
+	ok(b.http.requests.size() == 2,"double Save cannot duplicate retry")
+	b.http.respond(200,player())
+	finish_code(b,"retry-code","nwd_stale")
+	ok(b.http.requests.size() == 4,"successful retry sends one email store and one code request")
+	ui.free(); await frames()
+	b = make_ui("retry-fails"); ui = b.ui
+	b.http.respond(503,{"error":"Unavailable"}); save(b)
+	b.http.respond(0,{},HTTPRequest.RESULT_TIMEOUT)
+	ui.account._process(Account.EMAIL_SETUP_TIMEOUT)
+	ok(b.http.requests.size() == 2 and not ui.account.email_busy,"second outage stops without automatic retry or email")
+	ok("saved on this device only" in ui.account.email_message,"failed retry remains explicitly unverified")
+	ui.free(); await frames()

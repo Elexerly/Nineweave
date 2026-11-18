@@ -1,0 +1,23 @@
+{
+  "tool": "built-in image_gen.imagegen",
+  "reference": "reference.png",
+  "generated_files": {
+    "head_neutral": "exec-4b1fe14e-1fec-43c7-b99d-a3611a22ddee.png",
+    "head_smug": "exec-04a71a1d-ce01-4314-84aa-2b4ede3dfde1.png",
+    "head_doubletake": "exec-4351bb4b-2e59-4686-975d-2921814a55dd.png",
+    "head_panic": "exec-ed6e559c-e1b3-449e-8eff-cd98c4cbeddf.png",
+    "head_eyeroll": "exec-0e095eb0-b5f3-449f-835f-34fb9973f1cc.png",
+    "head_cheer": "exec-471f99df-d23c-4de6-ba54-ebeb1ca3fb4b.png",
+    "head_pout": "exec-d6dda9cf-6805-4948-9500-7471dae15611.png",
+    "splash": "exec-dae8c28a-d3da-4b79-bc03-a8472f46f599.png",
+    "versus": "exec-b4413cd0-3c70-49ed-8d28-06c72481730e.png",
+    "victory": "exec-3882a551-e235-4832-9c2e-a032e35396f2.png"
+  },
+  "portrait_prompt": "identity-preserve; adult brown-haired blue-eyed tech ranger, mustache and short pointed goatee, cyan-trim black jacket, same cel-shaded anime; centered head and shoulders, seven expressions, real alpha, no text or cape",
+  "body_prompt": "identity-preserve; full body and blue drone inside frame, splash crossed arms, versus tactical hologram, victory raised fist, real alpha, no text or cape; background-extraction follow-up for broad haze",
+  "background_extraction_files": {
+    "splash": "exec-809aa452-2d5c-4523-ab87-1fa3be8e007f.png",
+    "versus": "exec-f08a4041-e951-415c-8201-8c58a1aaa8ca.png",
+    "victory": "exec-2dba65f2-3ead-41c4-b54a-635003d481ac.png"
+  }
+}

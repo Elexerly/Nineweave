@@ -25,6 +25,9 @@ func _ready():
 		# Local QA only: ?api=http://127.0.0.1:PORT is honoured on a localhost page, never elsewhere.
 		var local = Clock.api_override(str(JavaScriptBridge.eval("window.location.hostname")),str(JavaScriptBridge.eval("(new URLSearchParams(window.location.search)).get('api')||''")))
 		if not local.is_empty(): base_url = local
+		elif OS.has_feature("lexerly_test"):
+			# Isolated test export uses its own host API, never production.
+			base_url = str(JavaScriptBridge.eval("(typeof window.LEXERLY_TEST_API_URL === 'string' && window.LEXERLY_TEST_API_URL.startsWith('https://')) ? window.LEXERLY_TEST_API_URL : window.location.origin"))
 		elif base_url == LIVE_ORIGIN: base_url = origin_base(str(JavaScriptBridge.eval("window.location.origin")))
 	_request = request_factory.call() if request_factory.is_valid() else HTTPRequest.new()
 	_request.timeout = 8.0; add_child(_request)

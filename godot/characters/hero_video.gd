@@ -6,6 +6,8 @@ const MANIFEST = "res://assets/hero_video/manifest.json"
 const KINDS = ["intro","victory"]
 # Revision query prevents an old browser/CDN sidecar from shadowing replaced media.
 const MEDIA_REVISIONS = {
+	"jb_rocker/intro":"9d8a1c0a8f67", "jb_rocker/victory":"f115776ff5c3",
+	"jb_circuit/intro":"0a7411767394", "jb_circuit/victory":"48ca5708ec4b",
 	"kellen_byte/intro":"60713ca", "professor_gilt/intro":"fd1c7e0",
 	"nyx_thread/intro":"d1e7b84", "cobalt_bastion/intro":"d1e7b84",
 	"sara/intro":"d1e7b84", "pope_slam/intro":"d1e7b84",

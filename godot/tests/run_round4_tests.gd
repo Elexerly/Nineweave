@@ -39,9 +39,9 @@ func run():
 	print("NINEWEAVE_ROUND4 ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)
 func roster_assets():
-	var order = ["cryon","aurelia","vesper_vale","auric_rex","nyx_thread","cobalt_bastion","ember_quill","lumen_pike","shard_jack","madame_solstice","bramble_ox","patrick_laquin","professor_gilt","siren_coil","ryan_blaze","tempest_vega"]
+	var order = ["cryon","aurelia","vesper_vale","auric_rex","nyx_thread","cobalt_bastion","ember_quill","lumen_pike","shard_jack","madame_solstice","bramble_ox","patrick_laquin","jb_circuit","siren_coil","ryan_blaze","tempest_vega"]
 	var ids = {}
-	ok(R.DATA.size() == 33 and R.selectable_indices().size() == 32,"32 public plus secret Nick")
+	ok(R.DATA.size() == 35 and R.selectable_indices().size() == 32,"32 public plus secret Nick and Professor")
 	for i in range(R.DATA.size()):
 		var hero = R.DATA[i]; ids[hero.id] = true
 		if i < order.size(): ok(hero.id == order[i],"approved original display order "+hero.id)

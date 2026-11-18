@@ -89,7 +89,7 @@ func set_status(value: String):
 func _account_welcome():
 	var w = minf(440,size.x-48); var x = (size.x-w)*.5; var y = maxf(24,(size.y-300)*.5)
 	_panel = Rect2(x-12,y-20,w+24,300)
-	_label("ENTER THE NINEWEAVE",Rect2(x,y,w,50),25,P.PALE,true)
+	_label("ENTER LEXERLY",Rect2(x,y,w,50),25,P.PALE,true)
 	_label("New challenger or returning player?",Rect2(x,y+54,w,48),18)
 	_button("begin_create","Create Account",Rect2(x,y+118,w,52),"begin_create","",true)
 	_button("sign_in","Sign In",Rect2(x,y+184,w,52),"sign_in")

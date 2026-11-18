@@ -2,7 +2,7 @@ extends RefCounted
 ## Pure transition detector. Most specific event first; all qualifying events retained
 ## for tests/telemetry. Presentation selects one line so claims never become a queue.
 const Rules = preload("res://kernel/rules.gd")
-const TEXT = {"ready":"READY…", "weave":"WEAVE!", "victory":"VICTORY!", "defeat":"DEFEAT!", "first_claim":"FIRST CLAIM!", "double_lock":"DOUBLE LOCK!", "triple_weave":"TRIPLE WEAVE!", "match_point":"MATCH POINT!", "turnaround":"TURNAROUND!", "shutout":"SHUTOUT!", "nineweave":"NINEWEAVE!", "clean_sweep":"CLEAN SWEEP!", "standoff":"STANDOFF!"}
+const TEXT = {"ready":"READY…", "weave":"WEAVE!", "victory":"VICTORY!", "defeat":"DEFEAT!", "first_claim":"FIRST CLAIM!", "double_lock":"DOUBLE LOCK!", "triple_weave":"TRIPLE WEAVE!", "match_point":"MATCH POINT!", "turnaround":"TURNAROUND!", "shutout":"SHUTOUT!", "nineweave":"LEXERLY!", "clean_sweep":"CLEAN SWEEP!", "standoff":"STANDOFF!"}
 const WEIGHT = {"ready":1,"weave":2,"victory":5,"defeat":3,"first_claim":2,"double_lock":3,"triple_weave":4,"match_point":4,"turnaround":5,"shutout":5,"nineweave":6,"clean_sweep":7,"standoff":2}
 static func snapshot(game) -> Dictionary:
 	return {"owners":Array(game.owners),"status":game.status,"turn":game.turn,"moves":game.history.size()}

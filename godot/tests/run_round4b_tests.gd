@@ -53,7 +53,7 @@ func lazy_selection():
 	ok(not Art.textures.has("res://assets/heroes/cryon/head_neutral.webp"),"unvisited pages remain unloaded")
 	select.queue_free(); await frames()
 func assets():
-	ok(R.DATA.size() == 33 and R.selectable_indices().size() == 32,"32 public plus secret Nick")
+	ok(R.DATA.size() == 35 and R.selectable_indices().size() == 32,"32 public plus secret Nick and Professor")
 	var unique = {}; var count = 0
 	for i in range(R.DATA.size()):
 		var h = R.DATA[i]; unique[h.id] = true
@@ -91,7 +91,7 @@ func aliases():
 		ok(Art.get_texture(old,"head_neutral") == Art.get_texture(id,"head_neutral"),"alias loads canonical hero art "+old)
 	net.free()
 	ok(not R.valid("removed-hero") and R.index_of("removed-hero") == 0,"unknown IDs remain invalid with safe art fallback")
-	ok(R.tile_label("james_ii") == "JAMES II" and R.tile_label("simon_shade") == "SIMON","owner tile-label exception")
+	ok(R.tile_label("james_ii") == "SEVRYN" and R.tile_label("simon_shade") == "SIMON","owner tile-label exception")
 	for spec in [["shard_jack","Jack Sovereign",["8a4dff","15121f","e8c060"],"Checkmate was decided three moves ago."],["sara","Sara",["7cc4ff","2a3a5a","fff4dc"],"Be kind, or be outfoxed."],["aiden_vortex","Aiden Vortex",["2f6bff","1a2240","ff3b3b"],"Let it rip!"],["ethan_ricochet","Ethan Ricochet",["3a7bff","1c2450","eef2ff"],"Bank shot!"],["dylan_volt","Dylan Volt",["b26bff","2a2050","ffd34d"],"Flip a gold token. Blink and you lost."]]:
 		var h = R.get_hero(spec[0]); ok(h.name == spec[1] and h.palette == spec[2] and h.pop == spec[3],"approved redesign copy/palette "+h.id)
 		var copy = " ".join([h.concept,h.pop,h.victory,h.defeat,h.action,h.prop,h.mark]).to_lower()

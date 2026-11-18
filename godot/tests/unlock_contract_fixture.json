@@ -219,6 +219,52 @@
         "error": "That unlock code was not recognized.",
         "code": "invalid_code"
       }
+    },
+    {
+      "code": "Prof26",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "hero",
+          "id": "professor_gilt"
+        },
+        "already_owned": false,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "fourth_july",
+          "new_year",
+          "st_patrick",
+          "tictactoe"
+        ],
+        "unlocked_heroes": [
+          "nick",
+          "professor_gilt"
+        ]
+      }
+    },
+    {
+      "code": "pRoF26",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "hero",
+          "id": "professor_gilt"
+        },
+        "already_owned": true,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "fourth_july",
+          "new_year",
+          "st_patrick",
+          "tictactoe"
+        ],
+        "unlocked_heroes": [
+          "nick",
+          "professor_gilt"
+        ]
+      }
     }
   ],
   "me": {
@@ -237,7 +283,8 @@
         "tictactoe"
       ],
       "unlocked_heroes": [
-        "nick"
+        "nick",
+        "professor_gilt"
       ],
       "matches_won": 0,
       "matches_played": 0,

@@ -130,5 +130,13 @@
   "nick": [
     "intro",
     "victory"
+  ],
+  "jb_circuit": [
+    "intro",
+    "victory"
+  ],
+  "jb_rocker": [
+    "intro",
+    "victory"
   ]
 }

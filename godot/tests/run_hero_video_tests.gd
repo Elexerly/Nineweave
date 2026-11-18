@@ -64,7 +64,7 @@ func beth_labels():
 	ok(Roster.tile_lines("madame_solstice") == PackedStringArray(["BETH","SOLSTICE"]),"select tile wraps BETH / SOLSTICE")
 	ok(hero.name.to_upper() == "BETH SOLSTICE","versus, winner and select plaque use BETH SOLSTICE")
 	ok(not "MADAME" in Roster.tile_label("madame_solstice") and not "MADAME" in hero.name.to_upper(),"old MADAME tile label is gone")
-	ok(Roster.tile_label("simon_shade") == "SIMON" and Roster.tile_label("james_ii") == "JAMES II","other tile-label rules stay the same")
+	ok(Roster.tile_label("simon_shade") == "SIMON" and Roster.tile_label("james_ii") == "SEVRYN","other tile-label rules stay the same")
 func beth_screens():
 	var Select = load("res://characters/select.gd")
 	var select = Select.new(); select.selected_id = "cryon"; select.size = Vector2(390,844)
@@ -144,7 +144,7 @@ func long_name_layout():
 func catalog():
 	var v = Video.new(); v.bundled_override = 1; root.add_child(v)
 	ok(v.bundled() and not v.streaming(),"bundled source policy seam")
-	ok(Roster.DATA.size() == 33 and v.catalog.size() == 33,"manifest covers 32 standard heroes and Nick")
+	ok(Roster.DATA.size() == 35 and v.catalog.size() == 35,"manifest covers 32 standard heroes, Nick and Professor")
 	var clips = 0
 	for hero in Roster.DATA:
 		ok(v.catalog.get(hero.id,[]) == ["intro","victory"],"both clip kinds catalogued for "+hero.id)

@@ -13,7 +13,3 @@
 - `git diff --cached --check`: passed.
 
 Runner updated to include all four additional suites in future runs. Gameplay files were unchanged after verification. Generated UID files and build logs are local artifacts, not committed. No production API writes, migrations, publish, or native installation occurred. Browser/physical-device interaction was not tested in this recovery pass; source equivalence is established by all 52 compiled GDScript payloads matching the released pack exactly.
-
-## Sanitized backup fixture
-
-The offline Fake HTTP unlock fixture used two opaque example player IDs. These were replaced with explicit `synthetic-test-owner` and `synthetic-test-other` values; a synthetic-fixture note was added. All email/name/consent values are null, purchases and legacy unlocks empty, match records zero. This fixture is excluded by the Web export and is used only by `run_unlock_contract_tests.gd`. Its unlock-case expectations remain unchanged. The fixture test was rerun after sanitization.

@@ -287,7 +287,7 @@ func _relayout():
 	_title = _title_geometry()
 	backdrop.title_anchor = _title.anchor; backdrop.title_region = _title.region
 	var fs: int = _title.font_size
-	title_label.text = "NINEWEAVE"; title_label.add_theme_font_size_override("font_size",fs)
+	title_label.text = "LEXERLY"; title_label.add_theme_font_size_override("font_size",fs)
 	title_label.position = _title.label.position; title_label.size = _title.label.size
 	var font_h = P.DISPLAY.get_height(fs); var ascent = P.DISPLAY.get_ascent(fs)
 	var line_top = (_title.label.size.y-font_h)*.5
@@ -1949,7 +1949,7 @@ func _draw_hinge(node: Control):
 func _draw_title():
 	var s: Vector2 = layout.size; var g = _title
 	var fs: float = g.font_size
-	var tw = P.DISPLAY.get_string_size("NINEWEAVE",HORIZONTAL_ALIGNMENT_LEFT,-1,int(fs)).x
+	var tw = P.DISPLAY.get_string_size("LEXERLY",HORIZONTAL_ALIGNMENT_LEFT,-1,int(fs)).x
 	# Warm bloom behind the lettering, cool glow behind the crown.
 	P.halo_rect(self,Rect2(g.anchor.x-tw*.68,g.anchor.y-fs*1.1,tw*1.36,fs*2.2),Color(1,.72,.3,.34))
 	P.halo_rect(self,Rect2(g.anchor.x-tw*.55,g.anchor.y-fs*.6,tw*1.1,fs*1.2),Color(0,0,0,.35))
@@ -2670,7 +2670,7 @@ func _code_completed(operation: String, response: int, data: Dictionary, problem
 			settings.set_value("background_theme",selected)
 			_code_message = "Unlocked! Choose your background anytime in Appearance."
 		elif grant is Dictionary and grant.get("kind") == "hero" and Roster.selectable(str(grant.get("id","")),settings.values.unlocked_heroes):
-			_code_message = "Unlocked! Nick is now available in character selection."
+			_code_message = "Unlocked! %s is now available in character selection." % Roster.get_hero(str(grant.id)).name
 		else: _code_message = "Your account unlocks have been refreshed."
 		_apply_preferences()
 	if overlay == "secret_codes": _rebuild()

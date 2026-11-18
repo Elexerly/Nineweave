@@ -150,7 +150,7 @@ func _background():
 	draw_line(Vector2(16,12),Vector2(size.x-16,12),Color(P.GOLD,.38),1,true)
 	P.diamond(self,Vector2(size.x*.5,12),4,P.GOLD)
 func _draw_bracket_chrome():
-	P.text(self,"NINEWEAVE / TOURNAMENT",geo.eyebrow,14,P.GOLD,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
+	P.text(self,"LEXERLY / TOURNAMENT",geo.eyebrow,14,P.GOLD,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 	P.text(self,"THE CROWN AWAITS",geo.title,30 if geo.phone else 42,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_LEFT)
 	P.text(self,"8 HEROES    /    3 ROUNDS    /    1 CROWN",geo.subtitle,15,P.MUTED,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 	var next = B.next_match(data.model,data.hero)
@@ -178,7 +178,7 @@ func _draw_outcome():
 	var champion = data.status == "champion"
 	var col = P.GOLD if champion else P.MUTED
 	if champion: _celebration()
-	P.text(self,"NINEWEAVE / TOURNAMENT",geo.eyebrow,15,P.GOLD)
+	P.text(self,"LEXERLY / TOURNAMENT",geo.eyebrow,15,P.GOLD)
 	P.text(self,"CHAMPION" if champion else "ELIMINATED",geo.title,46 if geo.phone else 66,P.PALE if champion else P.WHITE,P.DISPLAY)
 	var subtitle = "THREE VICTORIES. ONE UNBROKEN THREAD." if champion else "Eliminated in the "+B.round_name(data.model,int(data.round))
 	P.text(self,subtitle,geo.subtitle,15 if champion else 18,col)

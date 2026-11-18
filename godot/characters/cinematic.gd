@@ -792,7 +792,7 @@ func result_text_layout(s: Vector2) -> Array:
 	return sections
 func _draw_combined():
 	var s = region.size; var g = combined_geometry(s)
-	P.text(front,"NINEWEAVE / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
+	P.text(front,"LEXERLY / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
 	P.outline(front,g.hero.grow(2),Color(P.GOLD,.55),1)
 	for section in result_text_layout(s):
 		var fs: int = section.font_size

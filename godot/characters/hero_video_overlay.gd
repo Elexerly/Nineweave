@@ -241,7 +241,7 @@ func _draw_chrome():
 		preload("res://characters/arena_backdrop.gd").draw_at(_chrome,size,_wait_age)
 		return
 	if scene_kind == "versus":
-		P.text(_chrome,"NINEWEAVE  /  HERO CLASH",Rect2(12,12,size.x-24,32),P.fit_size("NINEWEAVE  /  HERO CLASH",size.x-24,24),P.GOLD)
+		P.text(_chrome,"LEXERLY  /  HERO CLASH",Rect2(12,12,size.x-24,32),P.fit_size("LEXERLY  /  HERO CLASH",size.x-24,24),P.GOLD)
 		for side in sides:
 			var frame: Rect2 = side.frame
 			P.outline(_chrome,frame.grow(3),P.GOLD,2)

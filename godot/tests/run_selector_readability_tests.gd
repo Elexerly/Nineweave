@@ -39,7 +39,7 @@ func run():
  ui.swipe(Vector2(100,0)); ok(ui.page == 0,"swipe goes to previous page")
  ui.swipe(Vector2(-100,0)); ok(ui.page == 1,"swipe goes to next page")
  var james = ui.portraits[R.index_of("james_ii")]
- ok(james.caption_height() == 28 and james.rig.size.y == james.size.y-28,"James II two-line caption not overlapped")
+ ok(james.caption_height() == 18 and james.rig.size.y == james.size.y-18,"Sevryn single-line caption not overlapped")
  ui.free()
  var phone = Select.new(); phone.size = Vector2(390,844); phone.selected_id = R.DATA[20].id; root.add_child(phone)
  ok(phone.geo.per_page == 8 and phone.geo.pages == 4 and phone.page == 2,"narrow phone eight per page opens selected hero page")

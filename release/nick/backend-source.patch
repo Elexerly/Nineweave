@@ -1,0 +1,189 @@
+diff --git a/src/lib/nineweave/api.ts b/src/lib/nineweave/api.ts
+index 6bd2d49..8aa78dc 100644
+--- a/src/lib/nineweave/api.ts
++++ b/src/lib/nineweave/api.ts
+@@ -22,7 +22,7 @@ import {
+   requestRecovery,
+   requestVerification,
+ } from "./email.ts";
+-import { HERO_ALIASES, HERO_IDS } from "./heroes.ts";
++import { HERO_ALIASES, HERO_IDS, SECRET_HERO_IDS } from "./heroes.ts";
+ import {
+   completeTutorial,
+   leaderboard,
+@@ -151,7 +151,7 @@ async function route(
+   }
+   if (head === "heroes" && segments.length === 1) {
+     if (method !== "GET") methodNotAllowed();
+-    return [200, { heroes: HERO_IDS, aliases: HERO_ALIASES }];
++    return [200, { heroes: HERO_IDS, secret_heroes: SECRET_HERO_IDS, aliases: HERO_ALIASES }];
+   }
+   if (head === "auth" && code === "device" && segments.length === 2) {
+     if (method !== "POST") methodNotAllowed();
+diff --git a/src/lib/nineweave/heroes.ts b/src/lib/nineweave/heroes.ts
+index 3c59fb2..26b0c43 100644
+--- a/src/lib/nineweave/heroes.ts
++++ b/src/lib/nineweave/heroes.ts
+@@ -1,3 +1,4 @@
++import { ApiError, type Service } from "./service.ts";
+ /**
+  * Canonical hero (character) IDs — mirrors `godot/characters/roster.gd`.
+  * Incoming legacy aliases are accepted and canonicalized; responses always
+@@ -50,7 +51,24 @@ export const HERO_ALIASES: Readonly<Record<string, string>> = {
+ /** The Godot client's legacy default character. */
+ export const DEFAULT_HERO = "auric_rex";
+ 
+-const HERO_SET: ReadonlySet<string> = new Set(HERO_IDS);
++export const SECRET_HERO_IDS = ["nick"] as const;
++const SECRET_HERO_SET: ReadonlySet<string> = new Set(SECRET_HERO_IDS);
++const HERO_SET: ReadonlySet<string> = new Set([...HERO_IDS, ...SECRET_HERO_IDS]);
++
++/** Server entitlements, never the client-asserted legacy unlocks JSON. */
++export async function requireHeroOwnership(svc: Service, playerId: string | null, hero: string) {
++  if (!SECRET_HERO_SET.has(hero)) return;
++  const rows = playerId
++    ? await svc.db.query<{ unlock_id: string }>(
++        "select unlock_id from nw_account_unlocks where player_id=$1 and kind='hero' and unlock_id=$2",
++        [playerId, hero],
++      )
++    : [];
++  if (!rows.length)
++    throw new ApiError(403, "Unlock this secret character on your account first.", {
++      code: "hero_locked",
++    });
++}
+ 
+ /** Canonical ID for a known hero or alias, else null. */
+ export function canonicalHero(id: unknown): string | null {
+diff --git a/src/lib/nineweave/players.ts b/src/lib/nineweave/players.ts
+index 497f318..e93d954 100644
+--- a/src/lib/nineweave/players.ts
++++ b/src/lib/nineweave/players.ts
+@@ -7,7 +7,7 @@
+  * for the player already holding that `sub`. Nothing reads it yet.
+  */
+ import { accountUnlocks } from "./unlocks.ts";
+-import { canonicalHero } from "./heroes.ts";
++import { canonicalHero, requireHeroOwnership } from "./heroes.ts";
+ import { validateName } from "./names.ts";
+ import { hashToken, newId, newToken } from "./security.ts";
+ import { ApiError, type Service } from "./service.ts";
+@@ -179,6 +179,7 @@ export async function registerDevice(svc: Service, body: Record<string, unknown>
+     "accepted_at",
+     "age_confirmed",
+   ]);
++  if (fields.last_hero_id) await requireHeroOwnership(svc, null, fields.last_hero_id);
+   const token = newToken("nwd");
+   const id = newId("p");
+   const now = svc.now();
+@@ -312,6 +313,7 @@ export async function updateMe(svc: Service, player: PlayerRow, body: Record<str
+     "age_confirmed",
+     "email",
+   ]);
++  if (fields.last_hero_id) await requireHeroOwnership(svc, player.id, fields.last_hero_id);
+   const sets: string[] = [];
+   const params: unknown[] = [player.id];
+   const add = (col: string, value: unknown, cast = "") => {
+diff --git a/src/lib/nineweave/rooms.ts b/src/lib/nineweave/rooms.ts
+index 3472d39..7565dd6 100644
+--- a/src/lib/nineweave/rooms.ts
++++ b/src/lib/nineweave/rooms.ts
+@@ -29,7 +29,7 @@
+  * update.
+  */
+ import { createHmac, randomInt } from "node:crypto";
+-import { canonicalHero, DEFAULT_HERO } from "./heroes.ts";
++import { canonicalHero, DEFAULT_HERO, requireHeroOwnership } from "./heroes.ts";
+ import { validateName } from "./names.ts";
+ import { playerByToken, type PlayerRow } from "./players.ts";
+ import { O, OPEN, Rules, X, type SerializedState } from "./rules.ts";
+@@ -689,6 +689,7 @@ async function resolveParticipant(
+     if (!canonical) throw new ApiError(400, "Unknown character_id");
+     hero = canonical;
+   }
++  await requireHeroOwnership(svc, player?.id ?? null, hero);
+   return { player, name, hero };
+ }
+ 
+diff --git a/src/lib/nineweave/tournaments.ts b/src/lib/nineweave/tournaments.ts
+index fc9eea5..d0bf635 100644
+--- a/src/lib/nineweave/tournaments.ts
++++ b/src/lib/nineweave/tournaments.ts
+@@ -18,7 +18,7 @@
+  * ready window and played as one game (no rematch; a level draw replays).
+  */
+ import { randomInt } from "node:crypto";
+-import { canonicalHero, DEFAULT_HERO } from "./heroes.ts";
++import { canonicalHero, DEFAULT_HERO, requireHeroOwnership } from "./heroes.ts";
+ import { requirePlayer, TOURNAMENT_CAPABILITIES, type PlayerRow } from "./players.ts";
+ import {
+   leaveRoom,
+@@ -756,6 +756,7 @@ export async function createTournament(
+   const isPrivate = body.private === true || password !== null;
+   if (isPrivate && !password) throw new ApiError(400, "Private tournaments need a password");
+   const hero = readHero(body, player);
++  await requireHeroOwnership(svc, player.id, hero);
+   await sweepTournaments(svc);
+   await ensureFree(svc, player.id);
+   const passwordHash = password ? await hashPassword(password) : null;
+@@ -854,6 +855,7 @@ export async function joinTournament(
+   const player = await requirePlayer(svc, bearer);
+   const name = requireScreenName(player);
+   const hero = readHero(body, player);
++  await requireHeroOwnership(svc, player.id, hero);
+   const password = readPassword(body);
+   const found = await tournamentByCode(svc, code);
+   let passwordOk = false;
+diff --git a/src/lib/nineweave/unlocks.ts b/src/lib/nineweave/unlocks.ts
+index eb75642..e876322 100644
+--- a/src/lib/nineweave/unlocks.ts
++++ b/src/lib/nineweave/unlocks.ts
+@@ -10,12 +10,12 @@ const BACKGROUND_CODES: Readonly<Record<string, string>> = Object.freeze({
+   "0704027": "fourth_july",
+   PATRICK: "st_patrick",
+ });
++const HERO_CODES: Readonly<Record<string, string>> = Object.freeze({ N2026: "nick" });
+ const RESERVED_HERO_CODES = new Set([
+   "W2026",
+   "G2026",
+   "J2026",
+   "B2026",
+-  "N2026",
+   "E2026",
+   "JB2026",
+   "T2026",
+@@ -74,7 +74,13 @@ export async function redeemUnlock(svc: Service, player: PlayerRow, body: Record
+       "This secret character is not available yet. Keep the code and try again when the character arrives.",
+       { code: "code_unavailable" },
+     );
+-  const id = Object.hasOwn(BACKGROUND_CODES, code) ? BACKGROUND_CODES[code] : undefined;
++  const kind = Object.hasOwn(HERO_CODES, code) ? "hero" : "background";
++  const id =
++    kind === "hero"
++      ? HERO_CODES[code]
++      : Object.hasOwn(BACKGROUND_CODES, code)
++        ? BACKGROUND_CODES[code]
++        : undefined;
+   if (!id)
+     throw new ApiError(400, "That unlock code was not recognized.", { code: "invalid_code" });
+   let granted: { unlock_id: string }[];
+@@ -82,8 +88,8 @@ export async function redeemUnlock(svc: Service, player: PlayerRow, body: Record
+     granted = await svc.db.query<{ unlock_id: string }>(
+       `
+       insert into nw_account_unlocks(player_id,kind,unlock_id,granted_at)
+-      values($1,'background',$2,$3) on conflict do nothing returning unlock_id`,
+-      [player.id, id, svc.now()],
++      values($1,$2,$3,$4) on conflict do nothing returning unlock_id`,
++      [player.id, kind, id, svc.now()],
+     );
+   } catch (err) {
+     if (pgCode(err) === "23503") throw new ApiError(401, "Account no longer exists");
+@@ -91,7 +97,7 @@ export async function redeemUnlock(svc: Service, player: PlayerRow, body: Record
+   }
+   return {
+     ok: true,
+-    unlock: { kind: "background", id },
++    unlock: { kind, id },
+     already_owned: !granted.length,
+     ...(await accountUnlocks(svc, player.id)),
+   };

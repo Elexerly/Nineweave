@@ -1,0 +1,92 @@
+diff --git a/src/lib/nineweave/unlocks.test.ts b/src/lib/nineweave/unlocks.test.ts
+index a2386cd..b6716c3 100644
+--- a/src/lib/nineweave/unlocks.test.ts
++++ b/src/lib/nineweave/unlocks.test.ts
+@@ -89,14 +89,13 @@ it("duplicate codes idempotent and account isolated", async () => {
+   assert.deepEqual((await call("GET", "/me", b.token)).body.unlocked_backgrounds, []);
+   assert.equal((await redeem(b.token, "Blizzard")).body.already_owned, false);
+ });
+-it("all eleven reserved codes return readable unavailable with no grants", async () => {
++it("all ten reserved codes return readable unavailable with no grants", async () => {
+   const d = await device();
+   for (const code of [
+     "W2026",
+     "G2026",
+     "J2026",
+     "B2026",
+-    "N2026",
+     "E2026",
+     "JB2026",
+     "T2026",
+@@ -195,3 +194,71 @@ it("migration never promotes client-asserted legacy unlocks and preserves verifi
+   await pg.exec(migration);
+   assert.deepEqual((await call("GET", "/me", d.token)).body.unlocked_backgrounds, ["st_patrick"]);
+ });
++
++it("N2026 grants Nick once, persists across recovery, and leaves base roster untouched", async () => {
++  const a = await device(),
++    b = await device();
++  const r = await redeem(a.token, " n2026 ");
++  assert.equal(r.status, 200);
++  assert.deepEqual(r.body.unlock, { kind: "hero", id: "nick" });
++  assert.deepEqual(r.body.unlocked_heroes, ["nick"]);
++  assert.equal((await redeem(a.token, "N2026")).body.already_owned, true);
++  assert.deepEqual((await call("GET", "/me", b.token)).body.unlocked_heroes, []);
++  const roster = (await call("GET", "/heroes")).body;
++  assert.equal(roster.heroes.length, 32);
++  assert.equal(roster.heroes.includes("nick"), false);
++  assert.deepEqual(roster.secret_heroes, ["nick"]);
++  await pg.query("update nw_players set token_hash=$1 where id=$2", [
++    hashToken("nick-recovered"),
++    a.player_id,
++  ]);
++  assert.deepEqual((await call("GET", "/me", "nick-recovered")).body.unlocked_heroes, ["nick"]);
++  assert.equal(
++    (await call("DELETE", "/me", "nick-recovered", { confirm: "DELETE MY ACCOUNT" })).status,
++    200,
++  );
++  assert.deepEqual((await call("GET", "/me", (await device()).token)).body.unlocked_heroes, []);
++});
++it("Nick cannot be selected by forged profile, guest, room or tournament requests", async () => {
++  assert.equal(
++    (await call("POST", "/auth/device", undefined, { last_hero_id: "nick" })).status,
++    403,
++  );
++  const d = await device();
++  await call("PATCH", "/me", d.token, { screen_name: "NickTester", unlocks: ["nick", "N2026"] });
++  const patch = () => call("PATCH", "/me", d.token, { last_hero_id: "nick" });
++  assert.equal((await patch()).status, 403);
++  assert.equal((await call("POST", "/rooms", undefined, { character_id: "nick" })).status, 403);
++  assert.equal((await call("POST", "/rooms", d.token, { character_id: "nick" })).status, 403);
++  const otherRoom = await call("POST", "/rooms", undefined, { name: "Other" });
++  assert.equal(otherRoom.status, 201);
++  assert.equal(
++    (await call("POST", `/rooms/${otherRoom.body.code}/join`, d.token, { character_id: "nick" }))
++      .status,
++    403,
++  );
++  const tour = { size: 4, starts_in_minutes: 5, character_id: "nick" };
++  assert.equal((await call("POST", "/tournaments", d.token, tour)).status, 403);
++  const host = await device();
++  await call("PATCH", "/me", host.token, { screen_name: "TourHost" });
++  const publicTour = await call("POST", "/tournaments", host.token, {
++    size: 4,
++    starts_in_minutes: 5,
++  });
++  assert.equal(publicTour.status, 201);
++  assert.equal(
++    (
++      await call("POST", `/tournaments/${publicTour.body.code}/join`, d.token, {
++        character_id: "nick",
++      })
++    ).status,
++    403,
++  );
++  await redeem(d.token, "N2026");
++  assert.equal((await patch()).status, 200);
++  const joined = await call("POST", `/rooms/${otherRoom.body.code}/join`, d.token, {
++    character_id: "nick",
++  });
++  assert.equal(joined.status, 200, JSON.stringify(joined.body));
++  assert.equal((await call("POST", "/tournaments", d.token, tour)).status, 201);
++});

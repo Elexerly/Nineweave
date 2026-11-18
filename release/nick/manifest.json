@@ -1,0 +1,52 @@
+{
+  "source_commit": "5161626",
+  "backend_commit": "c9dc380",
+  "base_source": "8d10a3625181c261a3c909ded30e1e2430e39457",
+  "requires": "account-unlocks deployment including migration0011 already applied; no new migration",
+  "files": {
+    "BUILD_INFO.txt": {
+      "bytes": 2173,
+      "sha256": "27669830faf6e97b639e95b729bac7206fa49ff9fbd3d50af086511f3ea2224d"
+    },
+    "backend-source.patch": {
+      "bytes": 8085,
+      "sha256": "f763f72d39a8295107bfc26f598179fe09aab60851b0fbeb8f9a9b736c240d18"
+    },
+    "backend-tests.patch": {
+      "bytes": 4105,
+      "sha256": "2dd8c810237917984a6716d2e7662ae210924dd6c75be986ddfd4a05a3665f2b"
+    },
+    "hero_video/nick/intro.ogv": {
+      "bytes": 3376014,
+      "sha256": "b4a07f8fae8bfbab518e866698c09125750dbdde309b3a32972837fe4710636e"
+    },
+    "hero_video/nick/victory.ogv": {
+      "bytes": 3195386,
+      "sha256": "5148105ca31d1302a218e49ffef1ffe105412f7d5df814636f0112744e45ef6c"
+    },
+    "index.html": {
+      "bytes": 5622,
+      "sha256": "983995bf1b5f01373e08412ef8053762cf99a6cf857b66d13f3ab5d2377057a1"
+    },
+    "index.pck.part-a": {
+      "bytes": 8572210,
+      "sha256": "9cc32b8b4f37067dda3ab1767057e8d87feeafc5b96ac5ae08bc98d35203dfb7"
+    },
+    "index.pck.part-b": {
+      "bytes": 8572210,
+      "sha256": "3d9bebbd9e5db1cca425db5ca9951ba9da2038ab3c4af59efbb9e39e4393ecf3"
+    },
+    "verify_transfer.py": {
+      "bytes": 953,
+      "sha256": "d1a337dd90c80397af5b9e225fd302fd56d6260ff61aa8d5d8456b95b5558318"
+    },
+    "README.md": {
+      "bytes": 2075,
+      "sha256": "2adc60c4207e74a585d27c9d2ee7d1cd1de3ed23189a5d268210f99d8b066c9e"
+    }
+  },
+  "assembled_pack": {
+    "bytes": 17144420,
+    "sha256": "75837c7912cd396bb83df42eb72b3c96a114148d15db64784dc228490d3c2477"
+  }
+}

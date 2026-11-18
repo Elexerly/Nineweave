@@ -1,0 +1,11 @@
+Nineweave Round 5s (Patrick Laquin and hero video redo)
+engine: 4.7.2.stable.official.ed1daf0bf
+preset: Web / Compatibility / variant/thread_support=false
+mode: --export-release
+built: 2026-11-18T00:44:33Z
+source SHA: 51616260115d9718f075c7da4a0b4cfdab954128
+branch: plax/nick-secret-hero-nov18
+tag: pending
+tree: godot/characters/hero_audio.gd.uid godot/net/account_deletion.gd.uid godot/net/account_recovery.gd.uid godot/net/social.gd.uid godot/net/turn_clock.gd.uid godot/tests/round5c_fixtures.gd.uid godot/tests/run_account_entry_tests.gd.uid godot/tests/run_comic_prelude_tests.gd.uid godot/tests/run_deletion_tests.gd.uid godot/tests/run_hero_audio_playback_tests.gd.uid godot/tests/run_hero_sync_tests.gd.uid godot/tests/run_idle_warning_tests.gd.uid godot/tests/run_nick_tests.gd.uid godot/tests/run_online_audio_tests.gd.uid godot/tests/run_online_character_tests.gd.uid godot/tests/run_online_turn_tests.gd.uid godot/tests/run_recovery_layout_tests.gd.uid godot/tests/run_recovery_tests.gd.uid godot/tests/run_rename_tests.gd.uid godot/tests/run_result_spacing_tests.gd.uid godot/tests/run_round4g_tests.gd.uid godot/tests/run_round5a_tests.gd.uid godot/tests/run_round5b_tests.gd.uid godot/tests/run_round5c_tests.gd.uid godot/tests/run_round5d_tests.gd.uid godot/tests/run_selector_readability_tests.gd.uid godot/tests/run_signout_tests.gd.uid godot/tests/run_tutorial_account_tests.gd.uid godot/tests/run_unlock_contract_tests.gd.uid godot/tests/run_unlock_tests.gd.uid godot/tests/run_versus_flow_tests.gd.uid godot/tools/capture_account_entry.gd.uid godot/tools/capture_arena_prelude.gd.uid godot/tools/capture_idle_timer.gd.uid godot/tools/capture_r4f.gd.uid godot/tools/capture_r4g.gd.uid godot/tools/capture_r5a.gd.uid godot/tools/capture_r5b.gd.uid godot/tools/capture_r5c.gd.uid godot/tools/check_round5c_pack.gd.uid godot/tournament/online_flow.gd.uid godot/tournament/online_model.gd.uid godot/tournament/online_screen.gd.uid godot/ui/chat_panel.gd.uid godot/ui/deletion_screen.gd.uid godot/ui/readability.gd.uid godot/ui/recovery_screen.gd.uid qa/ 
+staging: /tmp/nineweave-export.sRdh1K/project
+notices: THIRD_PARTY_NOTICES.md and LICENSES/*OFL.txt

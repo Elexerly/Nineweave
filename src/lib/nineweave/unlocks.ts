@@ -10,14 +10,13 @@ const BACKGROUND_CODES: Readonly<Record<string, string>> = Object.freeze({
   "0704027": "fourth_july",
   PATRICK: "st_patrick",
 });
-const HERO_CODES: Readonly<Record<string, string>> = Object.freeze({ N2026: "nick" });
+const HERO_CODES: Readonly<Record<string, string>> = Object.freeze({ N2026: "nick", PROF26: "professor_gilt", JB2026: "jb_rocker" });
 const RESERVED_HERO_CODES = new Set([
   "W2026",
   "G2026",
   "J2026",
   "B2026",
   "E2026",
-  "JB2026",
   "T2026",
   "JY2026",
   "GM2026",

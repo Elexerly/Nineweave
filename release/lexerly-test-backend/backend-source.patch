@@ -1,0 +1,42 @@
+diff --git a/src/lib/nineweave/heroes.ts b/src/lib/nineweave/heroes.ts
+index 26b0c43..54fb818 100644
+--- a/src/lib/nineweave/heroes.ts
++++ b/src/lib/nineweave/heroes.ts
+@@ -17,7 +17,7 @@ export const HERO_IDS = [
+   "madame_solstice",
+   "bramble_ox",
+   "patrick_laquin",
+-  "professor_gilt",
++  "jb_circuit",
+   "siren_coil",
+   "ryan_blaze",
+   "tempest_vega",
+@@ -51,7 +51,7 @@ export const HERO_ALIASES: Readonly<Record<string, string>> = {
+ /** The Godot client's legacy default character. */
+ export const DEFAULT_HERO = "auric_rex";
+ 
+-export const SECRET_HERO_IDS = ["nick"] as const;
++export const SECRET_HERO_IDS = ["nick", "professor_gilt", "jb_rocker"] as const;
+ const SECRET_HERO_SET: ReadonlySet<string> = new Set(SECRET_HERO_IDS);
+ const HERO_SET: ReadonlySet<string> = new Set([...HERO_IDS, ...SECRET_HERO_IDS]);
+ 
+diff --git a/src/lib/nineweave/unlocks.ts b/src/lib/nineweave/unlocks.ts
+index e876322..9215b72 100644
+--- a/src/lib/nineweave/unlocks.ts
++++ b/src/lib/nineweave/unlocks.ts
+@@ -10,14 +10,13 @@ const BACKGROUND_CODES: Readonly<Record<string, string>> = Object.freeze({
+   "0704027": "fourth_july",
+   PATRICK: "st_patrick",
+ });
+-const HERO_CODES: Readonly<Record<string, string>> = Object.freeze({ N2026: "nick" });
++const HERO_CODES: Readonly<Record<string, string>> = Object.freeze({ N2026: "nick", PROF26: "professor_gilt", JB2026: "jb_rocker" });
+ const RESERVED_HERO_CODES = new Set([
+   "W2026",
+   "G2026",
+   "J2026",
+   "B2026",
+   "E2026",
+-  "JB2026",
+   "T2026",
+   "JY2026",
+   "GM2026",

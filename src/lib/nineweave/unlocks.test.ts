@@ -89,7 +89,7 @@ it("duplicate codes idempotent and account isolated", async () => {
   assert.deepEqual((await call("GET", "/me", b.token)).body.unlocked_backgrounds, []);
   assert.equal((await redeem(b.token, "Blizzard")).body.already_owned, false);
 });
-it("all ten reserved codes return readable unavailable with no grants", async () => {
+it("all nine reserved codes return readable unavailable with no grants", async () => {
   const d = await device();
   for (const code of [
     "W2026",
@@ -97,7 +97,6 @@ it("all ten reserved codes return readable unavailable with no grants", async ()
     "J2026",
     "B2026",
     "E2026",
-    "JB2026",
     "T2026",
     "JY2026",
     "GM2026",
@@ -205,9 +204,9 @@ it("N2026 grants Nick once, persists across recovery, and leaves base roster unt
   assert.equal((await redeem(a.token, "N2026")).body.already_owned, true);
   assert.deepEqual((await call("GET", "/me", b.token)).body.unlocked_heroes, []);
   const roster = (await call("GET", "/heroes")).body;
-  assert.equal(roster.heroes.length, 32);
+  assert.equal(roster.heroes.length, 33);
   assert.equal(roster.heroes.includes("nick"), false);
-  assert.deepEqual(roster.secret_heroes, ["nick"]);
+  assert.deepEqual(roster.secret_heroes, ["nick", "jb_rocker"]);
   await pg.query("update nw_players set token_hash=$1 where id=$2", [
     hashToken("nick-recovered"),
     a.player_id,
@@ -261,4 +260,90 @@ it("Nick cannot be selected by forged profile, guest, room or tournament request
   });
   assert.equal(joined.status, 200, JSON.stringify(joined.body));
   assert.equal((await call("POST", "/tournaments", d.token, tour)).status, 201);
+});
+
+it("jb_rocker cannot be selected by forged profile, guest, room or tournament requests", async () => {
+  assert.equal(
+    (await call("POST", "/auth/device", undefined, { last_hero_id: "jb_rocker" })).status,
+    403,
+  );
+  const d = await device();
+  await call("PATCH", "/me", d.token, { screen_name: "NickTester", unlocks: ["jb_rocker", "JB2026"] });
+  const patch = () => call("PATCH", "/me", d.token, { last_hero_id: "jb_rocker" });
+  assert.equal((await patch()).status, 403);
+  assert.equal((await call("POST", "/rooms", undefined, { character_id: "jb_rocker" })).status, 403);
+  assert.equal((await call("POST", "/rooms", d.token, { character_id: "jb_rocker" })).status, 403);
+  const otherRoom = await call("POST", "/rooms", undefined, { name: "Other" });
+  assert.equal(otherRoom.status, 201);
+  assert.equal(
+    (await call("POST", `/rooms/${otherRoom.body.code}/join`, d.token, { character_id: "jb_rocker" }))
+      .status,
+    403,
+  );
+  const tour = { size: 4, starts_in_minutes: 5, character_id: "jb_rocker" };
+  assert.equal((await call("POST", "/tournaments", d.token, tour)).status, 403);
+  const host = await device();
+  await call("PATCH", "/me", host.token, { screen_name: "TourHost" });
+  const publicTour = await call("POST", "/tournaments", host.token, {
+    size: 4,
+    starts_in_minutes: 5,
+  });
+  assert.equal(publicTour.status, 201);
+  assert.equal(
+    (
+      await call("POST", `/tournaments/${publicTour.body.code}/join`, d.token, {
+        character_id: "jb_rocker",
+      })
+    ).status,
+    403,
+  );
+  await redeem(d.token, "JB2026");
+  assert.equal((await patch()).status, 200);
+  const joined = await call("POST", `/rooms/${otherRoom.body.code}/join`, d.token, {
+    character_id: "jb_rocker",
+  });
+  assert.equal(joined.status, 200, JSON.stringify(joined.body));
+  assert.equal((await call("POST", "/tournaments", d.token, tour)).status, 201);
+});
+
+it("JB2026 is case insensitive, idempotent, account-scoped and survives token recovery", async () => {
+ const a = await device(), b = await device();
+ for (const [i,code] of ["jb2026"," JB2026 ","jB2026"].entries()) {
+  const r = await redeem(a.token,code);
+  assert.equal(r.status,200);
+  assert.deepEqual(r.body.unlock,{kind:"hero",id:"jb_rocker"});
+  assert.equal(r.body.already_owned,i>0);
+ }
+ assert.deepEqual((await call("GET","/me",b.token)).body.unlocked_heroes,[]);
+ await pg.query("update nw_players set token_hash=$1 where id=$2",[hashToken("rocker-recovered"),a.player_id]);
+ assert.deepEqual((await call("GET","/me","rocker-recovered")).body.unlocked_heroes,["jb_rocker"]);
+ await redeem("rocker-recovered","Prof26"); await redeem("rocker-recovered","N2026");
+ assert.deepEqual((await call("GET","/me","rocker-recovered")).body.unlocked_heroes,["jb_rocker","nick","professor_gilt"]);
+ assert.equal((await call("DELETE","/me","rocker-recovered",{confirm:"DELETE MY ACCOUNT"})).status,200);
+ assert.deepEqual((await call("GET","/me",(await device()).token)).body.unlocked_heroes,[]);
+});
+
+it("legacy Professor stays selectable before/after Prof26, new tech and original James remain distinct", async () => {
+ const d=await device();
+ for(const hero of ['professor_gilt','jb_circuit','james_ii']) {
+  assert.equal((await call('PATCH','/me',d.token,{last_hero_id:hero})).status,200);
+  assert.equal((await call('POST','/auth/device',undefined,{last_hero_id:hero})).status,201);
+ }
+ const r=await redeem(d.token,'pRoF26');assert.equal(r.status,200);
+ assert.equal(r.body.unlock.id,'professor_gilt');assert.equal((await redeem(d.token,'PROF26')).body.already_owned,true);
+ assert.deepEqual((await call('GET','/me',d.token)).body.unlocked_heroes,['professor_gilt']);
+ const roster=(await call('GET','/heroes')).body;
+ assert.ok(roster.heroes.includes('professor_gilt'));assert.ok(roster.heroes.includes('jb_circuit'));assert.ok(roster.heroes.includes('james_ii'));
+});
+it("old Professor client can match the new tech client without unlocking", async () => {
+ const a=await device(),b=await device();
+ const room=await call('POST','/rooms',a.token,{name:'LegacyProfessor',character_id:'professor_gilt'});
+ assert.equal(room.status,201);
+ const join=await call('POST',`/rooms/${room.body.code}/join`,b.token,{name:'NewJames',character_id:'jb_circuit'});
+ assert.equal(join.status,200);
+ const x=room.body.seat===1?room.body.token:join.body.token;
+ assert.equal((await call('POST',`/rooms/${room.body.code}/moves`,undefined,{token:x,board:4,cell:0,seq:1})).status,200);
+ const stateA=await call('GET',`/rooms/${room.body.code}`,room.body.token);
+ const stateB=await call('GET',`/rooms/${room.body.code}`,join.body.token);
+ assert.equal(stateA.status,200);assert.equal(stateB.status,200);assert.deepEqual(stateA.body.state,stateB.body.state);
 });

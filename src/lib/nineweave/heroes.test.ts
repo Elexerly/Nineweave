@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { HERO_IDS, HERO_ALIASES, canonicalHero } from "./heroes.ts";
 
 describe("Patrick replaces Kite in the server roster", () => {
-  it("retains 32 unique slots with Patrick in Kite's original slot", () => {
-    assert.equal(HERO_IDS.length, 32);
-    assert.equal(new Set(HERO_IDS).size, 32);
+  it("retains legacy slots plus the new tech hero with Patrick in Kite's original slot", () => {
+    assert.equal(HERO_IDS.length, 33);
+    assert.equal(new Set(HERO_IDS).size, 33);
     assert.equal(HERO_IDS[11], "patrick_laquin");
     assert.equal((HERO_IDS as readonly string[]).includes("kite_hollow"), false);
   });

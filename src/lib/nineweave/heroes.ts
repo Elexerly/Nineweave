@@ -17,7 +17,8 @@ export const HERO_IDS = [
   "madame_solstice",
   "bramble_ox",
   "patrick_laquin",
-  "professor_gilt",
+  "professor_gilt", // Keep legacy client selection valid until frontend rollout.
+  "jb_circuit",
   "siren_coil",
   "ryan_blaze",
   "tempest_vega",
@@ -51,7 +52,7 @@ export const HERO_ALIASES: Readonly<Record<string, string>> = {
 /** The Godot client's legacy default character. */
 export const DEFAULT_HERO = "auric_rex";
 
-export const SECRET_HERO_IDS = ["nick"] as const;
+export const SECRET_HERO_IDS = ["nick", "jb_rocker"] as const;
 const SECRET_HERO_SET: ReadonlySet<string> = new Set(SECRET_HERO_IDS);
 const HERO_SET: ReadonlySet<string> = new Set([...HERO_IDS, ...SECRET_HERO_IDS]);
 

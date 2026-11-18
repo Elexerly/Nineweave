@@ -36,7 +36,9 @@ func run():
 	v.sides[0].node.finished.emit()
 	ok(c.active and ui.board.frozen,"shorter video never cuts off partner")
 	v.sides[1].node.finished.emit()
-	ok(not c.active and not ui.board.frozen,"both complete straight into game")
+	ok(c.active and ui.board.frozen,"short intros hold until shared deadline")
+	v._process(v.INTRO_PLAY_SECONDS-v._reveal_age)
+	ok(not c.active and not ui.board.frozen,"six-second deadline enters game")
 	# Dispatch genuine input events through the SceneTree, not a direct skip call.
 	ui._begin_versus(); c.advance(.7)
 	var tap = InputEventScreenTouch.new(); tap.pressed = true; tap.position = Vector2(195,400)

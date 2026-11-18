@@ -83,6 +83,9 @@ func _draw():
 	if background_theme != "crystal":
 		var top_theme = Color("0c2236") if background_theme == "tidal" else Color("372c4c")
 		var low_theme = Color("235869") if background_theme == "tidal" else Color("94654f")
+		if background_theme in ["blizzard","tictactoe","new_year","fourth_july","st_patrick"]:
+			top_theme = Color("03121f"); low_theme = Color("123e56") if background_theme == "blizzard" else Color("151938")
+			if background_theme == "st_patrick": low_theme = Color("104c37")
 		draw_polygon(PackedVector2Array([Vector2.ZERO,Vector2(w,0),Vector2(w,h),Vector2(0,h)]),PackedColorArray([top_theme,top_theme,low_theme,low_theme]))
 		return
 	var top = Color("030a1d"); var mid = Color("0a2048"); var low = Color("061330")
@@ -170,6 +173,8 @@ func _draw_art(n: Control):
 
 ## Cheap alternate skies, deliberately separate from the original art path.
 func _draw_local_theme(n: Control):
+	if background_theme in ["blizzard","tictactoe","new_year","fourth_july","st_patrick"]:
+		_draw_bonus_theme(n); return
 	var w = size.x; var h = size.y
 	var sun = Vector2(w*.78,h*.26)
 	if background_theme == "tidal":
@@ -198,3 +203,39 @@ func _draw_local_theme(n: Control):
 	for i in range(18):
 		var pos = Vector2(fmod(i*97.37+23,w),fmod(i*157.73+13,h*.4))
 		n.draw_circle(pos,.9,Color(.8,.9,1,.35))
+
+## Lightweight procedural backgrounds, no downloaded art or gameplay changes.
+func _draw_bonus_theme(n: Control):
+	var w = size.x; var h = size.y
+	var t = 0.0 if reduced_motion else clock
+	if background_theme == "blizzard":
+		for layer in range(3):
+			var points = PackedVector2Array([Vector2(0,h)])
+			for i in range(9): points.append(Vector2(w*i/8.0,h*(.55+layer*.1)-sin(i*2.4+layer)*h*.11))
+			points.append(Vector2(w,h)); n.draw_colored_polygon(points,Color("476e86").darkened(layer*.23))
+		for i in range(70):
+			var point = Vector2(fposmod(i*97.3+t*11,w),fposmod(i*151.7+t*(12+i%9),h))
+			n.draw_circle(point,1.0+i%3,Color(.8,.94,1,.35))
+	elif background_theme == "tictactoe":
+		for row in range(7):
+			for col in range(8):
+				var at = Vector2((col+.5)*w/8,(row+.5)*h/7); var radius = minf(w/8,h/7)*.17
+				var ink = Color(.2,.8,1,.18) if (row+col)%2 == 0 else Color(1,.7,.22,.18)
+				if (row+col)%2 == 0: n.draw_arc(at,radius,0,TAU,24,ink,2,true)
+				else:
+					n.draw_line(at-Vector2.ONE*radius,at+Vector2.ONE*radius,ink,2,true)
+					n.draw_line(at+Vector2(-radius,radius),at+Vector2(radius,-radius),ink,2,true)
+	elif background_theme == "st_patrick":
+		for i in range(17):
+			var at = Vector2(fposmod(i*137.1+40,w),fposmod(i*193.2+40,h)); var r = 10.0+i%6
+			for a in [0.0,TAU/3,TAU*2/3]: n.draw_circle(at+Vector2.from_angle(a)*r*.65,r*.65,Color(.15,.65,.35,.24))
+			n.draw_line(at,at+Vector2(r,r*1.8),Color(.4,.8,.35,.22),2,true)
+	else:
+		for i in range(9):
+			var at = Vector2(fposmod(i*173.7+40,w),fposmod(i*233.1+20,h))
+			var ink = Color(1,.77,.3,.3)
+			if background_theme == "fourth_july": ink = [Color(1,.2,.3,.28),Color(.85,.95,1,.28),Color(.25,.5,1,.3)][i%3]
+			var radius = (24+i%4*10)*(1.0+sin(t*.5+i)*.1)
+			for ray in range(12):
+				var direction = Vector2.from_angle(ray*TAU/12)
+				n.draw_line(at+direction*radius*.3,at+direction*radius,ink,2,true)

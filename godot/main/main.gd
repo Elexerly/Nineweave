@@ -21,6 +21,10 @@ const EmailScreen = preload("res://ui/email_screen.gd")
 const Tutorial = preload("res://ui/tutorial.gd")
 const Announcer = preload("res://fx/announcer.gd")
 const Callout = preload("res://fx/comic_callout.gd")
+var _code_taps: int = 0
+var _code_owner: String = ""
+var _code_pending: bool = false
+var _code_message: String = "Unlock characters and backgrounds for your account. Codes never change match rules."
 const Themes = preload("res://themes/registry.gd")
 const Roster = preload("res://characters/roster.gd")
 const Profile = preload("res://characters/profile.gd")
@@ -69,6 +73,8 @@ var _email_code_draft: String = ""
 var _onboarding_email_confirmation: bool = false
 var tutorial
 var _tutorial_return_overlay: String = ""
+var _tutorial_continue: Callable
+var _tutorial_waiting: bool = false
 var lobby_timer: Timer
 var public_rooms: Array = []
 var leaderboard_players: Array = []
@@ -107,6 +113,7 @@ var hinge_rect: Rect2 = Rect2()
 var layout: Dictionary = {}
 var board
 var backdrop
+var timer_overlay: Layer
 var fx_overlay: Layer
 var hinge_overlay: Layer
 var sound
@@ -171,6 +178,11 @@ func _ready():
 	fx_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE; fx_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var add = CanvasItemMaterial.new(); add.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD; fx_overlay.material = add
 	add_child(fx_overlay)
+	# Foreground HUD: parent _draw runs BEFORE child portraits. Keep countdown visible
+	# above hero artwork, without intercepting input or drawing over modal/versus screens.
+	timer_overlay = Layer.new(); timer_overlay.name = "TurnTimerHUD"; timer_overlay.painter = _draw_timer_hud
+	timer_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE; timer_overlay.z_index = 20
+	timer_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(timer_overlay)
 	sound = Sound.new(); add_child(sound)
 	callout = Callout.new(); callout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(callout)
 	add_child(hero_video)
@@ -202,7 +214,7 @@ func _ready():
 	account.sync_finished.connect(_account_sync_finished)
 	account.email_flow_changed.connect(_account_email_flow_changed)
 	account.email_verified.connect(_account_email_verified)
-	account.error.connect(_account_error); add_child(account)
+	account.error.connect(_account_error); account.api.completed.connect(_code_completed); add_child(account)
 	deletion.changed.connect(func():
 		if overlay in ["delete_account","local_reset"]: _rebuild())
 	deletion.store = account.store
@@ -228,6 +240,10 @@ func _ready():
 			_account_name(account.store.data.screen_name)
 			if not account.store.data.email_prompt_done:
 				page = "email"; _email_draft = account.store.data.email
+		# Adopt the old device-wide flag only for the identity already present.
+		if account.store.complete() and settings.values.tutorial_completed:
+			account.complete_tutorial()
+		settings.set_value("tutorial_completed",false)
 		account.refresh()
 	tournament.setup(self)
 	add_child(online_tournament); online_tournament.setup(self)
@@ -238,6 +254,7 @@ func _ready():
 	_rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
 	call_deferred("_clip_preview")
+	call_deferred("_tutorial_on_home")
 func _on_viewport_resize():
 	if _manual_size != Vector2.ZERO: return
 	_resize_pending = true
@@ -304,7 +321,7 @@ func _title_geometry() -> Dictionary:
 func _apply_preferences():
 	P.board_theme = str(settings.values.board_theme)
 	board._dirty = true
-	backdrop.background_theme = str(settings.values.background_theme)
+	backdrop.background_theme = str(settings.values.background_theme) if Themes.valid(str(settings.values.background_theme),Themes.available(settings.values.unlocked_backgrounds)) else "crystal"
 	board.reduced_motion = bool(settings.values.reduced_motion)
 	backdrop.reduced_motion = bool(settings.values.reduced_motion)
 	sound.configure(settings.values)
@@ -367,6 +384,7 @@ func _sync_fx():
 		_result_t = clampf((p-RESULT_AT)/.2,0,1)
 	if overlay == "result": _apply_result_anim()
 	if fx_overlay: fx_overlay.queue_redraw()
+	if timer_overlay: timer_overlay.queue_redraw()
 func _apply_result_anim():
 	if cinematic.kind in ["spotlight","draw"]:
 		var g = cinematic.result_geometry(layout.size)
@@ -384,6 +402,7 @@ func _apply_result_anim():
 func request_game(new_mode: String = "computer", mark: int = 1):
 	if _require_screen_name("online" if new_mode == "online" else "title"): return
 	if new_mode == "online": request_online(); return
+	if _tutorial_gate(func(): request_game(new_mode,mark)): return
 	_pending_game = {"mode":new_mode,"mark":mark}
 	_select_player = 1 if new_mode == "local" else 0; _local_picked = false
 	open_character_select()
@@ -394,7 +413,7 @@ func open_character_select():
 	_rebuild()
 func _confirm_hero(id: String, display_name: String):
 	if _require_screen_name(): return
-	if not Roster.valid(id): return
+	if not Roster.selectable(id,settings.values.unlocked_heroes): return
 	id = Roster.canonical_id(id)
 	if _select_player == 2:
 		if id == str(profile.data.character_id): return
@@ -425,7 +444,7 @@ func _cinematic_finished(kind: String):
 	if kind == "lock_in": go_home()
 	elif kind == "versus":
 		board.frozen = false; overlay = ""
-		if not _maybe_tutorial(): _rebuild(); _schedule_ai(); _announce("ready")
+		_rebuild(); _schedule_ai(); _announce("ready")
 	elif kind in ["spotlight","draw"]:
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
@@ -452,6 +471,9 @@ func _input(event):
 		if not event.pressed: _skip_guard_until = 0
 		get_viewport().set_input_as_handled(); return
 	var tap = (pointer and event.pressed) or (event is InputEventKey and event.pressed and not event.echo)
+	if tap and overlay == "settings":
+		var difficulty_control = controls.get("difficulty")
+		if pointer and (not is_instance_valid(difficulty_control) or not difficulty_control.get_global_rect().has_point(event.position)): _code_taps = 0
 	var result_skip = false
 	if tap and cinematic and cinematic.combined_result:
 		var g = cinematic.result_geometry(layout.size)
@@ -508,7 +530,7 @@ func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = fa
 	if not keep:
 		var available: Array = []
 		for h in Roster.DATA:
-			if h.id != profile.data.character_id: available.append(h.id)
+			if h.id != profile.data.character_id and not h.get("secret",false): available.append(h.id)
 		rival_character = str(available[randi()%available.size()])
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	sound.prepare_character(Roster.audio_index(profile.data.character_id)); sound.prepare_character(Roster.audio_index(rival_character))
@@ -518,7 +540,7 @@ func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = fa
 	_refresh_labels(); _rebuild()
 	sound.clear_announcer()
 	if present: _begin_versus()
-	elif not _maybe_tutorial(): _schedule_ai(); _announce("ready")
+	else: _schedule_ai(); _announce("ready")
 func _schedule_ai():
 	if page != "game":
 		thinking = false; return
@@ -669,7 +691,7 @@ func resume_game():
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	page = "game"; overlay = ""; board.clear_effects(); _result_shown = false; _spotlight_done = false; cinematic.clear()
 	_refresh_labels(); _rebuild()
-	if not _maybe_tutorial(): _schedule_ai()
+	_schedule_ai()
 func go_home():
 	if _require_screen_name(): return
 	if tutorial.active: tutorial.skip()
@@ -679,6 +701,7 @@ func go_home():
 	if online_tournament.match_active:
 		online_tournament.match_active = false; online_tournament._auto_return = -1
 	_leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
+	_tutorial_on_home()
 func show_settings():
 	if _require_screen_name(): return
 	if tutorial.active: return
@@ -686,6 +709,7 @@ func show_settings():
 	if cinematic.active and cinematic.kind == "pop": cinematic.clear()
 	overlay = "settings"; thinking = false; _rebuild()
 func _close_overlay():
+	_code_taps = 0
 	overlay = ""; _rebuild(); _schedule_ai()
 func _leave_online():
 	if is_instance_valid(demo_rival): demo_rival.leave(); demo_rival.queue_free()
@@ -694,6 +718,7 @@ func _leave_online():
 	chat_open = false; _prompt_key = ""
 	if is_instance_valid(joined_timer): joined_timer.stop()
 func request_online():
+	if not _name_required() and _tutorial_gate(request_online): return
 	_quiet_gameplay()
 	if _require_screen_name("online"): return
 	# Choose before matchmaking: a join can start the match immediately.
@@ -702,6 +727,7 @@ func request_online():
 	open_character_select()
 func request_resume():
 	if _require_screen_name(): return
+	if _tutorial_gate(request_resume): return
 	if not profile.data.onboarded:
 		_pending_game = {"mode":"resume","mark":human_mark}; open_character_select(); return
 	resume_game()
@@ -711,6 +737,7 @@ func _quiet_gameplay():
 	sound.stop_playback()
 func open_online():
 	if _require_screen_name("online"): return
+	if _tutorial_gate(open_online): return
 	_quiet_gameplay()
 	_leave_online(); message = ""; room_code = ""; _room_password = ""
 	page = "online"; overlay = ""; online_state = "lobby"
@@ -864,12 +891,13 @@ func _turn_key() -> String:
 ## Presentation never changes the server-owned turn or assumes the local seat is X.
 func local_online_turn() -> bool:
 	if not remote_ready or game.status != 0 or game.turn != human_mark: return false
-	if transport is HTTP and (transport.reconnecting or transport._inflight == "move"): return false
+	if transport is HTTP and (transport.reconnecting or transport._inflight == "move" or transport.turn_phase().phase == "expired"): return false
 	return true
 func online_turn_caption() -> String:
 	if not remote_ready: return "Waiting for opponent"
 	if transport is HTTP and transport.reconnecting: return "Reconnecting…"
 	if transport is HTTP and transport._inflight == "move": return "Sending move…"
+	if transport is HTTP and transport.turn_phase().phase == "expired": return "Checking result…"
 	return "Your turn" if game.turn == human_mark else "Opponent's turn"
 func _sync_turn_affordances():
 	board.active_highlights_enabled = tutorial.active or mode != "online" or local_online_turn()
@@ -895,18 +923,35 @@ func _clock_changed():
 	var key = prompt_state()
 	if key != _prompt_key: _prompt_key = key; _rebuild()
 ## Online status lines under the board: [primary, small secondary].
+## Server-derived late-turn warning; counters belong to each seat, not the device.
+func idle_turn_warning() -> String:
+	if not transport is HTTP or str(transport.room.get("status","")) != "active": return ""
+	var info = turn_info()
+	var limit = int(transport.room.get("turn_late_limit",0))
+	if limit <= 0 or info.phase not in ["turn","still_there"]: return ""
+	var key = "consecutive_late_turns" if info.mine else "opponent_consecutive_late_turns"
+	var late = int(transport.room.get(key,0))
+	if late <= 0: return ""
+	if info.phase == "turn" and late >= limit-1:
+		return "Final warning: move in %s or lose" % Clock.mmss(info.remaining) if info.mine else "Opponent must move in %s or lose" % Clock.mmss(info.remaining)
+	if late >= limit-1:
+		return "Next late turn loses (%d/%d)" % [late,limit] if info.mine else "Opponent: next late turn loses (%d/%d)" % [late,limit]
+	return "Late turns: %d/%d; a timely move resets" % [late,limit] if info.mine else "Opponent late turns: %d/%d" % [late,limit]
 func online_lines() -> Array:
 	if mode != "online" or page != "game" or game.status != 0: return ["",""]
 	if not transport is HTTP: return [online_turn_caption(),""]
-	if transport.reconnecting: return ["Reconnecting…",""]
+	if transport.reconnecting: return ["Reconnecting — timer continues",idle_turn_warning()]
 	if transport._inflight == "move": return ["Sending move…",""]
 	var info = turn_info()
-	var first = "First moves — no-shows cancel with no loss" if transport.online2 and transport.room.has("both_moved") and not bool(transport.room.both_moved) else ""
+	var first = "First moves — no-shows cancel with no loss" if transport.online2 and transport.room.has("both_moved") and not bool(transport.room.both_moved) and not bool(transport.room.get("still_here_used",false)) else ""
+	var warning = idle_turn_warning()
+	if not warning.is_empty(): first = warning
 	if transport.room.get("opponent_connected") == false: return [opponent_name+" reconnecting…",first]
 	match info.phase:
 		"turn", "still_there":
 			if info.mine: return ["Your move · "+Clock.mmss(info.remaining) if info.phase == "turn" else "",first]
 			return ["Waiting for %s… %s" % [opponent_name,Clock.mmss(info.remaining)],first]
+		"expired": return ["Time expired — checking result…",""]
 		"legacy": return [online_turn_caption()+" · "+Clock.mmss(info.remaining),""]
 	return [online_turn_caption(),first]
 func toggle_match_sound():
@@ -931,7 +976,9 @@ func chat_button_rect() -> Rect2:
 func _chat_button(rect: Rect2, z: int = 0):
 	var b = ChatPanel.ChatButton.new(); b.name = "chat"; b.tooltip_text = "Chat"; b.unread = chat_unread
 	b.position = rect.position; b.size = rect.size; b.z_index = z
-	b.pressed.connect(func(): sound.cue("ui")); b.pressed.connect(toggle_chat)
+	b.pressed.connect(func():
+		_code_taps = 0
+		sound.cue("ui")); b.pressed.connect(toggle_chat)
 	add_child(b); ui_nodes.append(b); controls["chat"] = b
 func _build_chat_panel(rect: Rect2, z: int = 40):
 	chat_view = ChatPanel.new(); chat_view.position = rect.position; chat_view.size = rect.size; chat_view.z_index = z
@@ -983,7 +1030,7 @@ func _draw_prompt(n: Control):
 	var top = (r.size.y-68)*.5
 	P.text(n,title,Rect2(18,top,tw+8,36),tfs,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_LEFT,.4)
 	P.text(n,Clock.mmss(info.get("remaining",0.0)),Rect2(28+tw,top-2,72,40),28,red,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
-	var hint = "Tap I'm here or make a move" if ask else "Extra time used — make a move"
+	var hint = "Tap I'm here or make a move" if ask else "Move before time runs out or lose"
 	P.text(n,hint,Rect2(18,top+40,text_w,24),P.fit_size(hint,text_w,15),P.MUTED,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 ## Timer ring geometry around the active seat's portrait (for drawing and tests).
 func ring_geometry(mark: int) -> Dictionary:
@@ -998,21 +1045,51 @@ func ring_geometry(mark: int) -> Dictionary:
 	var gap = minf(46,r.size.x*.12); var width = (r.size.x-gap)/2
 	var side = Rect2(r.position,Vector2(width,r.size.y)) if mark == human_mark else Rect2(r.end.x-width,r.position.y,width,r.size.y)
 	var g = scorecard_geometry(side,mark != human_mark)
-	return {"center":g.center,"radius":g.radius+maxf(2.5,g.radius*.13)*.5+2.2}
+	var radius = g.radius+maxf(2.5,g.radius*.13)*.5+2.2
+	# Medallions can hang over their cards on Duo; keep the timer stroke on-screen.
+	var edge = minf(minf(g.center.x,layout.size.x-g.center.x),minf(g.center.y,layout.size.y-g.center.y))
+	return {"center":g.center,"radius":minf(radius,edge-4.5)}
 func timer_ring_rect(mark: int) -> Rect2:
-	var g = ring_geometry(mark); var reach = g.radius+3.0
+	var g = ring_geometry(mark); var reach = g.radius+4.0
 	return Rect2(g.center-Vector2(reach,reach),Vector2(reach,reach)*2)
-func _draw_timer_ring(mark: int):
-	var info = turn_info()
-	if not info.phase in ["turn","still_there"] or int(info.get("turn",0)) != mark: return
+func timer_hud_visible() -> bool:
+	return page == "game" and mode == "online" and game.status == 0 and overlay.is_empty() and not tutorial.active and not cinematic.active
+func _draw_timer_hud(n: Control):
+	if not timer_hud_visible(): return
+	for mark in [1,2]: _draw_timer_ring(n,mark)
+func timer_ring_info() -> Dictionary:
+	var info = turn_info().duplicate()
+	# Compatibility envelopes can have a real expiry but no prompt boundary.
+	# Show their actual seconds, never invent a 25-second turn or a 10-second grace.
+	if info.phase == "legacy":
+		info.fraction = 1.0
+		var start = Clock.parse(transport.room.get("turn_started_at"))
+		var end = Clock.parse(transport.room.get("turn_expires_at"))
+		if start > 0 and end > start: info.fraction = clampf(float(info.remaining)/(end-start),0,1)
+		info.tier = "calm" if info.remaining > Clock.AMBER_AT else ("amber" if info.remaining > Clock.RED_AT else "red")
+	return info
+func _draw_timer_ring(n: Control, mark: int):
+	var info = timer_ring_info()
+	if not info.phase in ["turn","still_there","legacy"] or float(info.get("remaining",0)) <= 0 or int(info.get("turn",0)) != mark: return
 	var g = ring_geometry(mark)
 	var color = Clock.tier_color(info.tier)
 	# Reduced motion: a steady ring. Otherwise amber/red breathe gently.
 	var alpha = 1.0 if board.reduced_motion or info.tier == "calm" else .82+.18*sin(clock*TAU*1.5)
 	var end = -PI*.5+TAU*float(info.fraction)
-	draw_arc(g.center,g.radius,0,TAU,64,Color(.01,.02,.05,.85),5.5,true)
-	draw_arc(g.center,g.radius,-PI*.5,end,64,Color(color,alpha),4,true)
-	draw_circle(g.center+Vector2.from_angle(end)*g.radius,2.6,Color(color.lightened(.45),alpha))
+	# Strong dark rail + bright moving arc remain readable over any portrait palette.
+	n.draw_arc(g.center,g.radius,0,TAU,96,Color(.01,.02,.05,.98),8,true)
+	n.draw_arc(g.center,g.radius,0,TAU,96,Color(color,.22),5.5,true)
+	n.draw_arc(g.center,g.radius,-PI*.5,end,96,Color(color,alpha),5.5,true)
+	n.draw_circle(g.center+Vector2.from_angle(end)*g.radius,3.0,Color(color.lightened(.45),alpha))
+	# Seconds belong beside the active face too, not only in the bottom status line.
+	var badge = Rect2(g.center+Vector2(-16,g.radius-22),Vector2(32,19))
+	n.draw_style_box(_timer_badge_style(),badge)
+	P.text(n,str(maxi(0,ceili(float(info.remaining)-.001))),badge,15,color,P.SANS)
+func _timer_badge_style() -> StyleBoxFlat:
+	var style = StyleBoxFlat.new(); style.bg_color = Color(.01,.02,.05,.96)
+	style.corner_radius_top_left = 5; style.corner_radius_top_right = 5
+	style.corner_radius_bottom_left = 5; style.corner_radius_bottom_right = 5
+	return style
 func leave_costs_loss() -> bool:
 	return transport.leave_costs_loss() if transport is HTTP else false
 ## In-game back: a live match asks first; the copy depends on both_moved.
@@ -1085,6 +1162,7 @@ func _notification(what: int):
 		if _require_screen_name(): return
 		get_tree().quit()
 func _show_onboarding(destination: String):
+	_tutorial_continue = Callable()
 	_leave_online(); _onboarding_destination = destination; page = "onboarding"; overlay = ""
 	_pending_game = {}; _select_player = 0; thinking = false; hint_busy = false
 	if tutorial.active:
@@ -1099,6 +1177,7 @@ func _account_recovered(token: String, player: Dictionary):
 	if page != "recovery": return
 	# Server-confirmed existing identity only. No /auth/device registration here.
 	account.api.cancel_all(); account.busy = false; account._refreshing = false
+	account._tutorial_inflight = false; account._tutorial_owner = ""
 	account.store.data.pending_hero = ""; account.store.data.pending_hero_owner = ""; account._hero_inflight = ""
 	account.store.data.signed_out = false
 	account.store.keep_device(token,str(player.screen_name))
@@ -1168,6 +1247,11 @@ func _new_account_after_signout():
 func _account_deleted():
 	_clear_local_account(true)
 func _clear_local_account(deletion_confirmed: bool, signed_out: bool = false):
+	_code_pending = false; _code_owner = ""
+	settings.values.unlocked_backgrounds = []
+	settings.values.unlocked_heroes = []
+	if not Themes.valid(str(settings.values.background_theme),Themes.BACKGROUNDS): settings.set_value("background_theme","crystal")
+	_tutorial_continue = Callable(); _tutorial_waiting = false
 	# Reached after precise server deletion success OR explicit typed local reset.
 	# Retire request owners rather than letting late callbacks restore old identity.
 	var account_path = account.store.path
@@ -1183,7 +1267,7 @@ func _clear_local_account(deletion_confirmed: bool, signed_out: bool = false):
 	account.onboarding_complete.connect(_account_completed); account.sync_finished.connect(_account_sync_finished)
 	account.name_updated.connect(_account_name); account.player_received.connect(_account_player)
 	account.rename_flow_changed.connect(_settings_name_status); account.email_flow_changed.connect(_account_email_flow_changed)
-	account.email_verified.connect(_account_email_verified); account.error.connect(_account_error); add_child(account)
+	account.email_verified.connect(_account_email_verified); account.error.connect(_account_error); account.api.completed.connect(_code_completed); add_child(account)
 	recovery.cancel(); online_api.cancel_all(); lobby_timer.stop(); joined_timer.stop()
 	var lobby_factory = online_api.request_factory
 	_retire_account_client(online_api); remove_child(online_api); online_api.queue_free()
@@ -1225,9 +1309,17 @@ func _account_name(value: String):
 	if overlay == "settings" and controls.has("player_name") and not account.rename_pending():
 		controls.player_name.text = value
 func _account_player(player: Dictionary):
+	settings.values.unlocked_heroes = player.get("unlocked_heroes",[]) if player.get("unlocked_heroes") is Array else []
+	if not Roster.selectable(str(profile.data.character_id),settings.values.unlocked_heroes):
+		profile.data.character_id = "cryon"; _hero_focus = ""; profile.save()
+	settings.values.unlocked_backgrounds = player.get("unlocked_backgrounds",[]) if player.get("unlocked_backgrounds") is Array else []
+	if not Themes.valid(str(settings.values.background_theme),Themes.available(settings.values.unlocked_backgrounds)):
+		settings.set_value("background_theme","crystal")
+	_apply_preferences()
+	call_deferred("_tutorial_on_home")
 	var pending = account.pending_hero()
 	var id = pending if not pending.is_empty() else str(player.get("last_hero_id",""))
-	if not _hero_changed and Roster.valid(id):
+	if not _hero_changed and Roster.selectable(id,settings.values.unlocked_heroes):
 		profile.data.character_id = Roster.canonical_id(id); profile.save()
 		if page == "character_select": _hero_focus = profile.data.character_id; _rebuild()
 func _account_completed():
@@ -1235,12 +1327,14 @@ func _account_completed():
 	if page != "onboarding": return
 	page = "email"; _email_draft = account.store.data.email; _rebuild()
 func _account_sync_finished():
+	call_deferred("_tutorial_on_home")
 	if _require_screen_name("online" if page == "online" else "title"): return
 	if page != "online": return
 	message = "" if account.store.online_ready() else "Your screen name is saved on this device. Online server not available. Open Online again to retry."
 	_rebuild()
 	if account.store.online_ready(): _refresh_lobby()
 func _account_error(value: String):
+	call_deferred("_tutorial_on_home")
 	_require_screen_name("online" if page == "online" else "title")
 	message = value
 	if page == "email" or overlay == "account":
@@ -1301,22 +1395,44 @@ func _build_email_screen(s: Vector2):
 	email_view.action.connect(_email_action); email_view.draft_changed.connect(func(value): _email_draft = value)
 	email_view.code_changed.connect(func(value): _email_code_draft = value)
 	add_child(email_view); ui_nodes.append(email_view); controls.merge(email_view.controls,true)
+func _tutorial_on_home():
+	if _tutorial_waiting and not account._refreshing and not account.busy:
+		_tutorial_waiting = false
+		var next = _tutorial_continue; _tutorial_continue = Callable()
+		if next.is_valid(): next.call_deferred(); return
+	if page != "title" or not overlay.is_empty() or account._refreshing or account.busy: return
+	if account.store.complete(): _tutorial_gate(Callable())
+func _tutorial_gate(next: Callable) -> bool:
+	if test_online_bypass or _debug_capture or account.store.data.tutorial_completed: return false
+	# Never interrupt a live match, including a resumed tournament match.
+	if mode == "online" and page == "game" and game.status == 0: return false
+	if tutorial.active: return true
+	if _name_required(): return false
+	_tutorial_continue = next
+	if account._refreshing:
+		_tutorial_waiting = true; return true
+	start_tutorial()
+	return tutorial.active
 func _maybe_tutorial() -> bool:
-	if test_online_bypass or _debug_capture or settings.values.tutorial_completed: return false
-	start_tutorial(); return true
+	# Retained for QA callers; automatic tutorials no longer run after versus.
+	return _tutorial_gate(Callable())
 func start_tutorial(replay: bool = false):
 	if _require_screen_name(): return
 	if tutorial.active: return
+	if mode == "online" and page == "game" and game.status == 0: return
 	_tutorial_return_overlay = overlay if replay else ""
 	thinking = false; hint_busy = false; sound.clear_announcer(); callout.callout = ""
 	# A non-modal claim animation must not cover or finish during the demo.
 	if cinematic.active and cinematic.kind == "pop": cinematic.clear()
 	overlay = "tutorial"; tutorial.begin(board,layout,replay); _rebuild()
 func _tutorial_finished(_skipped: bool):
-	settings.set_value("tutorial_completed",true)
+	account.complete_tutorial()
 	board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
 	_skip_guard_until = Time.get_ticks_msec()+SKIP_GUARD_MS
 	overlay = _tutorial_return_overlay; _refresh_labels(); _rebuild(); _schedule_ai()
+	var next = _tutorial_continue; _tutorial_continue = Callable()
+	if next.is_valid():
+		next.call_deferred(); return
 	if page == "game" and game.status != 0 and overlay.is_empty():
 		board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
 	elif page == "game" and overlay.is_empty(): _announce("ready")
@@ -1423,7 +1539,9 @@ func _button(id: String, caption: String, rect: Rect2, callback: Callable, accen
 	b.icon_kind = icon
 	b.position = rect.position; b.size = rect.size; b.accent = accent
 	b.font_size = int(clampf(rect.size.y*.4,17,26))
-	b.pressed.connect(func(): sound.cue("ui")); b.pressed.connect(callback); add_child(b); ui_nodes.append(b); controls[id] = b
+	b.pressed.connect(func():
+		if id != "difficulty": _code_taps = 0
+		sound.cue("ui")); b.pressed.connect(callback); add_child(b); ui_nodes.append(b); controls[id] = b
 	return b
 func _field(id: String, placeholder: String, rect: Rect2, value: String = ""):
 	var e = LineEdit.new(); e.name = id; e.placeholder_text = placeholder; e.text = value
@@ -1477,7 +1595,7 @@ func _rebuild():
 		_button("sign_in","Sign in",Rect2(x,y+68,w,52),func(): recovery.begin(); page = "recovery"; _rebuild(),true)
 		_button("new_account","New account",Rect2(x,y+132,w,52),_new_account_after_signout)
 	elif page == "character_select":
-		hero_select = HeroSelect.new(); hero_select.size = s; hero_select.hinge = layout.hinge
+		hero_select = HeroSelect.new(); hero_select.unlocked_heroes = settings.values.unlocked_heroes; hero_select.size = s; hero_select.hinge = layout.hinge
 		hero_select.selected_id = _hero_focus if not _hero_focus.is_empty() else str(profile.data.character_id)
 		hero_select.display_name = _name_draft if not _name_draft.is_empty() else str(profile.data.display_name)
 		hero_select.reduced_motion = board.reduced_motion
@@ -1686,7 +1804,13 @@ func _overlay_controls(s: Vector2):
 		for pair in [["sfx_volume","SFX"],["announcer_volume","Announcer"]]:
 			_volume_slider(pair[0],pair[1],Rect2(rx,y,sw,44)); y += 50
 		_button("difficulty","AI: "+str(settings.values.difficulty),Rect2(rx,y,sw,44),func():
-			var levels = ["Easy","Medium","Hard"]; settings.set_value("difficulty",levels[(levels.find(settings.values.difficulty)+1)%3]); _rebuild())
+			_code_taps += 1
+			if _code_taps == 7:
+				_code_taps = 0; overlay = "secret_codes"
+				_code_message = "Unlock characters and backgrounds for your account. Codes never change match rules."
+			else:
+				var levels = ["Easy","Medium","Hard"]; settings.set_value("difficulty",levels[(levels.find(settings.values.difficulty)+1)%3])
+			_rebuild())
 		y += 52
 		var name_x = rx+sw+20 if short else rx
 		var name_y = r.position.y+70 if short else y
@@ -1710,7 +1834,7 @@ func _overlay_controls(s: Vector2):
 			overlay = "account_options"; _rebuild())
 		_button("replay_tutorial","How to play",Rect2(lx+sw*.52+4,r.end.y-116,sw*.48-4,44),func(): start_tutorial(true))
 		_button("done","Return",Rect2(lx,r.end.y-62,sw*.48,44),_close_overlay,true)
-		_button("cosmetics","Cosmetics",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
+		_button("cosmetics","Appearance",Rect2(lx+sw*.52,r.end.y-62,sw*.48,44),func(): overlay = "cosmetics"; _rebuild())
 		# Round 5a: blocked-player list only when the server advertises chat.
 		if social.chat() and not test_online_bypass and account.store.complete():
 			_button("blocked_players","Blocked players",Rect2(lx,r.end.y-170,sw,44),open_blocked_players)
@@ -1750,10 +1874,23 @@ func _overlay_controls(s: Vector2):
 		scroll.add_child(copy); controls["signout_copy"] = copy
 		_button("confirm_signout","Sign out",Rect2(x,r.end.y-74,w*.48,48),_confirm_signout)
 		_button("cancel_signout","Stay signed in",Rect2(x+w*.52,r.end.y-74,w*.48,48),func(): overlay = "account_options"; _rebuild(),true)
+	elif overlay == "secret_codes":
+		var x = r.position.x+24; var y = r.position.y+70; var w = r.size.x-48
+		var scroll = ScrollContainer.new(); scroll.position = Vector2(x,y); scroll.size = Vector2(w,r.size.y-144)
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		add_child(scroll); ui_nodes.append(scroll)
+		var content = Control.new(); content.custom_minimum_size = Vector2(w-16,208); scroll.add_child(content)
+		var code = _field("secret_code","Enter code",Rect2(0,0,w-16,48))
+		code.reparent(content,false); ui_nodes.erase(code); code.max_length = 32
+		var redeem = _button("redeem_code","Checking…" if _code_pending else "Unlock",Rect2(0,58,w-16,44),func():
+			_redeem_code(str(controls.secret_code.text)))
+		redeem.reparent(content,false); ui_nodes.erase(redeem)
+		var status = _modal_label(_code_message,Rect2(0,110,w-16,90),16,P.PALE); status.reparent(content,false); ui_nodes.erase(status)
+		_button("codes_back","Settings",Rect2(x,r.end.y-62,w,44),func(): overlay = "settings"; _rebuild())
 	elif overlay == "cosmetics":
 		var x = r.position.x+24; var y = r.position.y+74; var w = r.size.x-48
-		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.BACKGROUNDS).name,Rect2(x,y,w,44),func():
-			settings.set_value("background_theme",Themes.next(settings.values.background_theme,Themes.BACKGROUNDS)); _apply_preferences(); _rebuild())
+		_button("background_theme","Sky: "+Themes.item(settings.values.background_theme,Themes.available(settings.values.unlocked_backgrounds)).name,Rect2(x,y,w,44),func():
+			settings.set_value("background_theme",Themes.next(settings.values.background_theme,Themes.available(settings.values.unlocked_backgrounds))); _apply_preferences(); _rebuild())
 		_button("board_theme","Board: "+Themes.item(settings.values.board_theme,Themes.BOARDS).name,Rect2(x,y+50,w,44),func():
 			settings.set_value("board_theme",Themes.next(settings.values.board_theme,Themes.BOARDS)); _apply_preferences(); _rebuild())
 		_button("classic","Restore crystal",Rect2(x,y+100,w,44),func():
@@ -1890,7 +2027,7 @@ func _draw_game():
 func _draw_phone_lane(r: Rect2):
 	var fs = int(minf(13,r.size.y-2))
 	var lines = online_lines()
-	if not lines[1].is_empty(): P.text(self,fit_label(lines[1],r.size.x,11),Rect2(r.position.x,r.end.y+1,r.size.x,14),11,Color(P.MUTED,.85))
+	if not lines[1].is_empty(): P.text(self,fit_label(lines[1],r.size.x,11),Rect2(r.position.x,r.end.y+1,r.size.x,14),11,P.GOLD if not idle_turn_warning().is_empty() else Color(P.MUTED,.85))
 	if not message.is_empty(): P.text(self,fit_label(message,r.size.x,fs),r,fs,P.GOLD)
 	elif not lines[0].is_empty(): P.text(self,fit_label(lines[0],r.size.x,fs),r,fs,_online_line_color())
 	elif hint_busy: P.text(self,"Reading the threads…",r,fs,P.PALE)
@@ -1917,6 +2054,7 @@ func _draw_turn(r: Rect2, u: float):
 			elif caption == "Waiting for opponent": caption = "Waiting…"
 			elif caption == "Sending move…": caption = "Sending…"
 			elif caption == "Reconnecting…": caption = "Syncing…"
+			elif caption == "Checking result…": caption = "Checking…"
 		while fs > 10 and P.text_width(caption,fs,P.SERIF)+fs*.62*2.6 > r.size.x-16: fs -= 1
 		icon_r = fs*.62
 	var tw = P.text_width(caption,fs,P.SERIF)
@@ -1987,7 +2125,6 @@ func _draw_player(r: Rect2, mark: int, caption: String, active: bool, style: Str
 		var ir = 12*u
 		P.mark(self,Vector2(r.get_center().x,name_y+30*u+ir+4),ir,mark)
 		P.text(self,"%d claimed" % game.owners.count(mark),Rect2(r.position.x+6,name_y+30*u+ir*2+10,r.size.x-12,24*u),int(17*u),col if mark == 1 else P.PALE)
-		if mode == "online": _draw_timer_ring(mark)
 		return
 	var right = style == "right"
 	var g = scorecard_geometry(r,right)
@@ -2002,7 +2139,6 @@ func _draw_player(r: Rect2, mark: int, caption: String, active: bool, style: Str
 	if c.icon > 0: P.mark(self,Vector2(lx+c.icon,ly),c.icon,mark)
 	P.text(self,c.text,Rect2(lx+c.icon*2.6,ly-10,c.width-c.icon*2.6+6,20),c.fs,col if mark == 1 else P.PALE,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
 	_medallion(center,radius,mark,portrait,active,rival_thinking)
-	if mode == "online": _draw_timer_ring(mark)
 	# Crown rides above the name, clear of the corner header buttons.
 	if active: P.crown(self,Vector2(g.text.get_center().x,r.position.y+1),.5)
 ## Round 3c: horizontal scorecard geometry. The name and "claimed" lanes end before the
@@ -2195,7 +2331,7 @@ func _draw_modal(node: Control):
 		_draw_result(node,r,short); return
 	node.draw_rect(Rect2(Vector2.ZERO,s),Color(.001,.005,.015,.88))
 	P.panel(node,r,false,1,true); P.outline(node,r.grow(-8),P.GOLD.darkened(.4),1)
-	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"LOCAL COSMETICS","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
+	var heading = {"settings":"SETTINGS","account_options":"ACCOUNT","signout_confirm":"SIGN OUT?","setup":"CHOOSE YOUR PATH","how":"HOW TO PLAY","cosmetics":"APPEARANCE","secret_codes":"SECRET CODES","leave_confirm":"LEAVE MATCH?","blocked":"BLOCKED PLAYERS"}.get(overlay,"")
 	if overlay == "online_end": heading = Clock.cancelled_title(str(transport.room.get("end_reason","")) if transport is HTTP else "")
 	P.text(node,heading,Rect2(r.position+Vector2(20,23),Vector2(r.size.x-72,44)),25,P.PALE,P.SERIF,HORIZONTAL_ALIGNMENT_CENTER,.6)
 	if overlay == "setup":
@@ -2305,8 +2441,8 @@ func _clip_preview():
 	if scenario == "tutorial_auto":
 		# Needs an already-complete local account (URL cannot skip first-run name).
 		# Do not set test_online_bypass: that would suppress the first-play tutorial.
-		settings.values.tutorial_completed = false
-		start_game("computer",1,true,false)
+		account.store.data.tutorial_completed = false
+		_tutorial_on_home()
 		return
 	test_online_bypass = true
 	hero_video.prefetch_pair(hero, rival)
@@ -2508,3 +2644,33 @@ func debug_seek_cinematic(seconds: float):
 	if overlay != want: overlay = want; _rebuild()
 	_result_shown = cinematic.kind in ["spotlight","draw"]
 	debug_refresh()
+
+func _redeem_code(raw: String):
+	if _code_pending: return
+	if not account.store.online_ready():
+		_code_message = "Sign in and connect to the account server to unlock a code."; _rebuild(); return
+	_code_pending = true; _code_owner = str(account.store.data.device_token)
+	_code_message = "Checking code…"
+	account.api.submit("/me/unlocks",HTTPClient.METHOD_POST,{"code":raw.strip_edges()},"cosmetic_unlock",_code_owner)
+	_rebuild()
+func _code_completed(operation: String, response: int, data: Dictionary, problem: String):
+	if operation != "cosmetic_unlock" or not _code_pending: return
+	_code_pending = false
+	if _code_owner != str(account.store.data.device_token) or not account.store.online_ready(): return
+	_code_owner = ""
+	if not problem.is_empty() or response < 200 or response >= 300:
+		_code_message = problem if not problem.is_empty() else "Unable to unlock. Please try again."
+	else:
+		settings.values.unlocked_heroes = data.get("unlocked_heroes",[]) if data.get("unlocked_heroes") is Array else []
+		var unlocked = data.get("unlocked_backgrounds",[])
+		settings.values.unlocked_backgrounds = unlocked if unlocked is Array else []
+		var grant = data.get("unlock",{})
+		var selected = str(grant.get("id","")) if grant is Dictionary and grant.get("kind") == "background" else ""
+		if Themes.valid(selected,Themes.available(settings.values.unlocked_backgrounds)):
+			settings.set_value("background_theme",selected)
+			_code_message = "Unlocked! Choose your background anytime in Appearance."
+		elif grant is Dictionary and grant.get("kind") == "hero" and Roster.selectable(str(grant.get("id","")),settings.values.unlocked_heroes):
+			_code_message = "Unlocked! Nick is now available in character selection."
+		else: _code_message = "Your account unlocks have been refreshed."
+		_apply_preferences()
+	if overlay == "secret_codes": _rebuild()

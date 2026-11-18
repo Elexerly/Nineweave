@@ -2,8 +2,8 @@ class_name NineweaveSettings
 extends RefCounted
 const Themes = preload("res://themes/registry.gd")
 var path: String = "user://nineweave.cfg"
-const DEFAULTS = {"sound":true,"music":false,"reduced_motion":false,"difficulty":"Hard","show_hints":true,"player_name":"You","sfx_volume":.85,"announcer_volume":.9,"music_volume":.45,"audio_version":3,"background_theme":"crystal","board_theme":"crystal","tutorial_completed":false}
-var values: Dictionary = DEFAULTS.duplicate()
+const DEFAULTS = {"sound":true,"music":false,"reduced_motion":false,"difficulty":"Hard","show_hints":true,"player_name":"You","sfx_volume":.85,"announcer_volume":.9,"music_volume":.45,"audio_version":3,"background_theme":"crystal","board_theme":"crystal","tutorial_completed":false,"unlocked_backgrounds":[],"unlocked_heroes":[]}
+var values: Dictionary = DEFAULTS.duplicate(true)
 var saved_game = {}
 func _init(file_path: String = "user://nineweave.cfg"):
 	path = file_path
@@ -18,13 +18,16 @@ func _init(file_path: String = "user://nineweave.cfg"):
 		var version = c.get_value("settings","audio_version",0)
 		if not (version is int or version is float) or int(version) < 3:
 			values.sound = true; values.audio_version = 3; save()
+	values.unlocked_heroes = []
+	values.unlocked_backgrounds = [] # Refresh entitlements from the signed-in account, never local grants.
 	_sanitize()
-	if not Themes.valid(str(values.background_theme),Themes.BACKGROUNDS): values.background_theme = Themes.DEFAULT_BACKGROUND
+	if not Themes.valid(str(values.background_theme),Themes.BACKGROUNDS+Themes.BONUS_BACKGROUNDS): values.background_theme = Themes.DEFAULT_BACKGROUND
 	if not Themes.valid(str(values.board_theme),Themes.BOARDS): values.board_theme = Themes.DEFAULT_BOARD
 	for key in ["sfx_volume","announcer_volume","music_volume"]: values[key] = clampf(float(values[key]),0,1)
 func save() -> void:
 	var c = ConfigFile.new()
-	for key in values: c.set_value("settings",key,values[key])
+	for key in values:
+		if not key in ["unlocked_backgrounds","unlocked_heroes"]: c.set_value("settings",key,values[key])
 	c.set_value("resume","game",saved_game)
 	c.save(path)
 func set_value(key: String, value) -> void:
@@ -47,9 +50,12 @@ func _sanitize() -> void:
 				if is_nan(v) or is_inf(v): v = d
 			TYPE_INT:
 				v = int(v) if typeof(v) == TYPE_INT or typeof(v) == TYPE_FLOAT else d
+			TYPE_ARRAY:
+				v = v if v is Array else []
 			TYPE_STRING:
 				v = v if typeof(v) == TYPE_STRING else d
 		values[key] = v
+	values.unlocked_backgrounds = values.unlocked_backgrounds.filter(func(id): return id is String and Themes.valid(id,Themes.BONUS_BACKGROUNDS))
 	if not values.difficulty in DIFFICULTIES: values.difficulty = DEFAULTS.difficulty
 	values.player_name = str(values.player_name).strip_edges().left(24)
 	if values.player_name.is_empty(): values.player_name = DEFAULTS.player_name

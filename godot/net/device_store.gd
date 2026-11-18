@@ -6,7 +6,7 @@ var deletion_marker_io: Callable
 var deletion_reset_required = false
 var deletion_reset_reason = ""
 var path: String
-var data: Dictionary = {"pending_hero":"","pending_hero_owner":"","signed_out":false,"deletion_uncertain":false,"deletion_resolution":"","device_token":"","screen_name":"","tos_version":"","privacy_version":"","accepted_at":"","age_confirmed":false,"pending_sync":false,"registration_rejected":false,"email":"","email_status":"not_verified","email_verified_at":"","email_prompt_done":false}
+var data: Dictionary = {"tutorial_completed":false,"tutorial_pending":false,"pending_hero":"","pending_hero_owner":"","signed_out":false,"deletion_uncertain":false,"deletion_resolution":"","device_token":"","screen_name":"","tos_version":"","privacy_version":"","accepted_at":"","age_confirmed":false,"pending_sync":false,"registration_rejected":false,"email":"","email_status":"not_verified","email_verified_at":"","email_prompt_done":false}
 func _init(file_path: String = "user://nineweave-device.cfg"):
 	path = file_path; data = data.duplicate(true)
 	var cfg = ConfigFile.new()
@@ -88,6 +88,8 @@ func save():
 func keep_device(credential: String, screen_name: String):
 	if not credential.begins_with("nwd_") or credential.length() <= 4: return false
 	var old_token = str(data.device_token)
+	if not old_token.is_empty() and old_token != credential:
+		data.tutorial_completed = false; data.tutorial_pending = false
 	if not str(data.pending_hero).is_empty():
 		if old_token.is_empty() and str(data.pending_hero_owner).is_empty():
 			data.pending_hero_owner = credential.sha256_text()

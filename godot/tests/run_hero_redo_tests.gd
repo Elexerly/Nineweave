@@ -14,7 +14,7 @@ func ok(value: bool, label: String):
 func _initialize(): run.call_deferred()
 func run():
 	var hero = R.get_hero("patrick_laquin")
-	ok(R.DATA.size() == 32 and R.DATA[11].id == hero.id,"same roster slot, 32 heroes")
+	ok(R.selectable_indices().size() == 32 and R.DATA[11].id == hero.id,"same roster slot, 32 heroes")
 	ok(hero.name == "Patrick Laquin" and hero.palette == ["1c1c20","6b6f78","e0a040"],"name and palette")
 	ok(hero.concept == "Bounty hunter · wrist-crossbow and chain bola" and hero.mark == "crosshair" and hero.body == "athletic" and hero.prop == "crossbow","concept and rig metadata")
 	ok(hero.pop == "Your bounty just went up." and hero.victory == "Collected. Nine boards, one bounty." and hero.defeat == "He tears up his own wanted poster." and hero.action == "BAGGED!","approved copy")

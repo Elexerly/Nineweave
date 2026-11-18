@@ -25,6 +25,7 @@ func run():
 	for suffix in ["-device.cfg","-settings.cfg","-profile.cfg","-profile-tournament.cfg"]:
 		if FileAccess.file_exists(prefix+suffix): DirAccess.remove_absolute(prefix+suffix)
 	ui.account.store = Store.new(prefix+"-device.cfg"); ui.account.store.accept_consent("Original",Store.consent_payload())
+	ui.account.store.data.tutorial_completed = true
 	ui.account.store.keep_device("nwd_original","Original"); ui.account.store.keep_email("original@example.com"); ui.account.store.save()
 	ui.settings = Settings.new(prefix+"-settings.cfg"); ui.settings.values.sound = false
 	ui.profile = Profile.new(prefix+"-profile.cfg"); ui.profile.choose("cryon","Original")
@@ -137,7 +138,7 @@ func run():
 	ui.recovery.email = "original@example.com"; ui.recovery.request_code()
 	recovery_http.respond(200,{"challenge_id":"ec_resolve"})
 	ui.recovery.code = "123456"; ui.recovery.confirm()
-	var restored = Store.consent_payload(); restored.screen_name = "Original"; restored.email = "original@example.com"; restored.email_status = "verified"; restored.capabilities = {"email":true,"account_deletion":true}
+	var restored = Store.consent_payload(); restored.tutorial_completed = true; restored.screen_name = "Original"; restored.email = "original@example.com"; restored.email_status = "verified"; restored.capabilities = {"email":true,"account_deletion":true}
 	recovery_http.respond(200,{"token":"nwd_original","player_id":"existing","player":restored})
 	ok(not Store.new(prefix+"-device.cfg").data.deletion_uncertain and ui.account.store.online_ready(),"only explicit successful email recovery resolves uncertain existing identity")
 	ui.overlay = "delete_account"; ui.deletion.begin(); ui.deletion.proceed()

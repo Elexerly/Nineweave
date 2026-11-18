@@ -15,7 +15,7 @@ func run():
 	check(Overlay.soundtrack_tail_position(5.8,5.9) == 5.9,"ahead audio clock still fades")
 	check(Overlay.soundtrack_tail_position(-1,0) == 0,"tail clock nonnegative")
 	for kind in ["intro","victory"]:
-		var end = Overlay.BETH_VIDEO_SECONDS
+		var end = Overlay.INTRO_PLAY_SECONDS if kind == "intro" else Overlay.BETH_VIDEO_SECONDS
 		for elapsed in [0.0,end-.3]:
 			check(is_equal_approx(Overlay.soundtrack_tail_gain("madame_solstice",kind,elapsed,end),1.0),"Beth full gain before fade "+kind)
 		check(is_equal_approx(Overlay.soundtrack_tail_gain("madame_solstice",kind,end-.15,end),.5),"Beth half amplitude at fade midpoint "+kind)
@@ -26,10 +26,10 @@ func run():
 		check(Overlay.soundtrack_tail_gain("madame_solstice",kind,end,end) == 0,"Beth silent at end "+kind)
 		check(Overlay.soundtrack_tail_gain("madame_solstice",kind,end+1,end) == 0,"Beth silent after end "+kind)
 		for id in ["ryan_blaze","shard_jack","aurelia"]:
-			check(Overlay.soundtrack_tail_gain(id,kind,end,end) == 1,"other heroes unchanged "+id+kind)
+			check(Overlay.soundtrack_tail_gain(id,kind,end,end) == (0 if kind == "intro" else 1),"all intros fade; other victories unchanged "+id+kind)
 	var overlay = Overlay.new(); overlay.source = Source.new(); root.add_child(overlay)
 	overlay.decode_enabled = true
-	for id in ["ryan_blaze","shard_jack","madame_solstice","kellen_byte","professor_gilt"]:
+	for id in ["ryan_blaze","shard_jack","madame_solstice","kellen_byte","professor_gilt","nick"]:
 		var rival = "shard_jack" if id == "ryan_blaze" else "ryan_blaze"
 		for kind in ["versus","spotlight"]:
 			overlay.begin(kind,id,rival,1,Vector2(800,600),false)
@@ -51,7 +51,7 @@ func run():
 			check(is_equal_approx(sound.volume_db,-8),"unmute retains gain "+label)
 			if id == "madame_solstice":
 				var end = overlay._soundtrack_end(overlay.sides[0])
-				check(end > 6.0 and end <= Overlay.BETH_VIDEO_SECONDS+.001,"Beth end bounded by video "+kind)
+				check(end >= 6.0 and end <= Overlay.BETH_VIDEO_SECONDS+.001,"Beth end bounded by video "+kind)
 				sound.seek(end-.15)
 				await create_timer(.025).timeout
 				overlay.set_sound_enabled(true)

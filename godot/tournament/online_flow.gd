@@ -41,6 +41,7 @@ func now() -> float: return float(now_source.call()) if now_source.is_valid() el
 func token() -> String: return str(main.account.store.data.device_token)
 func request():
 	if main._require_screen_name(): return
+	if main._tutorial_gate(request): return
 	timer.stop(); main._leave_online(); main.cinematic.clear(); main.thinking = false
 	state = "waiting" if not code.is_empty() else "chooser"
 	main.page = "online_tournament"; main.overlay = ""; main._rebuild()

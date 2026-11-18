@@ -25,6 +25,11 @@ var _refreshing: bool = false
 var _recovering_device: bool = false
 var _account_unavailable: bool = false
 ## Session-only capability: neither a saved address nor config can enable writes.
+var tutorial_capable: bool = false
+var _tutorial_inflight: bool = false
+var _tutorial_owner: String = ""
+var _tutorial_request_serial: int = 0
+var _tutorial_operation: String = ""
 var deletion_capable: bool = false
 var email_capable: bool = false
 var email_capability_known: bool = false
@@ -63,7 +68,7 @@ func _retry_unavailable_account():
 func _process(delta: float):
 	_hero_retry_elapsed += delta
 	if _hero_retry_elapsed >= 30.0:
-		_hero_retry_elapsed = 0.0; _sync_hero()
+		_hero_retry_elapsed = 0.0; _sync_hero(); _sync_tutorial()
 	if not _email_waiting_for_account: return
 	_email_setup_elapsed += delta
 	if _email_setup_elapsed >= EMAIL_SETUP_TIMEOUT:
@@ -224,6 +229,7 @@ func _hero_completed(response: int, data: Dictionary, problem: String):
 		store.data.pending_hero = ""; store.data.pending_hero_owner = ""; store.save()
 	else: _sync_hero()
 func _recover_device(operation: String):
+	_tutorial_inflight = false; _tutorial_owner = ""; _tutorial_operation = ""; tutorial_capable = false
 	if _deletion_blocked():
 		api.cancel_all(); _refreshing = false; busy = false
 		error.emit("An earlier deletion may have completed. Your session was rejected. No replacement account was created. Use Account to sign in and resolve this."); return
@@ -232,6 +238,9 @@ func _recover_device(operation: String):
 	api.cancel_all(); _refreshing = false
 	store.data.pending_hero = ""; store.data.pending_hero_owner = ""; _hero_inflight = ""
 	store.data.device_token = ""; store.data.pending_sync = true
+	# Re-registration may create a different identity. Never transfer the old
+	# account's completion (or queued write) into that replacement identity.
+	store.data.tutorial_completed = false; store.data.tutorial_pending = false
 	store.data.email_status = "not_verified"; store.data.email_verified_at = ""; store.save()
 	email_capable = false; email_capability_known = false; _account_unavailable = false
 	if not busy:
@@ -258,11 +267,36 @@ func _recover_device(operation: String):
 		_stop_email_setup(message); error.emit(message); return
 	_recovering_device = true; busy = true
 	_submit_registration()
+func complete_tutorial():
+	if _deletion_blocked() or store.data.tutorial_completed: return
+	store.data.tutorial_completed = true; store.data.tutorial_pending = true; store.save()
+	_sync_tutorial()
+func _sync_tutorial():
+	if _tutorial_inflight or not tutorial_capable or not store.data.tutorial_pending or not store.online_ready() or _deletion_blocked(): return
+	_tutorial_inflight = true; _tutorial_owner = str(store.data.device_token)
+	_tutorial_request_serial += 1
+	_tutorial_operation = "tutorial_complete:"+str(_tutorial_request_serial)
+	api.submit("/me/tutorial/complete",HTTPClient.METHOD_POST,{},_tutorial_operation,store.data.device_token)
+
 func _completed(operation: String, response: int, data: Dictionary, problem: String):
+	# The code dialog owns this response; do not route reserved/invalid codes into onboarding.
+	if operation == "cosmetic_unlock": return
 	# A different tab can sign out while this request is in flight.
 	_deletion_blocked()
 	if store.data.signed_out:
-		api.cancel_all(); busy = false; _refreshing = false; return
+		api.cancel_all(); busy = false; _refreshing = false
+		_tutorial_inflight = false; _tutorial_owner = ""; return
+	if operation.begins_with("tutorial_complete"):
+		if not _tutorial_inflight or _tutorial_owner.is_empty() or operation != _tutorial_operation: return
+		if _tutorial_owner != str(store.data.device_token):
+			_tutorial_inflight = false; return
+		# Keep the write guard raised while merging: a malformed/stale success
+		# without the completion flag must wait for the normal retry, not loop.
+		if problem.is_empty() and response >= 200 and response < 300:
+			var player = data.get("player",data)
+			if player is Dictionary: _accept_email_player(player)
+		_tutorial_inflight = false
+		return
 	if operation == "rename":
 		_rename_completed(response,data,problem); return
 	if response == 401 and operation in ["me","consent","hero","email_store","email_request","email_confirm"]:
@@ -320,7 +354,11 @@ func _completed(operation: String, response: int, data: Dictionary, problem: Str
 
 func _accept_email_player(player: Dictionary, replace_email: bool = false):
 	email_capability_known = true; _account_unavailable = false
+	var tutorial_seen = player.get("tutorial_completed",false) == true
+	if tutorial_seen:
+		store.data.tutorial_completed = true; store.data.tutorial_pending = false
 	var capabilities = player.get("capabilities",{})
+	tutorial_capable = capabilities is Dictionary and capabilities.get("tutorial_completion",false) == true
 	deletion_capable = capabilities is Dictionary and capabilities.get("account_deletion",false) == true
 	email_capable = capabilities is Dictionary and capabilities.get("email",false) == true
 	var server_email = player.get("email","")
@@ -337,6 +375,7 @@ func _accept_email_player(player: Dictionary, replace_email: bool = false):
 	store.save()
 	email_changed.emit(store.data.email,store.data.email_status)
 	email_flow_changed.emit()
+	_sync_tutorial()
 
 func _email_completed(operation: String, response: int, data: Dictionary, problem: String):
 	email_busy = false
@@ -391,7 +430,7 @@ func _finish_registration(pending: bool, confirmed_name: String = ""):
 	if was_syncing: sync_finished.emit()
 	else: onboarding_complete.emit()
 	_resume_email_save()
-	_sync_hero()
+	_sync_hero(); _sync_tutorial()
 
 func _is_outage(response: int, problem: String) -> bool:
 	# Never turn a reachable server's validation/name conflict into acceptance,

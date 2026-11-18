@@ -1,0 +1,329 @@
+{
+  "steps": [
+    {
+      "code": "Blizzard",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "background",
+          "id": "blizzard"
+        },
+        "already_owned": false,
+        "unlocked_backgrounds": [
+          "blizzard"
+        ],
+        "unlocked_heroes": []
+      }
+    },
+    {
+      "code": "TicTacToe",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "background",
+          "id": "tictactoe"
+        },
+        "already_owned": false,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "tictactoe"
+        ],
+        "unlocked_heroes": []
+      }
+    },
+    {
+      "code": "010127",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "background",
+          "id": "new_year"
+        },
+        "already_owned": false,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "new_year",
+          "tictactoe"
+        ],
+        "unlocked_heroes": []
+      }
+    },
+    {
+      "code": "0704027",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "background",
+          "id": "fourth_july"
+        },
+        "already_owned": false,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "fourth_july",
+          "new_year",
+          "tictactoe"
+        ],
+        "unlocked_heroes": []
+      }
+    },
+    {
+      "code": "Patrick",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "background",
+          "id": "st_patrick"
+        },
+        "already_owned": false,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "fourth_july",
+          "new_year",
+          "st_patrick",
+          "tictactoe"
+        ],
+        "unlocked_heroes": []
+      }
+    },
+    {
+      "code": "Blizzard",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "background",
+          "id": "blizzard"
+        },
+        "already_owned": true,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "fourth_july",
+          "new_year",
+          "st_patrick",
+          "tictactoe"
+        ],
+        "unlocked_heroes": []
+      }
+    },
+    {
+      "code": "W2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "G2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "J2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "B2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "N2026",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "unlock": {
+          "kind": "hero",
+          "id": "nick"
+        },
+        "already_owned": false,
+        "unlocked_backgrounds": [
+          "blizzard",
+          "fourth_july",
+          "new_year",
+          "st_patrick",
+          "tictactoe"
+        ],
+        "unlocked_heroes": [
+          "nick"
+        ]
+      }
+    },
+    {
+      "code": "E2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "JB2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "T2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "JY2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "GM2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "D2026",
+      "status": 409,
+      "body": {
+        "error": "This secret character is not available yet. Keep the code and try again when the character arrives.",
+        "code": "code_unavailable"
+      }
+    },
+    {
+      "code": "wrong",
+      "status": 400,
+      "body": {
+        "error": "That unlock code was not recognized.",
+        "code": "invalid_code"
+      }
+    }
+  ],
+  "me": {
+    "status": 200,
+    "body": {
+      "player_id": "synthetic-test-owner",
+      "screen_name": null,
+      "last_hero_id": null,
+      "purchases": [],
+      "unlocks": [],
+      "unlocked_backgrounds": [
+        "blizzard",
+        "fourth_july",
+        "new_year",
+        "st_patrick",
+        "tictactoe"
+      ],
+      "unlocked_heroes": [
+        "nick"
+      ],
+      "matches_won": 0,
+      "matches_played": 0,
+      "matches_lost": 0,
+      "boards_won": 0,
+      "tournament_wins": 0,
+      "tos_version": null,
+      "privacy_version": null,
+      "accepted_at": null,
+      "age_confirmed": null,
+      "tutorial_completed": false,
+      "email": null,
+      "email_status": "none",
+      "email_verified_at": null,
+      "capabilities": {
+        "email": true,
+        "account_deletion": true,
+        "tutorial_completion": true,
+        "account_unlocks": true,
+        "online2": true,
+        "chat": true,
+        "tournaments": true,
+        "tournament_sizes": [
+          4,
+          8
+        ],
+        "tournament_min_players": 3,
+        "tournament_start_options": [
+          2,
+          5,
+          10,
+          15,
+          30,
+          60
+        ]
+      },
+      "rank": 1
+    }
+  },
+  "other": {
+    "status": 200,
+    "body": {
+      "player_id": "synthetic-test-other",
+      "screen_name": null,
+      "last_hero_id": null,
+      "purchases": [],
+      "unlocks": [],
+      "unlocked_backgrounds": [],
+      "unlocked_heroes": [],
+      "matches_won": 0,
+      "matches_played": 0,
+      "matches_lost": 0,
+      "boards_won": 0,
+      "tournament_wins": 0,
+      "tos_version": null,
+      "privacy_version": null,
+      "accepted_at": null,
+      "age_confirmed": null,
+      "tutorial_completed": false,
+      "email": null,
+      "email_status": "none",
+      "email_verified_at": null,
+      "capabilities": {
+        "email": true,
+        "account_deletion": true,
+        "tutorial_completion": true,
+        "account_unlocks": true,
+        "online2": true,
+        "chat": true,
+        "tournaments": true,
+        "tournament_sizes": [
+          4,
+          8
+        ],
+        "tournament_min_players": 3,
+        "tournament_start_options": [
+          2,
+          5,
+          10,
+          15,
+          30,
+          60
+        ]
+      },
+      "rank": 1
+    }
+  },
+  "_fixture_note": "Synthetic offline Fake HTTP test responses. No real account identifiers, emails, tokens, purchases or match records."
+}

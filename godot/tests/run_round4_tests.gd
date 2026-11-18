@@ -41,7 +41,7 @@ func run():
 func roster_assets():
 	var order = ["cryon","aurelia","vesper_vale","auric_rex","nyx_thread","cobalt_bastion","ember_quill","lumen_pike","shard_jack","madame_solstice","bramble_ox","patrick_laquin","professor_gilt","siren_coil","ryan_blaze","tempest_vega"]
 	var ids = {}
-	ok(R.DATA.size() == 32,"32 heroes")
+	ok(R.DATA.size() == 33 and R.selectable_indices().size() == 32,"32 public plus secret Nick")
 	for i in range(R.DATA.size()):
 		var hero = R.DATA[i]; ids[hero.id] = true
 		if i < order.size(): ok(hero.id == order[i],"approved original display order "+hero.id)
@@ -53,7 +53,7 @@ func roster_assets():
 			ok(cfg.get_value("params","compress/mode") == 1 and cfg.get_value("params","compress/lossy_quality") == .85 and not cfg.get_value("params","mipmaps/generate"),"hero-only lossy settings "+hero.id+key)
 	for i in range(R.AUDIO_IDS.size()): ok(R.audio_index(R.AUDIO_IDS[i]) == i,"original audio motif retained "+R.AUDIO_IDS[i])
 	for id in ["cryon","aurelia","ryan_blaze","tempest_vega"]: ok(R.audio_index(id) in range(12),"new hero reuses existing audio "+id)
-	ok(ids.size() == 32 and R.get_hero("shard_jack").name == "Jack Sovereign","unique stable IDs and Jack rename")
+	ok(ids.size() == R.DATA.size() and R.get_hero("shard_jack").name == "Jack Sovereign","unique stable IDs and Jack rename")
 	ok(not "she" in R.get_hero("patrick_laquin").defeat and R.get_hero("siren_coil").body == "diver","updated concepts")
 	ok(R.valid(R.get_hero("bad-id").id) and Art.get_texture("bad-id","head_neutral") != null,"unknown renderer ID safe fallback")
 	var path = "user://r4-corrupt-profile.cfg"; var cfg = ConfigFile.new()

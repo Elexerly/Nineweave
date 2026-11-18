@@ -32,7 +32,8 @@ const DATA = [
 	{"id":"devin_torque","name":"Devin Riot","concept":"Crystal-surf racer · living glass board","palette":["3de3fa","263357","f879bc"],"mark":"neon_graffiti","pop":"Kickflip. Board flip. Your move!","victory":"Devin drops in and steals the whole board!","defeat":"Glass board flips; he lands sitting.","action":"SHREDDED!","stinger":"Hot syncopated reed reprise","body":"lean","prop":"surf"},
 	{"id":"pope_slam","name":"Pope Slam","concept":"Plasma sports hero · cosmic court, championship grin","palette":["3a6dff","1c2a5e","ffd86a"],"mark":"plasma_hoop","pop":"Posterized!","victory":"Nothing but net. Everything but ordinary!","defeat":"He spins the orb, then calls for a timeout.","action":"DUNKED!","stinger":"Bright sixth reprise","body":"athletic","prop":"plasma_orb"},
 	{"id":"ethan_ricochet","name":"Ethan Ricochet","concept":"Trick-shot chakram ace · silver-white coat, sapphire-blue scarf and impossible angles","palette":["3a7bff","1c2450","eef2ff"],"mark":"sapphire_rebound","pop":"Bank shot!","victory":"Called it! Eventually. Off three walls!","defeat":"A returning chakram knocks his hat askew.","action":"REBOUNDED!","stinger":"Warm suspended chime reprise","body":"lean","prop":"sapphire_chakrams"},
-	{"id":"aiden_vortex","name":"Aiden Vortex","concept":"Blond arena-robotics battler · launcher gauntlet, original glowing battle spinning tops and a small two-legged robot buddy","palette":["2f6bff","1a2240","ff3b3b"],"mark":"vortex_top","pop":"Let it rip!","victory":"Top speed. Top teamwork. Take a bow, buddy!","defeat":"His spinning top wobbles; his robot buddy offers a tiny high-five.","action":"VORTEX LAUNCHED!","stinger":"Round formant reprise","body":"robotics_battler","prop":"top_launcher"}
+	{"id":"aiden_vortex","name":"Aiden Vortex","concept":"Blond arena-robotics battler · launcher gauntlet, original glowing battle spinning tops and a small two-legged robot buddy","palette":["2f6bff","1a2240","ff3b3b"],"mark":"vortex_top","pop":"Let it rip!","victory":"Top speed. Top teamwork. Take a bow, buddy!","defeat":"His spinning top wobbles; his robot buddy offers a tiny high-five.","action":"VORTEX LAUNCHED!","stinger":"Round formant reprise","body":"robotics_battler","prop":"top_launcher"},
+	{"id":"nick","name":"Nick","concept":"Chef undercover · rolling-pin spy","palette":["242630","c53542","e4b865"],"mark":"rolling_pin","pop":"A recipe for victory.","victory":"Mission served.","defeat":"Back to the kitchen. Back to the plan.","action":"SERVED!","stinger":"Plucked falling third reprise","body":"athletic","prop":"staff","secret":true}
 ]
 const ALIASES = {"kite_hollow":"patrick_laquin","erik_comet":"erick_comet","ak_shade":"simon_shade","derrick_torque":"devin_torque","nova_sable":"aiden_vortex","mateo_ricochet":"ethan_ricochet"}
 static func canonical_id(id: String) -> String: return ALIASES.get(id,id)
@@ -64,4 +65,12 @@ static func audio_index(id: String) -> int:
 	return original if original >= 0 else {"cryon":0,"aurelia":1,"ryan_blaze":4,"tempest_vega":9,
 		"james_ii":10,"sara":3,"daphne":7,"jason_danger":6,"dylan_volt":9,"max_granite":8,
 		"kellen_byte":10,"simon_shade":2,"alex_wilder":8,"rose_valor":1,"grayson_quake":3,
-		"erick_comet":0,"devin_torque":4,"pope_slam":6,"aiden_vortex":11,"ethan_ricochet":5}.get(id,0)
+		"erick_comet":0,"devin_torque":4,"pope_slam":6,"aiden_vortex":11,"ethan_ricochet":5,"nick":2}.get(id,0)
+
+static func selectable_indices(unlocked: Array = []) -> Array:
+	var indices: Array = []
+	for i in range(DATA.size()):
+		if not DATA[i].get("secret",false) or DATA[i].id in unlocked: indices.append(i)
+	return indices
+static func selectable(id: String, unlocked: Array = []) -> bool:
+	return valid(id) and (not get_hero(id).get("secret",false) or canonical_id(id) in unlocked)

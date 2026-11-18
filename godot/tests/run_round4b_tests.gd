@@ -53,11 +53,11 @@ func lazy_selection():
 	ok(not Art.textures.has("res://assets/heroes/cryon/head_neutral.webp"),"unvisited pages remain unloaded")
 	select.queue_free(); await frames()
 func assets():
-	ok(R.DATA.size() == 32,"32 heroes")
+	ok(R.DATA.size() == 33 and R.selectable_indices().size() == 32,"32 public plus secret Nick")
 	var unique = {}; var count = 0
 	for i in range(R.DATA.size()):
 		var h = R.DATA[i]; unique[h.id] = true
-		if i >= 16: ok(h.id == NEW_IDS[i-16],"appended order "+h.id)
+		if i >= 16 and i < 32: ok(h.id == NEW_IDS[i-16],"appended order "+h.id)
 		for field in ["concept","pop","victory","defeat","action","body","prop","mark"]: ok(not str(h[field]).is_empty(),"hero copy "+h.id+" "+field)
 		ok(R.audio_index(h.id) in range(12),"reused sound index "+h.id)
 		for key in KEYS:
@@ -68,7 +68,7 @@ func assets():
 			var cfg = ConfigFile.new(); ok(cfg.load(path+".import") == OK,"import exists "+path)
 			ok(cfg.get_value("deps","source_file","") == path,"correct import source "+path)
 			ok(cfg.get_value("params","compress/mode",-1) == 1 and cfg.get_value("params","compress/lossy_quality",0) >= .75 and cfg.get_value("params","compress/lossy_quality",1) <= .85 and not cfg.get_value("params","mipmaps/generate",true),"lossy, quality floor and mipmaps off "+path)
-	ok(unique.size() == 32 and count == 320,"32 unique IDs and 320 resources")
+	ok(unique.size() == R.DATA.size() and count == R.DATA.size()*10,"unique IDs and ten resources each")
 	for i in range(R.AUDIO_IDS.size()): ok(R.audio_index(R.AUDIO_IDS[i]) == i,"original motif unchanged")
 	for pair in [["cryon",0],["aurelia",1],["ryan_blaze",4],["tempest_vega",9]]: ok(R.audio_index(pair[0]) == pair[1],"Round 4 mascot motif unchanged")
 func aliases():

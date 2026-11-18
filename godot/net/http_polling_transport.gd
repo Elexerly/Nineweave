@@ -11,7 +11,7 @@ signal chat_failed(message: String)
 signal chat_sent
 signal link_changed(reconnecting: bool)
 signal clock_changed
-const ROOM_KEYS = ["tournament","status","private","opponent","opponent_left","result","end_reason","turn_expires_at","protocol","turn_started_at","still_there_at","still_here_used","turn_seconds","still_there_seconds","grace_seconds","both_moved","opponent_joined_at","opponent_last_seen_at","opponent_connected","you","players","poll_after_ms"]
+const ROOM_KEYS = ["tournament","status","private","opponent","opponent_left","result","end_reason","turn_expires_at","protocol","turn_started_at","still_there_at","still_here_used","consecutive_late_turns","opponent_consecutive_late_turns","turn_late_limit","turn_seconds","still_there_seconds","grace_seconds","both_moved","opponent_joined_at","opponent_last_seen_at","opponent_connected","you","players","poll_after_ms"]
 var base_url: String = LIVE_ORIGIN
 var device_token: String = ""
 var token: String = "" # Seat only; never copied into the device store.

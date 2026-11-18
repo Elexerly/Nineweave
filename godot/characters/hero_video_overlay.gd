@@ -11,7 +11,9 @@ const INTRO_WAIT_SECONDS = 12.0
 const INTRO_LEAD_SECONDS = .85
 const PRELUDE_GRACE_SECONDS = 2.0
 const FLASH_SECONDS = .18
-const STILL_SECONDS = 3.0
+const INTRO_PLAY_SECONDS = 6.0
+const INTRO_FADE_SECONDS = .30
+const STILL_SECONDS = INTRO_PLAY_SECONDS
 # Leave summing headroom for other game audio; never amplify source clips.
 const VIDEO_GAIN_DB = -8.0
 const BETH_FADE_SECONDS = .30
@@ -124,7 +126,9 @@ func set_sound_enabled(value: bool):
 			var enabled = i == 0 and side.audio and not side.done and sound_enabled
 			side.node.volume = 0.0
 			if side.sound != null:
-				var gain = soundtrack_tail_gain(side.id,side.kind,soundtrack_tail_position(side.node.stream_position,side.sound.get_playback_position()),_soundtrack_end(side))
+				var position = soundtrack_tail_position(side.node.stream_position,side.sound.get_playback_position())
+				if scene_kind == "versus": position = maxf(position,_reveal_age)
+				var gain = soundtrack_tail_gain(side.id,side.kind,position,_soundtrack_end(side))
 				side.sound.volume_db = VIDEO_GAIN_DB+linear_to_db(gain) if enabled and gain > 0 else -80.0
 			audible = audible or enabled
 	_set_audio(active and audible)
@@ -134,9 +138,17 @@ static func soundtrack_tail_position(video_position: float, audio_position: floa
 	# clock postpone Beth's fade past that trigger. No audio seek/rate changes.
 	return maxf(maxf(video_position,audio_position),0.0)
 static func soundtrack_tail_gain(id: String, kind: String, position: float, duration: float) -> float:
-	if id != "madame_solstice" or not kind in ["intro","victory"] or duration <= 0: return 1.0
+	if duration <= 0: return 1.0
+	if kind == "intro": return clampf((minf(duration,INTRO_PLAY_SECONDS)-position)/INTRO_FADE_SECONDS,0.0,1.0)
+	if id != "madame_solstice" or kind != "victory": return 1.0
 	return clampf((duration-position)/BETH_FADE_SECONDS,0.0,1.0)
 func _soundtrack_end(side: Dictionary) -> float:
+	if scene_kind == "versus":
+		var end = INTRO_PLAY_SECONDS
+		var video_end: float = side.node.get_stream_length()
+		if video_end > 0: end = minf(end,video_end)
+		if side.sound.stream != null and side.sound.stream.get_length() > 0: end = minf(end,side.sound.stream.get_length())
+		return end
 	if side.id != "madame_solstice": return 0.0
 	var duration: float = side.node.get_stream_length()
 	if duration <= 0: duration = BETH_VIDEO_SECONDS
@@ -152,6 +164,8 @@ func _side_finished(index: int, generation: int):
 	sides[index].done = true
 	if sides[index].sound != null: sides[index].sound.stop()
 	set_sound_enabled(sound_enabled)
+	# Short intros hold their final frame; only the shared six-second clock ends versus.
+	if scene_kind == "versus": return
 	for side in sides:
 		if side.video and not side.done: return
 	active = false; _set_audio(false); finished.emit()
@@ -190,13 +204,20 @@ func _process(delta):
 		return
 	_reveal_age += delta
 	if is_instance_valid(_chrome): _chrome.queue_redraw()
-	if _still_only:
-		if _reveal_age >= STILL_SECONDS:
+	if scene_kind == "versus" and _reveal_age >= INTRO_PLAY_SECONDS:
+		if _still_only:
 			clear(); finished.emit()
+			return
+		# Pause (not stop/rewind) both lanes, and stop their independent audio.
+		for side in sides:
+			if side.video: side.node.paused = true
+			if side.sound != null: side.sound.stop()
+		active = false; _set_audio(false); finished.emit()
 		return
+	if _still_only: return
 	if not decode_enabled: return
-	# Beth-only envelope follows the finish clock, including mute/unmute.
-	if not sides.is_empty() and sides[0].id == "madame_solstice": set_sound_enabled(sound_enabled)
+	# Intro envelope follows the shared clock; victory retains Beth-only behavior.
+	if not sides.is_empty() and (scene_kind == "versus" or sides[0].id == "madame_solstice"): set_sound_enabled(sound_enabled)
 	_play_age += delta
 	# A decoder/open failure must never strand a modal screen. Normal completion
 	# uses finished; this only catches a player that stopped without emitting it.

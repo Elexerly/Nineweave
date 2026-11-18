@@ -40,7 +40,7 @@ func create(hero: String, seed_value: int = -1):
 	var available: Array = []
 	var rival: String = RIVALS.get(hero,"")
 	for entry in Roster.DATA:
-		if not entry.id in [hero,rival]: available.append(entry.id)
+		if not entry.id in [hero,rival] and not entry.get("secret",false): available.append(entry.id)
 	var chosen: Array = [hero]
 	if not rival.is_empty(): chosen.append(rival)
 	while chosen.size() < 8: chosen.append(available.pop_at(rng.randi_range(0,available.size()-1)))

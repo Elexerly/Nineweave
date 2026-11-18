@@ -52,11 +52,13 @@ func run():
 	quit(0 if failures == 0 else 1)
 func tutorial_first_play():
 	var bundle = make_ui("first"); var ui = bundle.ui
-	ok(not ui.settings.values.tutorial_completed and not ui.tutorial.active,"fresh startup waits for a match")
+	ok(not ui.account.store.data.tutorial_completed and not ui.tutorial.active,"startup waits for account refresh before tutorial")
 	ui.start_game("computer",2,true,true)
 	ok(ui.cinematic.active and not ui.tutorial.active,"hero intro is intact and runs before tutorial")
 	ui.cinematic.advance(.81); ui.cinematic.skip()
-	ok(ui.tutorial.active and ui.overlay == "tutorial" and ui.board.frozen,"first match automatically opens locked guided demo")
+	ok(not ui.tutorial.active,"versus never automatically opens tutorial")
+	ui.start_tutorial(true)
+	ok(ui.tutorial.active and ui.board.frozen,"manual replay opens locked guided demo")
 	ok(ui.board.game == ui.tutorial.demo and ui.board.game != ui.game,"same board renderer uses isolated demo rules")
 	ok(not ui.thinking and ui.game.history.is_empty(),"opponent-first AI waits for tutorial")
 	var original = ui.game.serialize(); var geometry = ui.board.get_rect(); var seconds = ui.match_seconds
@@ -83,7 +85,7 @@ func tutorial_first_play():
 		ui.tutorial.next_step()
 	ok(not ui.tutorial.active and ui.board.game == ui.game and not ui.board.frozen,"completion restores real board")
 	ok(ui.game.serialize() == original and ui.thinking,"untouched opponent-first match resumes AI")
-	ok(Settings.new(ui.settings.path).values.tutorial_completed,"completion persists to user config")
+	ok(DeviceStore.new(ui.account.store.path).data.tutorial_completed,"completion persists to user config")
 	ui.thinking = false; ui.start_game("local")
 	ok(not ui.tutorial.active,"second match never auto-replays completed demo")
 	ui.free(); await frames()
@@ -92,8 +94,8 @@ func tutorial_first_play():
 	ui.free(); await frames()
 func tutorial_skip_and_replay():
 	var bundle = make_ui("skip"); var ui = bundle.ui
-	ui.start_game("local"); ui.tutorial.controls.skip.pressed.emit()
-	ok(Settings.new(ui.settings.path).values.tutorial_completed,"skip persists immediately")
+	ui.start_game("local"); ui.start_tutorial(true); ui.tutorial.controls.skip.pressed.emit()
+	ok(DeviceStore.new(ui.account.store.path).data.tutorial_completed,"skip persists immediately")
 	ui.free(); await frames()
 	bundle = make_ui("skip",true,false); ui = bundle.ui; ui.start_game("local")
 	ok(not ui.tutorial.active and ui.play_cell(0,4),"skipped flag survives restart and match is playable")
@@ -112,24 +114,15 @@ func tutorial_skip_and_replay():
 func tutorial_online_updates():
 	var bundle = make_ui("online"); var ui = bundle.ui
 	ui._reset_online_match(); ui.cinematic.advance(.81); ui.cinematic.skip()
-	ok(ui.tutorial.active,"first online match offers tutorial")
-	var demo_cells = ui.tutorial.demo.cells.duplicate()
-	ui._receive_move(0,4,1)
-	ok(ui.game.cells[4] == 1 and ui.online_sequence == 1 and ui.tutorial.demo.cells == demo_cells,"incoming online move updates real state without touching demo")
-	var remote = Rules.new(); remote.play(0,4); remote.play(4,0)
-	ui._receive_state(remote.serialize(),2)
-	ok(ui.game.cells == remote.cells and ui.tutorial.active and ui.board.frozen,"online resync stays behind locked tutorial")
-	ui.tutorial.skip()
-	ok(ui.board.game == ui.game and ui.game.cells == remote.cells,"latest authoritative match restored after tutorial")
+	ok(not ui.tutorial.active,"online match never offers a blocking tutorial")
 	ui.start_tutorial(true)
-	ui._online_room_update({"status":"closed","result":{"winner":2}})
-	ok(ui.game.status == 2 and ui.tutorial.active and ui.board.win_fx.is_empty(),"official online forfeit remains authoritative during replay")
-	ui.tutorial.skip()
-	ok(ui.board.win_fx.player == 2,"online result presentation resumes after tutorial")
+	ok(not ui.tutorial.active,"manual tutorial cannot block online turn")
+	ui._receive_move(0,4,1)
+	ok(ui.game.cells[4] == 1,"incoming online move applies without tutorial interruption")
 	ui.free(); await frames()
 func tutorial_manual_navigation():
 	var bundle = make_ui("manual"); var ui = bundle.ui
-	ui.start_game("local")
+	ui.start_game("local"); ui.start_tutorial(true)
 	var t = ui.tutorial
 	ok(not t.manual and t.controls.back.disabled,"first step starts automatic with Back disabled")
 	t._process(0); t._process(Tutorial.STEP_SECONDS+.1)
@@ -148,14 +141,14 @@ func tutorial_manual_navigation():
 	t._process(30)
 	ok(t.active and t.step == 5,"last manual step remains readable")
 	t.controls.back.pressed.emit(); t.controls.next.pressed.emit(); t.controls.next.pressed.emit()
-	ok(not t.active and ui.settings.values.tutorial_completed,"Done exits and persists completion")
+	ok(not t.active and ui.account.store.data.tutorial_completed,"Done exits and persists completion")
 	ui.start_tutorial(true)
 	ok(not t.manual and t.step == 0,"explicit How to Play replay starts fresh")
 	t.controls.next.pressed.emit(); t.controls.skip.pressed.emit()
-	ok(not t.active and ui.settings.values.tutorial_completed,"Skip works after manual takeover")
+	ok(not t.active and ui.account.store.data.tutorial_completed,"Skip works after manual takeover")
 	ui.queue_free(); await frames()
 func tutorial_input():
-	var bundle = make_ui("input"); var ui = bundle.ui; ui.start_game("local")
+	var bundle = make_ui("input"); var ui = bundle.ui; ui.start_game("local"); ui.start_tutorial(true)
 	var touch = InputEventScreenTouch.new(); touch.pressed = true
 	ui.tutorial._gui_input(touch); ok(ui.tutorial.step == 0,"touch press alone cannot double advance")
 	touch.pressed = false; ui.tutorial._gui_input(touch)
@@ -164,7 +157,7 @@ func tutorial_input():
 	ok(ui.tutorial.step == 1,"touch plus emulated mouse advances exactly once")
 	var escape = InputEventKey.new(); escape.keycode = KEY_ESCAPE; escape.pressed = true
 	ui.tutorial._unhandled_key_input(escape)
-	ok(not ui.tutorial.active and ui.settings.values.tutorial_completed,"Escape is a persistent skip")
+	ok(not ui.tutorial.active and ui.account.store.data.tutorial_completed,"Escape is a persistent skip")
 	ui.free(); await frames()
 func create_name(bundle, name: String):
 	var ui = bundle.ui
@@ -204,6 +197,8 @@ func email_creation_paths():
 	create_name(bundle,"Weaver")
 	ok(ui.page == "email" and bundle.lobby.requests.is_empty(),"online destination waits for optional step")
 	ui.controls.continue_email.pressed.emit()
+	ok(ui.tutorial.active,"online destination teaches before hero selection")
+	ui.tutorial.skip(); await frames()
 	ok(ui.page == "character_select" and bundle.lobby.requests.is_empty(),"continue without email preserves online hero-selection destination")
 	ui.hero_select._confirm()
 	ok(ui.page == "online" and bundle.lobby.requests.size() == 1,"hero confirmation fetches requested online lobby")
@@ -226,10 +221,12 @@ func offline_first_play():
 	bundle.http.respond(503,{"error":"Service unavailable"})
 	ok(ui.page == "email" and "saved on this device only" in ui.email_view.status and ui.account.store.data.email == "offline@example.com","optional email explains local-only save during outage")
 	ui.controls.continue_email.pressed.emit()
+	ok(ui.tutorial.active,"offline tutorial starts after account setup")
+	ui.tutorial.skip()
 	ui.start_game("computer",1,false,true)
 	ok(ui.cinematic.active and not ui.tutorial.active,"offline local account keeps hero intro")
 	ui.cinematic.advance(.81); ui.cinematic.skip()
-	ok(ui.tutorial.active and ui.overlay == "tutorial","offline local account keeps first-play tutorial")
+	ok(not ui.tutorial.active,"offline tutorial does not repeat after versus")
 	ui.tutorial.skip(); ui.go_home(); ui.open_online()
 	ok(ui.page == "online" and bundle.lobby.requests.is_empty() and bundle.http.active,"Online retries pending registration without unauthenticated lobby requests")
 	ui.create_online(); ui.join_online("N9ABC")
@@ -240,7 +237,7 @@ func offline_first_play():
 	ok(ui.page == "game" and not ui.tutorial.active,"local match remains resumable after failed online sync")
 	ui.go_home(); ui.free(); await frames()
 	bundle = make_ui("offline-first",false,false,false); ui = bundle.ui
-	ok(ui.page == "title" and ui.account.store.data.email_prompt_done and ui.settings.values.tutorial_completed,"restart preserves offline name, email decision and tutorial completion")
+	ok(ui.page == "title" and ui.account.store.data.email_prompt_done and ui.account.store.data.tutorial_completed,"restart preserves offline name, email decision and tutorial completion")
 	bundle.http.respond(201,{"token":"nwd_offline_synced","player":{"screen_name":"Offline Weaver"}})
 	ok(bundle.http.requests.back().body.accepted_at == consent_time,"later sync preserves original consent timestamp")
 	bundle.http.respond(200,{"screen_name":"Offline Weaver"})
@@ -252,7 +249,7 @@ func offline_first_play():
 	# mandatory form; retries and restarts must never silently accept a 409.
 	bundle = make_ui("offline-conflict",false); ui = bundle.ui
 	ui.controls.screen_name.text_changed.emit("Taken"); ui.controls.create_name.pressed.emit()
-	bundle.http.respond(503,{"error":"Unavailable"}); ui.controls.continue_email.pressed.emit(); ui.open_online()
+	bundle.http.respond(503,{"error":"Unavailable"}); ui.controls.continue_email.pressed.emit(); ui.tutorial.skip(); ui.open_online()
 	bundle.http.respond(409,{"error":"Name taken"})
 	ok(ui.page == "onboarding" and "Name taken" in ui.online_view.status and not ui.account.store.complete(),"sync 409 returns to name form for retry")
 	ui.go_home(); ui.request_game("local"); ui.resume_game()

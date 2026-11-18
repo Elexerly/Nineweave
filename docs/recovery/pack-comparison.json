@@ -1,0 +1,22 @@
+{
+  "live_pack_sha256": "8cf30a10e4a2350def23aca587310a806015e85fb32eab53b32140a061448d62",
+  "live_entries": 843,
+  "recovered_entries": 843,
+  "identical_entries": 833,
+  "compiled_scripts": 52,
+  "changed": [
+    ".godot/exported/133200997/export-435f623093a3e2498450e744191b98a6-main.scn",
+    ".godot/global_script_class_cache.cfg",
+    ".godot/uid_cache.bin",
+    "assets/art/crystal_cluster.png.import",
+    "assets/art/crystal_knight.png.import",
+    "assets/art/distant_castle.png.import",
+    "assets/art/goddess_portrait.png.import",
+    "assets/art/gold_goddess.png.import",
+    "assets/art/knight_portrait.png.import",
+    "assets/art/sky_plate.png.import"
+  ],
+  "missing": [],
+  "extra": [],
+  "all_compiled_scripts_identical": true
+}

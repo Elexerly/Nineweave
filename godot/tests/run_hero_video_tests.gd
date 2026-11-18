@@ -144,7 +144,7 @@ func long_name_layout():
 func catalog():
 	var v = Video.new(); v.bundled_override = 1; root.add_child(v)
 	ok(v.bundled() and not v.streaming(),"bundled source policy seam")
-	ok(Roster.DATA.size() == 32 and v.catalog.size() == 32,"manifest covers exactly 32 roster heroes")
+	ok(Roster.DATA.size() == 33 and v.catalog.size() == 33,"manifest covers 32 standard heroes and Nick")
 	var clips = 0
 	for hero in Roster.DATA:
 		ok(v.catalog.get(hero.id,[]) == ["intro","victory"],"both clip kinds catalogued for "+hero.id)
@@ -153,7 +153,7 @@ func catalog():
 			ok(v.has_clip(hero.id,kind) and v.is_ready(hero.id,kind) and v.local_path(hero.id,kind) == path,"native bundled clip "+hero.id+"/"+kind)
 			ok(not Cache.ogg_info(path).is_empty(),"complete Theora Ogg "+hero.id+"/"+kind)
 			clips += 1
-	ok(clips == 64,"64 complete roster clips")
+	ok(clips == Roster.DATA.size()*2,"complete roster clips")
 	for alias in Roster.ALIASES:
 		for kind in Video.KINDS:
 			ok(v.has_clip(alias,kind) and v.local_path(alias,kind) == v.local_path(Roster.ALIASES[alias],kind),"alias resolves canonical clip "+alias+"/"+kind)
@@ -406,9 +406,13 @@ func controller():
 	cinema.advance(8.1); cinema.video_overlay.sides[0].node.finished.emit()
 	ok(cinema.active and ui.board.frozen,"first intro finishing waits for longer intro")
 	cinema.video_overlay.sides[1].node.finished.emit()
-	ok(not cinema.active and not ui.board.frozen and both.held == 0,"longer intro finishes match entry and releases both")
+	ok(cinema.active,"both finished still hold to shared deadline")
+	cinema.video_overlay._process(6)
+	ok(not cinema.active and not ui.board.frozen and both.held == 0,"six-second deadline releases both")
 	ui._begin_versus(); cinema.video_overlay._process(cinema.video_overlay.minimum_lead); cinema.video_overlay.decode_enabled = true
 	cinema.video_overlay._process(.6)
+	ok(cinema.active,"decoder fallback holds until shared deadline")
+	cinema.video_overlay._process(5.4)
 	ok(not cinema.active and not ui.board.frozen,"decoder stop without finished cannot strand modal")
 	cinema.video_overlay.decode_enabled = false; cinema.video_source = live_source
 	ui.go_home(); ui.queue_free(); await frames(3)

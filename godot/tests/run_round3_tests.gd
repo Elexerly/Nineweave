@@ -96,7 +96,7 @@ func run():
 	for key in ["id","name","pop","victory","mark","action"]:
 		unique.clear()
 		for h in Roster.DATA: unique[h[key]] = true
-		ok(unique.size() == 32,"32 unique "+key)
+		ok(unique.size() == Roster.DATA.size(),"unique roster "+key)
 	var theme_path = "user://r3-themes.cfg"; DirAccess.remove_absolute(theme_path)
 	var themed = Store.new(theme_path)
 	ok(themed.values.background_theme == Themes.DEFAULT_BACKGROUND and themed.values.board_theme == Themes.DEFAULT_BOARD,"crystal defaults")

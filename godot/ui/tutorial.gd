@@ -141,12 +141,12 @@ func _pointer_release(event) -> bool:
 	return true
 func _input(event):
 	if not active or not visible: return
-	if _over_skip(event.position if event is InputEventFromWindow else Vector2(-1,-1)): return
+	if _over_skip(event.position if event is InputEventMouse or event is InputEventScreenTouch or event is InputEventScreenDrag else Vector2(-1,-1)): return
 	if _pointer_release(event): get_viewport().set_input_as_handled()
 func _gui_input(event):
 	# Keep a GUI-path advance so a click on this overlay still jumps ahead when
 	# _input is not dispatched (unit tests call _gui_input directly).
-	if _over_skip(event.position if event is InputEventFromWindow else Vector2(-1,-1)): return
+	if _over_skip(event.position if event is InputEventMouse or event is InputEventScreenTouch or event is InputEventScreenDrag else Vector2(-1,-1)): return
 	if _pointer_release(event): accept_event()
 func _unhandled_key_input(event):
 	if not active or not event is InputEventKey or not event.pressed or event.echo: return

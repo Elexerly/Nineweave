@@ -176,6 +176,7 @@ func optional_continue():
 	finish_name(bundle,player(),player()); store_and_send(bundle)
 	var count = bundle.http.requests.size(); ui.controls.continue_email.pressed.emit()
 	ok(ui.page == "title" and ui.account.store.data.email == "weaver@example.com" and bundle.http.requests.size() == count,"saved address can continue without verifying")
+	ui.tutorial.skip()
 	ui.show_settings(); ui.controls.account_email.pressed.emit(); ui.controls.edit_account_email.pressed.emit()
 	ok(ui.controls.has("email_code"),"Settings can resume an optional verification left during this session")
 	ui.free(); await frames()
@@ -256,10 +257,12 @@ func layouts():
 	ui.free(); await frames()
 func tutorial_auto_advance():
 	var bundle = make_ui("tutorial-auto"); var ui = bundle.ui
-	ui.settings.values.tutorial_completed = false
+	ui.account.store.data.tutorial_completed = false
 	ui.start_game("computer",2,true,true)
 	ui.cinematic.advance(.81); ui.cinematic.skip()
-	ok(ui.tutorial.active and ui.overlay == "tutorial" and ui.tutorial.step == 0,"first match still auto-opens the tutorial")
+	ok(not ui.tutorial.active,"tutorial never automatically interrupts a started match")
+	ui.start_tutorial(true)
+	ok(ui.tutorial.active and ui.overlay == "tutorial" and ui.tutorial.step == 0,"How to Play opens a fresh tutorial")
 	ok(ui.tutorial.controls.has_all(["back","next"]) and not ui.tutorial.manual,"Back/Next are available while first play starts automatic")
 	ok(ui.tutorial.controls.skip.visible and ui.tutorial.controls.skip.size.y >= 44,"Skip remains on the first step")
 	ok(Tutorial.STEP_SECONDS >= 3.0 and ui.tutorial.arrow_progress() < 1,"auto-advance waits until after the arrow would finish")
@@ -280,7 +283,7 @@ func tutorial_auto_advance():
 	ok(ui.tutorial.active and ui.tutorial.step == 5,"arrives on the last step without finishing early")
 	ui.tutorial._ignore_next_delta = false; ui.tutorial._process(Tutorial.STEP_SECONDS)
 	ok(not ui.tutorial.active and ui.board.game == ui.game and not ui.board.frozen,"auto-advance through step 6 starts the match")
-	ok(ui.settings.values.tutorial_completed and ui.thinking,"completion persists and opponent-first AI may resume")
+	ok(ui.account.store.data.tutorial_completed and ui.thinking,"completion persists and opponent-first AI may resume")
 	ui.thinking = false; ui.start_game("local")
 	ok(not ui.tutorial.active,"second match does not auto-run the tutorial")
 	# How to Play still replays, also auto-advances, and a tap can jump ahead.
@@ -297,7 +300,7 @@ func tutorial_auto_advance():
 	ui.tutorial._gui_input(mouse)
 	ok(ui.tutorial.step == 2,"touch plus emulated mouse still advances exactly once")
 	ui.tutorial.skip()
-	ok(not ui.tutorial.active and ui.settings.values.tutorial_completed,"Skip still ends a replay")
+	ok(not ui.tutorial.active and ui.account.store.data.tutorial_completed,"Skip still ends a replay")
 	ui.free(); await frames()
 
 func confirmation_navigation():
@@ -313,6 +316,8 @@ func confirmation_navigation():
 		elif mode == "refresh": ui.account.refresh()
 		bundle.http.respond(200,player("verified","weaver@example.com"))
 		if mode == "online":
+			ok(ui.tutorial.active,"verified first player learns before matchmaking")
+			ui.tutorial.skip(); await frames()
 			ok(ui.page == "character_select" and ui._pending_game.mode == "online_lobby","verified onboarding respects online hero-selection destination")
 			ui.hero_select._confirm()
 			ok(ui.page == "online","verified player reaches lobby after confirming hero")

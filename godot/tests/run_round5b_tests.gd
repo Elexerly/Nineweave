@@ -141,7 +141,7 @@ func controller_cases():
 	ok(ui.mode == "computer" and ui.tournament.match_active and ui.cinematic.kind == "versus","normal computer flow and hero intro used")
 	ok(ui.rival_character == ui.tournament.session.opponent(),"bracket opponent retained through start_game")
 	ui.cinematic.advance(.81); ui.cinematic.skip()
-	ok(ui.tutorial.active,"first-run tutorial is unchanged")
+	ok(not ui.tutorial.active,"tournament match never starts a blocking tutorial")
 	ui.tutorial.skip(); ui.test_online_bypass = true
 	win_match(ui)
 	ok(ui.tournament.recorded and ui.tournament.session.active.round == 1,"normal match win persists immediately before cutscene")

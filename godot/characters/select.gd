@@ -11,6 +11,7 @@ signal name_changed(value: String)
 class Portrait extends Button:
 	var index: int = 0
 	var selected: bool = false
+	var display_index: int = 0
 	var trophies: int = 0
 	var rig
 	func _ready():
@@ -46,6 +47,8 @@ class Portrait extends Button:
 		var style = StyleBoxFlat.new(); style.bg_color = Color("14243a") if not selected else Color("25425c")
 		style.border_color = P.GOLD if selected else Color("35445a"); style.set_border_width_all(2)
 		return style
+var unlocked_heroes: Array = []
+var visible_indices: Array = []
 var selected_id: String = "cryon"
 var display_name: String = "You"
 var heading: String = "CHOOSE YOUR HERO"
@@ -64,18 +67,21 @@ var paging_controls: Array = []
 var _drag_start = Vector2.ZERO
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	geo = geometry(size,hinge)
-	page = int(R.index_of(selected_id)/geo.per_page) if geo.paged else 0
+	visible_indices = R.selectable_indices(unlocked_heroes)
+	if not R.selectable(selected_id,unlocked_heroes): selected_id = R.DATA[visible_indices[0]].id
+	geo = geometry(size,hinge,visible_indices.size())
+	page = int(visible_indices.find(R.index_of(selected_id))/geo.per_page) if geo.paged else 0
 	hero = Rig.new(); hero.hero_id = selected_id; hero.bust = false; hero.art_key = "splash"
 	hero.position = geo.hero.position; hero.size = geo.hero.size; hero.reduced_motion = reduced_motion; add_child(hero)
-	for i in range(R.DATA.size()):
-		var tile = Portrait.new(); tile.index = i; tile.selected = R.DATA[i].id == selected_id
+	for display_index in range(visible_indices.size()):
+		var i = visible_indices[display_index]
+		var tile = Portrait.new(); tile.index = i; tile.display_index = display_index; tile.selected = R.DATA[i].id == selected_id
 		tile.trophies = int(trophy_counts.get(R.DATA[i].id,0))
-		tile.position = geo.tiles[i%geo.per_page].position; tile.size = geo.tiles[i%geo.per_page].size
+		tile.position = geo.tiles[display_index%geo.per_page].position; tile.size = geo.tiles[display_index%geo.per_page].size
 		tile.disabled = R.DATA[i].id == blocked_id; tile.modulate.a = .28 if tile.disabled else 1.0
 		tile.pressed.connect(func(): focus_hero(R.DATA[i].id))
 		tile.focus_entered.connect(func(): focus_hero(R.DATA[i].id))
-		tile.visible = not geo.paged or int(i/geo.per_page) == page
+		tile.visible = not geo.paged or int(display_index/geo.per_page) == page
 		add_child(tile); portraits.append(tile)
 	var exit_button = ButtonArt.new(); exit_button.icon_kind = "back"; exit_button.position = geo.back.position; exit_button.size = geo.back.size
 	exit_button.pressed.connect(func(): back.emit()); add_child(exit_button)
@@ -121,9 +127,9 @@ func set_page(value: int):
 	page = posmod(value,geo.pages) if geo.paged else 0; _sync_page()
 func _sync_page():
 	for tile in portraits:
-		var local_index = tile.index%geo.per_page
+		var local_index = tile.display_index%geo.per_page
 		tile.position = geo.tiles[local_index].position; tile.size = geo.tiles[local_index].size
-		tile.visible = not geo.paged or int(tile.index/geo.per_page) == page
+		tile.visible = not geo.paged or int(tile.display_index/geo.per_page) == page
 		if is_instance_valid(tile.rig):
 			tile.rig.size = Vector2(tile.size.x-6,tile.size.y-tile.caption_height())
 			if tile.visible and tile.rig.texture == null: tile.rig.refresh_texture()
@@ -131,15 +137,15 @@ func _sync_page():
 		for dot in range(geo.pages): paging_controls[2+dot].add_theme_color_override("font_color",P.BLUE if page == dot else P.MUTED)
 	queue_redraw()
 func _confirm():
-	if confirm_button.disabled or selected_id == blocked_id: return
+	if confirm_button.disabled or selected_id == blocked_id or not R.selectable(selected_id,unlocked_heroes): return
 	confirm_button.disabled = true; field.release_focus(); confirmed.emit(selected_id,display_name)
 func focus_hero(id: String):
-	if not R.valid(id) or id == blocked_id or (confirm_button != null and confirm_button.disabled): return
+	if not R.selectable(id,unlocked_heroes) or id == blocked_id or (confirm_button != null and confirm_button.disabled): return
 	if id == selected_id: return
 	selected_id = id; hero.configure(id); hero.art_key = "splash"; hero.refresh_texture(); hero.set_clip("hover_react"); focused.emit(id)
 	for tile in portraits: tile.selected = R.DATA[tile.index].id == id; tile.queue_redraw()
 	queue_redraw()
-static func geometry(s: Vector2, seam: Rect2 = Rect2()) -> Dictionary:
+static func geometry(s: Vector2, seam: Rect2 = Rect2(), hero_count: int = 32) -> Dictionary:
 	var mode = Layout.mode_for(s)
 	var phone = mode == "phone_portrait" and seam.size.x <= 0
 	var g = {"tiles":[],"back":Rect2(12,12,44,44),"paged":true,"pages":4 if phone else 2,"per_page":8 if phone else 16,"nav":Rect2(),"columns":4,"rows":2}
@@ -176,6 +182,7 @@ static func geometry(s: Vector2, seam: Rect2 = Rect2()) -> Dictionary:
 			g.confirm = Rect2(24,s.y-52,left_end-48,44)
 			grid = Rect2(split,58,s.x-split-12,s.y-114)
 			g.nav = Rect2(split,s.y-52,s.x-split-12,44)
+	g.pages = maxi(1,int(ceil(float(hero_count)/g.per_page)))
 	g.grid = grid
 	var pitch = Vector2(grid.size.x/g.columns,minf(grid.size.y/g.rows,grid.size.x/g.columns*1.30))
 	var top = grid.position+Vector2(0,(grid.size.y-pitch.y*g.rows)*.5)

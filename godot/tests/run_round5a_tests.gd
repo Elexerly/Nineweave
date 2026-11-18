@@ -154,6 +154,11 @@ func clock_math():
 	ok(p.phase == "still_there" and absf(p.remaining-9) < .01 and p.tier == "red","still_there_at starts the 10 s prompt")
 	ok(Clock.phase(room,2,skew,device_now+23).phase == "still_there" and not Clock.phase(room,2,skew,device_now+23).mine,"opponent sees the same phase, not as theirs")
 	ok(Clock.phase(room,1,skew,device_now+40).phase == "expired","past turn_expires_at is expired (server decides)")
+	var confirmed = env(26,0,{"still_here_used":true,"turn_expires_at":iso(T0+36)})
+	for seat in [1,2]:
+		var countdown = Clock.phase(confirmed,seat,skew,T0-300+30)
+		ok(countdown.phase == "still_there" and absf(countdown.remaining-6) < .01 and countdown.mine == (seat==1),"both seats see the same confirmed deadline with correct ownership")
+		ok(Clock.phase(confirmed,seat,skew,T0-300+36).phase == "expired","exact 10-second boundary expires for both players, server adjudicates loss")
 	ok(Clock.phase(env(3,0,{"status":"finished"}),1,skew,device_now).phase == "none","no clock outside active")
 	ok(Clock.phase(old_env(),1,0,Time.get_unix_time_from_system()).phase == "legacy","old server falls back to a plain countdown")
 	ok(Clock.mmss(8.2) == "0:09" and Clock.mmss(8) == "0:08" and Clock.mmss(0) == "0:00" and Clock.mmss(65) == "1:05","countdown formatting")
@@ -307,19 +312,23 @@ func still_there():
 	ok(request != null and request.method == HTTPClient.METHOD_POST and request.url.ends_with("/rooms/N9ABC/still-here") and request.body.token == "nws_fixture","I'm here posts /still-here with the seat token")
 	ok(not ui.controls.has("still_here") and ui.prompt_state() == "move","button hides once used")
 	ok(not t.still_here() and count_requests(bundle,"/still-here") == 1,"only once per turn")
-	ok(respond(bundle,"/still-here",200,env(26,26,{"still_here_used":true,"ok":true})),"still-here reply")
+	ok(respond(bundle,"/still-here",200,env(26,0,{"still_here_used":true,"ok":true,"turn_expires_at":iso(T0+36)})),"still-here reply")
 	ui.tick_online()
-	ok(ui.prompt_state() == "" and ui.turn_info().phase == "turn" and absf(ui.turn_info().remaining-25) < .01,"fresh 25 s clock dismisses the prompt")
-	device_now = T0-300+52
+	ok(ui.prompt_state() == "move" and ui.turn_info().phase == "still_there" and absf(ui.turn_info().remaining-10) < .01,"acknowledgment grants only 10 seconds to move, retaining visible countdown")
+	device_now = T0-300+30
 	ui.tick_online()
 	ok(ui.prompt_state() == "move" and not ui.controls.has("still_here"),"after still_here_used: Move now! without the button")
 	ok(not t.still_here() and count_requests(bundle,"/still-here") == 1,"no second still-here in the same turn")
+	ok(ui.online_lines()[1] == "","confirmed first-turn deadline must not promise no recorded loss")
+	# A stale poll from before the acknowledgment cannot rewind the authoritative clock.
+	t._absorb_room(env(25,0))
+	ok(bool(t.room.still_here_used) and absf(ui.turn_info().remaining-6) < .01,"stale envelope cannot undo acknowledgment or its fixed deadline")
 	# Making a move dismisses the prompt immediately.
 	ok(ui.play_cell(4,4),"move during the prompt is accepted")
 	ok(ui.prompt_state() == "" and ui.prompt_layer == null,"move dismisses Still there?")
 	ok(last_request(bundle,"/moves").body.seq == 1,"move posted")
 	var state = Rules.new(); state.play(4,4)
-	respond(bundle,"/moves",200,env(53,53,{"seq":1,"state":state.serialize(),"moves":[{"board":4,"cell":4,"seq":1}]})); quiet(bundle)
+	respond(bundle,"/moves",200,env(31,31,{"seq":1,"state":state.serialize(),"moves":[{"board":4,"cell":4,"seq":1}]})); quiet(bundle)
 	# Next own turn: a 409 (already confirmed) envelope also hides the button.
 	state.play(4,0)
 	device_now = T0-300+60
@@ -497,7 +506,7 @@ func polling():
 	# Own polls failing: quiet "Reconnecting…" and backoff; no error message spam.
 	ui.message = ""
 	t._poll(); pending(bundle,"/rooms/N9ABC?").respond(0,{},HTTPRequest.RESULT_CANT_CONNECT)
-	ok(t.reconnecting and ui.online_lines()[0] == "Reconnecting…" and ui.message == "","failed poll shows Reconnecting…")
+	ok(t.reconnecting and ui.online_lines()[0] == "Reconnecting — timer continues" and ui.message == "","failed poll explains reconnect does not pause the timer")
 	ok(absf(t._timer.wait_time-1.0) < .01,"first retry after 1 s")
 	t._poll(); pending(bundle,"/rooms/N9ABC?").respond(503,{"error":"busy"})
 	ok(absf(t._timer.wait_time-2.0) < .01 and ui.message == "","second retry backs off")

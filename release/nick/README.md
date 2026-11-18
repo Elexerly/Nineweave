@@ -10,6 +10,6 @@ Do not merge/reset/publish this branch wholesale. It contains an older host base
 6. Report staging ready; owner manually publishes. After publishing verify live source5161626, pack75837c7912cd396b, sidecars200, N2026 redemption on owner's authorized account, permanent availability on re-login and own intro audio only.
 
 Expected PCK17,144,420bytes SHA25675837c7912cd396bb83df42eb72b3c96a114148d15db64784dc228490d3c2477.
-Source5161626; backend c9dc380. Server179/179 tests/typecheck pass.39/40Godot suites pass. Unchanged AI suite had one seeded-search determinism failure under CPU timing limits; strength tests pass, baseline comparison pending. Packed Nick resources and independent audio playback pass. No real-device subjective audio claim.
+Source5161626; backend c9dc380. Server179/179 tests/typecheck pass.All40Godot suites pass on final runs. Earlier concurrent run failed one seeded-search determinism check; clean baseline and isolated Nick rerun both pass2566AI checks, with Medium29/30 and Hard30/30wins. No AI code/tests changed. Packed Nick resources and independent audio playback pass. No real-device subjective audio claim.
 
 Native iPhone build is separate; this packet does not update installed apps.

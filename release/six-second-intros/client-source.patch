@@ -1,0 +1,216 @@
+diff --git a/godot/characters/hero_video_overlay.gd b/godot/characters/hero_video_overlay.gd
+index 2414a9a..3ccc0c7 100644
+--- a/godot/characters/hero_video_overlay.gd
++++ b/godot/characters/hero_video_overlay.gd
+@@ -11,7 +11,9 @@ const INTRO_WAIT_SECONDS = 12.0
+ const INTRO_LEAD_SECONDS = .85
+ const PRELUDE_GRACE_SECONDS = 2.0
+ const FLASH_SECONDS = .18
+-const STILL_SECONDS = 3.0
++const INTRO_PLAY_SECONDS = 6.0
++const INTRO_FADE_SECONDS = .30
++const STILL_SECONDS = INTRO_PLAY_SECONDS
+ # Leave summing headroom for other game audio; never amplify source clips.
+ const VIDEO_GAIN_DB = -8.0
+ const BETH_FADE_SECONDS = .30
+@@ -124,7 +126,9 @@ func set_sound_enabled(value: bool):
+ 			var enabled = i == 0 and side.audio and not side.done and sound_enabled
+ 			side.node.volume = 0.0
+ 			if side.sound != null:
+-				var gain = soundtrack_tail_gain(side.id,side.kind,soundtrack_tail_position(side.node.stream_position,side.sound.get_playback_position()),_soundtrack_end(side))
++				var position = soundtrack_tail_position(side.node.stream_position,side.sound.get_playback_position())
++				if scene_kind == "versus": position = maxf(position,_reveal_age)
++				var gain = soundtrack_tail_gain(side.id,side.kind,position,_soundtrack_end(side))
+ 				side.sound.volume_db = VIDEO_GAIN_DB+linear_to_db(gain) if enabled and gain > 0 else -80.0
+ 			audible = audible or enabled
+ 	_set_audio(active and audible)
+@@ -134,9 +138,17 @@ static func soundtrack_tail_position(video_position: float, audio_position: floa
+ 	# clock postpone Beth's fade past that trigger. No audio seek/rate changes.
+ 	return maxf(maxf(video_position,audio_position),0.0)
+ static func soundtrack_tail_gain(id: String, kind: String, position: float, duration: float) -> float:
+-	if id != "madame_solstice" or not kind in ["intro","victory"] or duration <= 0: return 1.0
++	if duration <= 0: return 1.0
++	if kind == "intro": return clampf((minf(duration,INTRO_PLAY_SECONDS)-position)/INTRO_FADE_SECONDS,0.0,1.0)
++	if id != "madame_solstice" or kind != "victory": return 1.0
+ 	return clampf((duration-position)/BETH_FADE_SECONDS,0.0,1.0)
+ func _soundtrack_end(side: Dictionary) -> float:
++	if scene_kind == "versus":
++		var end = INTRO_PLAY_SECONDS
++		var video_end: float = side.node.get_stream_length()
++		if video_end > 0: end = minf(end,video_end)
++		if side.sound.stream != null and side.sound.stream.get_length() > 0: end = minf(end,side.sound.stream.get_length())
++		return end
+ 	if side.id != "madame_solstice": return 0.0
+ 	var duration: float = side.node.get_stream_length()
+ 	if duration <= 0: duration = BETH_VIDEO_SECONDS
+@@ -152,6 +164,8 @@ func _side_finished(index: int, generation: int):
+ 	sides[index].done = true
+ 	if sides[index].sound != null: sides[index].sound.stop()
+ 	set_sound_enabled(sound_enabled)
++	# Short intros hold their final frame; only the shared six-second clock ends versus.
++	if scene_kind == "versus": return
+ 	for side in sides:
+ 		if side.video and not side.done: return
+ 	active = false; _set_audio(false); finished.emit()
+@@ -190,13 +204,20 @@ func _process(delta):
+ 		return
+ 	_reveal_age += delta
+ 	if is_instance_valid(_chrome): _chrome.queue_redraw()
+-	if _still_only:
+-		if _reveal_age >= STILL_SECONDS:
++	if scene_kind == "versus" and _reveal_age >= INTRO_PLAY_SECONDS:
++		if _still_only:
+ 			clear(); finished.emit()
++			return
++		# Pause (not stop/rewind) both lanes, and stop their independent audio.
++		for side in sides:
++			if side.video: side.node.paused = true
++			if side.sound != null: side.sound.stop()
++		active = false; _set_audio(false); finished.emit()
+ 		return
++	if _still_only: return
+ 	if not decode_enabled: return
+-	# Beth-only envelope follows the finish clock, including mute/unmute.
+-	if not sides.is_empty() and sides[0].id == "madame_solstice": set_sound_enabled(sound_enabled)
++	# Intro envelope follows the shared clock; victory retains Beth-only behavior.
++	if not sides.is_empty() and (scene_kind == "versus" or sides[0].id == "madame_solstice"): set_sound_enabled(sound_enabled)
+ 	_play_age += delta
+ 	# A decoder/open failure must never strand a modal screen. Normal completion
+ 	# uses finished; this only catches a player that stopped without emitting it.
+diff --git a/godot/tests/run_hero_audio_playback_tests.gd b/godot/tests/run_hero_audio_playback_tests.gd
+index c443896..f830380 100644
+--- a/godot/tests/run_hero_audio_playback_tests.gd
++++ b/godot/tests/run_hero_audio_playback_tests.gd
+@@ -15,7 +15,7 @@ func run():
+ 	check(Overlay.soundtrack_tail_position(5.8,5.9) == 5.9,"ahead audio clock still fades")
+ 	check(Overlay.soundtrack_tail_position(-1,0) == 0,"tail clock nonnegative")
+ 	for kind in ["intro","victory"]:
+-		var end = Overlay.BETH_VIDEO_SECONDS
++		var end = Overlay.INTRO_PLAY_SECONDS if kind == "intro" else Overlay.BETH_VIDEO_SECONDS
+ 		for elapsed in [0.0,end-.3]:
+ 			check(is_equal_approx(Overlay.soundtrack_tail_gain("madame_solstice",kind,elapsed,end),1.0),"Beth full gain before fade "+kind)
+ 		check(is_equal_approx(Overlay.soundtrack_tail_gain("madame_solstice",kind,end-.15,end),.5),"Beth half amplitude at fade midpoint "+kind)
+@@ -26,7 +26,7 @@ func run():
+ 		check(Overlay.soundtrack_tail_gain("madame_solstice",kind,end,end) == 0,"Beth silent at end "+kind)
+ 		check(Overlay.soundtrack_tail_gain("madame_solstice",kind,end+1,end) == 0,"Beth silent after end "+kind)
+ 		for id in ["ryan_blaze","shard_jack","aurelia"]:
+-			check(Overlay.soundtrack_tail_gain(id,kind,end,end) == 1,"other heroes unchanged "+id+kind)
++			check(Overlay.soundtrack_tail_gain(id,kind,end,end) == (0 if kind == "intro" else 1),"all intros fade; other victories unchanged "+id+kind)
+ 	var overlay = Overlay.new(); overlay.source = Source.new(); root.add_child(overlay)
+ 	overlay.decode_enabled = true
+ 	for id in ["ryan_blaze","shard_jack","madame_solstice","kellen_byte","professor_gilt","nick"]:
+@@ -51,7 +51,7 @@ func run():
+ 			check(is_equal_approx(sound.volume_db,-8),"unmute retains gain "+label)
+ 			if id == "madame_solstice":
+ 				var end = overlay._soundtrack_end(overlay.sides[0])
+-				check(end > 6.0 and end <= Overlay.BETH_VIDEO_SECONDS+.001,"Beth end bounded by video "+kind)
++				check(end >= 6.0 and end <= Overlay.BETH_VIDEO_SECONDS+.001,"Beth end bounded by video "+kind)
+ 				sound.seek(end-.15)
+ 				await create_timer(.025).timeout
+ 				overlay.set_sound_enabled(true)
+diff --git a/godot/tests/run_hero_video_tests.gd b/godot/tests/run_hero_video_tests.gd
+index 9bf7fe2..583c9b9 100644
+--- a/godot/tests/run_hero_video_tests.gd
++++ b/godot/tests/run_hero_video_tests.gd
+@@ -406,9 +406,13 @@ func controller():
+ 	cinema.advance(8.1); cinema.video_overlay.sides[0].node.finished.emit()
+ 	ok(cinema.active and ui.board.frozen,"first intro finishing waits for longer intro")
+ 	cinema.video_overlay.sides[1].node.finished.emit()
+-	ok(not cinema.active and not ui.board.frozen and both.held == 0,"longer intro finishes match entry and releases both")
++	ok(cinema.active,"both finished still hold to shared deadline")
++	cinema.video_overlay._process(6)
++	ok(not cinema.active and not ui.board.frozen and both.held == 0,"six-second deadline releases both")
+ 	ui._begin_versus(); cinema.video_overlay._process(cinema.video_overlay.minimum_lead); cinema.video_overlay.decode_enabled = true
+ 	cinema.video_overlay._process(.6)
++	ok(cinema.active,"decoder fallback holds until shared deadline")
++	cinema.video_overlay._process(5.4)
+ 	ok(not cinema.active and not ui.board.frozen,"decoder stop without finished cannot strand modal")
+ 	cinema.video_overlay.decode_enabled = false; cinema.video_source = live_source
+ 	ui.go_home(); ui.queue_free(); await frames(3)
+diff --git a/godot/tests/run_intro_duration_tests.gd b/godot/tests/run_intro_duration_tests.gd
+new file mode 100644
+index 0000000..8ec0557
+--- /dev/null
++++ b/godot/tests/run_intro_duration_tests.gd
+@@ -0,0 +1,66 @@
++extends SceneTree
++const Overlay = preload("res://characters/hero_video_overlay.gd")
++class Source extends RefCounted:
++	var missing = false
++	func acquire(id: String, kind: String) -> String: return "" if missing else "res://assets/hero_video/"+id+"/"+kind+".ogv"
++	func release(_id: String, _kind: String): pass
++	func has_audio(_id: String, _kind: String) -> bool: return true
++var checks = 0
++var failures = 0
++func check(value: bool, label: String):
++	checks += 1
++	if not value: failures += 1; print("FAIL ", label)
++func _initialize(): run.call_deferred()
++func run():
++	var v = Overlay.new(); v.source = Source.new(); root.add_child(v)
++	v.set_process(false); v.decode_enabled = false
++	var ended = [0]; v.finished.connect(func(): ended[0] += 1)
++	for completion in ["long", "one_short", "both_short", "missing"]:
++		v.source.missing = completion == "missing"
++		v.begin("versus","kellen_byte","shard_jack",1,Vector2(800,600),false)
++		var generation = v._generation
++		if completion in ["one_short", "both_short"]:
++			v.sides[0].node.finished.emit()
++			check(v.active and v.sides[0].node.visible and v.sides[0].done,"short local holds frame")
++			check(not v._audible and v.sides[1].sound == null,"short local never promotes rival audio")
++		if completion == "both_short": v.sides[1].node.finished.emit()
++		v._process(5.99)
++		check(v.active,"not before six seconds: "+completion)
++		var before = ended[0]
++		v._process(.01)
++		check(not v.active and ended[0] == before+1,"ends at six seconds: "+completion)
++		for side in v.sides:
++			if side.video: check(side.node.paused,"long decoder paused at deadline")
++			if side.sound != null: check(not side.sound.playing,"sound stops at deadline")
++		v._side_finished(0,generation); v._process(20)
++		check(ended[0] == before+1,"late decoder cannot double-finish")
++		v.clear()
++	v.source.missing = false
++	v.begin("versus","nick","shard_jack",1,Vector2(800,600))
++	v._process(v.minimum_lead)
++	check(v._reveal_age == 0,"prelude excluded from six-second window")
++	v._process(5.9); check(v.active,"full window after reveal")
++	var old = v._generation; v.clear(); var before = ended[0]
++	v._side_finished(0,old); v._process(20)
++	check(ended[0] == before and not v.visible,"skip/navigation cancels timer and callback")
++	for duration in [5.33,6.0,8.04]:
++		var end = minf(duration,6.0)
++		check(is_equal_approx(Overlay.soundtrack_tail_gain("nick","intro",end-.3,duration),1),"full before fade")
++		check(is_equal_approx(Overlay.soundtrack_tail_gain("nick","intro",end-.15,duration),.5),"half fade")
++		check(Overlay.soundtrack_tail_gain("nick","intro",end,duration) == 0,"silent at clip/window end")
++	v.begin("spotlight","nick","shard_jack",1,Vector2(800,600),false)
++	v._process(6.1); check(v.active,"victory has no six-second cutoff")
++	v.sides[0].node.finished.emit()
++	check(v.holds_completed_result(),"victory still holds completed frame")
++	v.clear()
++	# Exercise actual Theora completion and wall-clock cutoff, not just synthetic signals.
++	v.decode_enabled = true; v.set_process(true)
++	v.begin("versus","shard_jack","kellen_byte",1,Vector2(800,600),false)
++	await create_timer(5.5).timeout
++	check(v.active and v.sides[0].done and v.sides[0].node.visible,"real short clip holds final frame while longer rival continues")
++	check(v.sides[1].node.is_playing(),"real longer rival still playing before deadline")
++	await create_timer(.6).timeout
++	check(not v.active and v.sides[1].node.paused and not v.sides[0].sound.playing,"real playback stops at shared deadline")
++	v.clear(); v.queue_free(); await process_frame
++	print("NINEWEAVE_INTRO_DURATION ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
++	quit(failures)
+diff --git a/godot/tests/run_versus_flow_tests.gd b/godot/tests/run_versus_flow_tests.gd
+index 1d11862..4a35bf9 100644
+--- a/godot/tests/run_versus_flow_tests.gd
++++ b/godot/tests/run_versus_flow_tests.gd
+@@ -36,7 +36,9 @@ func run():
+ 	v.sides[0].node.finished.emit()
+ 	ok(c.active and ui.board.frozen,"shorter video never cuts off partner")
+ 	v.sides[1].node.finished.emit()
+-	ok(not c.active and not ui.board.frozen,"both complete straight into game")
++	ok(c.active and ui.board.frozen,"short intros hold until shared deadline")
++	v._process(v.INTRO_PLAY_SECONDS-v._reveal_age)
++	ok(not c.active and not ui.board.frozen,"six-second deadline enters game")
+ 	# Dispatch genuine input events through the SceneTree, not a direct skip call.
+ 	ui._begin_versus(); c.advance(.7)
+ 	var tap = InputEventScreenTouch.new(); tap.pressed = true; tap.position = Vector2(195,400)

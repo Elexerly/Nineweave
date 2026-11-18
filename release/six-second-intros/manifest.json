@@ -1,0 +1,39 @@
+{
+  "source_commit": "fa059ed19a066614b7347dfc7ce3630a8ced40bb",
+  "base_source": "51616260115d9718f075c7da4a0b4cfdab954128",
+  "requires": "Current Nick production; replace exactly three client files; no server/database change",
+  "assembled_pack": {
+    "bytes": 17144772,
+    "sha256": "8cf30a10e4a2350def23aca587310a806015e85fb32eab53b32140a061448d62"
+  },
+  "files": {
+    "BUILD_INFO.txt": {
+      "bytes": 2174,
+      "sha256": "aab3d83bcd2952be8ecb146149c8b410802002fcdc719e3c8a38d4062420a848"
+    },
+    "README.md": {
+      "bytes": 1813,
+      "sha256": "38aea9f2d03195573d0325089e26931e06ed82c62b7ec27f6da96ad7f1426b39"
+    },
+    "client-source.patch": {
+      "bytes": 12424,
+      "sha256": "e1b6364ada2ca485f74e3727257204d02d179b3d07ee97bd947e79328d39d890"
+    },
+    "index.html": {
+      "bytes": 5622,
+      "sha256": "5a31e71930d65a4e63fd13dc27ff2ebf772e5115969bcd75f01d2366ef342ae5"
+    },
+    "index.pck.part-a": {
+      "bytes": 8572386,
+      "sha256": "6f574db6c1333c235d7db9120bf28aefdfa206b2ae6d3e82e0d7fc361fd01d0e"
+    },
+    "index.pck.part-b": {
+      "bytes": 8572386,
+      "sha256": "50e50a3ee205ed7646704c352720e1524299b52e5abff518b3247c15ab555d3b"
+    },
+    "verify_transfer.py": {
+      "bytes": 953,
+      "sha256": "d1a337dd90c80397af5b9e225fd302fd56d6260ff61aa8d5d8456b95b5558318"
+    }
+  }
+}

@@ -357,6 +357,7 @@ export async function reportPlayer(
 /** GET /capabilities — public, cacheable server feature detection. */
 export function capabilities() {
   return {
+    account_unlocks: true,
     protocol: 2,
     online2: true,
     chat: true,

@@ -6,7 +6,8 @@
  * attach its `sub` to the caller's device player or re-issue a device token
  * for the player already holding that `sub`. Nothing reads it yet.
  */
-import { canonicalHero } from "./heroes.ts";
+import { accountUnlocks } from "./unlocks.ts";
+import { canonicalHero, requireHeroOwnership } from "./heroes.ts";
 import { validateName } from "./names.ts";
 import { hashToken, newId, newToken } from "./security.ts";
 import { ApiError, type Service } from "./service.ts";
@@ -35,15 +36,18 @@ export interface PlayerRow {
   age_confirmed: boolean | null;
   email: string | null;
   email_verified_at: Date | null;
+  tutorial_completed: boolean;
 }
 
 const PLAYER_COLUMNS =
-  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, tournament_wins, created_at, tos_version, privacy_version, accepted_at, age_confirmed, email, email_verified_at";
+  "id, screen_name, purchases, unlocks, last_hero_id, matches_won, matches_lost, matches_played, boards_won, tournament_wins, created_at, tos_version, privacy_version, accepted_at, age_confirmed, email, email_verified_at, tutorial_completed";
 
 /** Feature flags the client checks before using newer endpoints. */
 export const CAPABILITIES = {
   email: true,
   account_deletion: true,
+  tutorial_completion: true,
+  account_unlocks: true,
   online2: true,
   chat: true,
   tournaments: true,
@@ -137,6 +141,7 @@ export async function profile(svc: Service, p: PlayerRow) {
     last_hero_id: p.last_hero_id,
     purchases: p.purchases,
     unlocks: p.unlocks,
+    ...(await accountUnlocks(svc, p.id)),
     matches_won: p.matches_won,
     matches_played: p.matches_played,
     matches_lost: p.matches_lost,
@@ -146,6 +151,7 @@ export async function profile(svc: Service, p: PlayerRow) {
     privacy_version: p.privacy_version,
     accepted_at: p.accepted_at ? new Date(p.accepted_at).toISOString() : null,
     age_confirmed: p.age_confirmed,
+    tutorial_completed: p.tutorial_completed,
     email: p.email,
     email_status: emailStatus(p),
     email_verified_at: p.email_verified_at ? new Date(p.email_verified_at).toISOString() : null,
@@ -173,6 +179,7 @@ export async function registerDevice(svc: Service, body: Record<string, unknown>
     "accepted_at",
     "age_confirmed",
   ]);
+  if (fields.last_hero_id) await requireHeroOwnership(svc, null, fields.last_hero_id);
   const token = newToken("nwd");
   const id = newId("p");
   const now = svc.now();
@@ -306,6 +313,7 @@ export async function updateMe(svc: Service, player: PlayerRow, body: Record<str
     "age_confirmed",
     "email",
   ]);
+  if (fields.last_hero_id) await requireHeroOwnership(svc, player.id, fields.last_hero_id);
   const sets: string[] = [];
   const params: unknown[] = [player.id];
   const add = (col: string, value: unknown, cast = "") => {
@@ -403,4 +411,14 @@ export async function leaderboard(
     };
   }
   return result;
+}
+
+/** Authenticated, monotonic completion. No activity history or additional identifier. */
+export async function completeTutorial(svc: Service, player: PlayerRow) {
+  const rows = await svc.db.query<PlayerRow>(
+    `update nw_players set tutorial_completed = true where id = $1 returning ${PLAYER_COLUMNS}`,
+    [player.id],
+  );
+  if (!rows[0]) throw new ApiError(401, "Account no longer exists");
+  return profile(svc, rows[0]);
 }

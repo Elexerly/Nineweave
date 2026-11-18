@@ -18,7 +18,7 @@
  * ready window and played as one game (no rematch; a level draw replays).
  */
 import { randomInt } from "node:crypto";
-import { canonicalHero, DEFAULT_HERO } from "./heroes.ts";
+import { canonicalHero, DEFAULT_HERO, requireHeroOwnership } from "./heroes.ts";
 import { requirePlayer, TOURNAMENT_CAPABILITIES, type PlayerRow } from "./players.ts";
 import {
   leaveRoom,
@@ -756,6 +756,7 @@ export async function createTournament(
   const isPrivate = body.private === true || password !== null;
   if (isPrivate && !password) throw new ApiError(400, "Private tournaments need a password");
   const hero = readHero(body, player);
+  await requireHeroOwnership(svc, player.id, hero);
   await sweepTournaments(svc);
   await ensureFree(svc, player.id);
   const passwordHash = password ? await hashPassword(password) : null;
@@ -854,6 +855,7 @@ export async function joinTournament(
   const player = await requirePlayer(svc, bearer);
   const name = requireScreenName(player);
   const hero = readHero(body, player);
+  await requireHeroOwnership(svc, player.id, hero);
   const password = readPassword(body);
   const found = await tournamentByCode(svc, code);
   let passwordOk = false;

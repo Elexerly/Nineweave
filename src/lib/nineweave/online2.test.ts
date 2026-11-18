@@ -266,7 +266,7 @@ describe("turn clock", () => {
     assert.equal((await matchRows())[0].end_reason, "timeout");
   });
 
-  it("still-here inside the window restarts the clock once; a second confirm is 409", async () => {
+  it("still-here gives ten seconds to move; a second confirm cannot extend it", async () => {
     const { code, host, guest } = await startMatch();
     nowMs = START + 10_000;
     const early = await stillHere(code, host.token);
@@ -283,23 +283,23 @@ describe("turn clock", () => {
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     assert.equal(ok.body.ok, true);
     assert.equal(ok.body.still_here_used, true);
-    assert.equal(ok.body.turn_started_at, at(26_000));
-    assert.equal(ok.body.still_there_at, at(51_000));
-    assert.equal(ok.body.turn_expires_at, at(61_000));
+    assert.equal(ok.body.turn_started_at, at(0));
+    assert.equal(ok.body.still_there_at, at(25_000));
+    assert.equal(ok.body.turn_expires_at, at(36_000));
 
-    nowMs = START + 40_000;
+    nowMs = START + 30_000;
     await poll(code, guest.token);
-    nowMs = START + 52_000;
+    nowMs = START + 32_000;
     const again = await stillHere(code, host.token);
     assert.equal(again.status, 409);
-    assert.equal(again.body.turn_expires_at, at(61_000), "no extension");
+    assert.equal(again.body.turn_expires_at, at(36_000), "no extension");
 
-    nowMs = START + 60_999;
+    nowMs = START + 35_999;
     assert.equal((await poll(code, guest.token)).body.status, "active");
-    nowMs = START + 61_000;
+    nowMs = START + 36_000;
     const expired = await poll(code, guest.token);
     assert.equal(expired.body.status, "closed");
-    assert.equal(expired.body.end_reason, "no_show");
+    assert.equal(expired.body.end_reason, "timeout");
   });
 
   it("still-here after expiry or in a non-active room is rejected; a move resets the allowance", async () => {
@@ -312,7 +312,7 @@ describe("turn clock", () => {
     nowMs = START + 56_000;
     const guestConfirm = await stillHere(code, guest.token);
     assert.equal(guestConfirm.status, 200);
-    assert.equal(guestConfirm.body.turn_expires_at, at(91_000));
+    assert.equal(guestConfirm.body.turn_expires_at, at(66_000));
 
     const waiting = await call("POST", "/rooms", { body: {} });
     assert.equal((await stillHere(waiting.body.code, waiting.body.token)).status, 409);
@@ -329,9 +329,8 @@ describe("disconnect grace", () => {
   it("a seat silent for 60 s while not due to move abandons (recorded) after both moved", async () => {
     const { code, host, guest, hostDev, guestDev } = await namedMatch();
     await playMoves(code, host.token, guest.token, X_WIN_GAME.slice(0, 2)); // guest seen at 0
-    // Host is due and keeps the turn alive with polls + one still-here.
-    nowMs = START + 26_000;
-    assert.equal((await stillHere(code, host.token)).status, 200);
+    // Isolate disconnect grace using a longer normal turn.
+    svc.turnMs = 90_000;
     nowMs = START + 59_000;
     const alive = await poll(code, host.token);
     assert.equal(alive.body.status, "active");
@@ -351,8 +350,7 @@ describe("disconnect grace", () => {
   it("reconnecting inside the grace continues normally", async () => {
     const { code, host, guest } = await startMatch();
     await playMoves(code, host.token, guest.token, X_WIN_GAME.slice(0, 2));
-    nowMs = START + 26_000;
-    await stillHere(code, host.token);
+    svc.turnMs = 90_000;
     nowMs = START + 50_000;
     const back = await poll(code, guest.token);
     assert.equal(back.body.status, "active");
@@ -366,8 +364,7 @@ describe("disconnect grace", () => {
   it("before both moved, a lost grace is a no-show", async () => {
     const { code, host, guest, hostDev } = await namedMatch();
     await move(code, host.token, 1, X_WIN_GAME[0]); // host seen at 0, guest due
-    nowMs = START + 26_000;
-    await stillHere(code, guest.token);
+    svc.turnMs = 90_000;
     nowMs = START + 60_000;
     await runCleanup(svc, true); // nobody polls: the sweep resolves it
     const view = await poll(code, guest.token);
@@ -391,6 +388,7 @@ describe("leave and rematch", () => {
     const { code, host, guest } = await startMatch();
     const end = await playMoves(code, host.token, guest.token, X_WIN_GAME);
     assert.equal(end.body.status, "finished");
+    await pg.query("update nw_rooms set a_late_turns=2, b_late_turns=1 where code=$1", [code]);
     assert.equal(end.body.both_moved, true);
     assert.equal(end.body.turn_expires_at, null);
     assert.equal(end.body.poll_after_ms, 4000);
@@ -401,6 +399,8 @@ describe("leave and rematch", () => {
     });
     assert.equal(next.body.status, "active");
     assert.equal(next.body.match.round, 2);
+    assert.equal(next.body.consecutive_late_turns, 0);
+    assert.equal(next.body.opponent_consecutive_late_turns, 0);
     assert.equal(next.body.both_moved, false);
     assert.equal(next.body.still_here_used, false);
     assert.equal(next.body.turn_expires_at, at(40_000));
@@ -457,6 +457,8 @@ describe("envelope additions", () => {
     const expected = {
       email: true,
       account_deletion: true,
+      account_unlocks: true,
+      tutorial_completion: true,
       online2: true,
       chat: true,
       tournaments: true,
@@ -830,5 +832,163 @@ describe("retention", () => {
     nowMs = START + 30 * 24 * 60 * 60_000 + 1;
     await runCleanup(svc, true);
     assert.equal(await count("nw_reports"), 0, "reports are purged after 30 days");
+  });
+});
+
+describe("account-scoped tutorial completion", () => {
+  it("requires authentication, persists across clients, is monotonic, and is private", async () => {
+    const a = await device("TutorialA");
+    const b = await device("TutorialB");
+    assert.equal((await me(a.token)).tutorial_completed, false);
+    assert.equal((await call("POST", "/me/tutorial/complete", {body:{}})).status, 401);
+    assert.equal((await call("POST", "/me/tutorial/complete", {token:a.token, body:{player_id:b.player_id}})).status, 400);
+    const complete = await call("POST", "/me/tutorial/complete", {token:a.token, body:{}});
+    assert.equal(complete.status, 200);
+    assert.equal(complete.body.tutorial_completed, true);
+    assert.equal((await me(b.token)).tutorial_completed, false);
+    const freshService = createService({db:pgliteDb(pg), now:()=>new Date(nowMs)});
+    const response = await handleNineweaveRequest(freshService, new Request("http://localhost/api/nineweave/me", {headers:{Authorization:`Bearer ${a.token}`}}));
+    assert.equal((await response.json()).tutorial_completed, true);
+    assert.equal((await call("POST", "/me/tutorial/complete", {token:a.token, body:{}})).body.tutorial_completed, true);
+    assert.equal((await call("PATCH", "/me", {token:a.token, body:{tutorial_completed:false}})).status, 400);
+    assert.equal((await me(a.token)).tutorial_completed, true);
+    assert.equal((await call("GET", "/me/tutorial/complete", {token:a.token})).status, 405);
+    const deleted = await call("DELETE", "/me", {token:a.token, body:{confirm:"DELETE MY ACCOUNT"}});
+    assert.equal(deleted.status, 200);
+    assert.equal((await call("GET", "/me", {token:a.token})).status, 401);
+    const replacement = await device("TutorialA");
+    assert.equal((await me(replacement.token)).tutorial_completed, false);
+  });
+});
+
+describe("confirmed move deadline", () => {
+  it("concurrent confirmations commit once and cleanup resolves a silent confirmed player", async () => {
+    const {code,host,guest}=await startMatch();
+    nowMs=START+26_000;
+    const responses=await Promise.all([stillHere(code,host.token),stillHere(code,host.token)]);
+    assert.deepEqual(responses.map(r=>r.status).sort(),[200,409]);
+    assert.equal(responses[0].body.turn_expires_at,at(36_000));
+    assert.equal(responses[1].body.turn_expires_at,at(36_000));
+    nowMs=START+36_000;
+    await runCleanup(svc,true);
+    const ended=await poll(code,guest.token);
+    assert.deepEqual(ended.body.result,{winner:2,reason:"timeout"});
+  });
+
+  it("forfeits at exactly ten seconds even before any moves, and rejects late moves", async () => {
+    const {code, host, guest, hostDev, guestDev} = await namedMatch();
+    nowMs = START + 26_000;
+    const ack = await stillHere(code, host.token);
+    assert.equal(ack.status, 200);
+    assert.equal(ack.body.turn_expires_at, at(36_000));
+    nowMs = START + 35_999;
+    assert.equal((await poll(code, host.token)).body.turn_expires_at, at(36_000));
+    assert.equal((await poll(code, guest.token)).body.turn_expires_at, at(36_000));
+    assert.equal((await stillHere(code, host.token)).status, 409);
+    nowMs = START + 36_000;
+    const late = await move(code, host.token, 1, X_WIN_GAME[0]);
+    assert.equal(late.status, 409);
+    const ended = await poll(code, guest.token);
+    assert.deepEqual(ended.body.result, {winner:2, reason:"timeout"});
+    assert.deepEqual(await record(hostDev.token), [0,1,1]);
+    assert.deepEqual(await record(guestDev.token), [1,0,1]);
+    await poll(code, host.token);
+    assert.equal((await matchRows()).length, 1, "only one recorded result");
+  });
+
+  it("a valid move just before the deadline clears confirmation and gives the opponent a normal turn", async () => {
+    const {code,host,guest}=await startMatch();
+    nowMs=START+26_000;
+    await stillHere(code,host.token);
+    nowMs=START+35_999;
+    const moved=await move(code,host.token,1,X_WIN_GAME[0]);
+    assert.equal(moved.status,200);
+    assert.equal(moved.body.still_here_used,false);
+    assert.equal(moved.body.turn_expires_at,at(70_999));
+    nowMs=START+36_000;
+    assert.equal((await poll(code,guest.token)).body.status,"active");
+  });
+});
+
+describe("three consecutive own late turns", () => {
+  async function twoLateHostTurns() {
+    const m=await namedMatch();
+    for (let n=0;n<2;n++) {
+      nowMs+=25_000;
+      if(n===0) assert.equal((await stillHere(m.code,m.host.token)).status,200);
+      const late=await move(m.code,m.host.token,n*2+1,X_WIN_GAME[n*2]);
+      assert.equal(late.status,200);
+      assert.equal(late.body.consecutive_late_turns,n+1);
+      // Prompted move without acknowledgment counts too; opponent acts promptly.
+      assert.equal((await move(m.code,m.guest.token,n*2+2,X_WIN_GAME[n*2+1])).status,200);
+    }
+    return m;
+  }
+
+  it("forfeits at the third prompt, not ten seconds later, even on a move request",async()=>{
+    const m=await twoLateHostTurns();
+    const warning=await poll(m.code,m.host.token);
+    assert.equal(warning.body.consecutive_late_turns,2);
+    assert.equal(warning.body.opponent_consecutive_late_turns,0);
+    assert.equal(warning.body.turn_late_limit,3);
+    assert.equal(warning.body.turn_expires_at,at(75_000));
+    nowMs=START+74_999;
+    assert.equal((await poll(m.code,m.guest.token)).body.status,"active");
+    nowMs=START+75_000;
+    const late=await move(m.code,m.host.token,5,X_WIN_GAME[4]);
+    assert.equal(late.status,409);
+    const ended=await poll(m.code,m.guest.token);
+    assert.deepEqual(ended.body.result,{winner:2,reason:"timeout"});
+    assert.equal(ended.body.opponent_consecutive_late_turns,3);
+    assert.equal((await stillHere(m.code,m.host.token)).status,409);
+    assert.deepEqual(await record(m.hostDev.token),[0,1,1]);
+  });
+
+  it("third-boundary move and acknowledgement racing produce only one timeout result",async()=>{
+    const m=await twoLateHostTurns();
+    nowMs=START+75_000;
+    const attempts=await Promise.all([
+      move(m.code,m.host.token,5,X_WIN_GAME[4]),
+      stillHere(m.code,m.host.token),
+      poll(m.code,m.guest.token),
+    ]);
+    assert.equal(attempts[0].status,409);
+    assert.equal(attempts[1].status,409);
+    assert.deepEqual(attempts[2].body.result,{winner:2,reason:"timeout"});
+    assert.equal((await matchRows()).length,1);
+  });
+
+  it("a legal own move just before the third prompt resets streak; duplicate move cannot change it",async()=>{
+    const m=await twoLateHostTurns();
+    nowMs=START+74_999;
+    const timely=await move(m.code,m.host.token,5,X_WIN_GAME[4]);
+    assert.equal(timely.status,200);
+    assert.equal(timely.body.consecutive_late_turns,0);
+    nowMs=START+75_001;
+    const replay=await move(m.code,m.host.token,5,X_WIN_GAME[4]);
+    assert.equal(replay.status,200);
+    assert.equal(replay.body.consecutive_late_turns,0);
+    assert.equal((await poll(m.code,m.guest.token)).body.status,"active");
+  });
+
+  it("counts each seat separately, preserves through polls, and rejects invalid moves without reset",async()=>{
+    const m=await startMatch();
+    for(let n=0;n<4;n++) {
+      nowMs+=25_000;
+      const token=n%2===0?m.host.token:m.guest.token;
+      const result=await move(m.code,token,n+1,X_WIN_GAME[n]);
+      assert.equal(result.status,200);
+    }
+    const view=await poll(m.code,m.host.token);
+    assert.equal(view.body.consecutive_late_turns,2);
+    assert.equal(view.body.opponent_consecutive_late_turns,2);
+    assert.notEqual((await move(m.code,m.host.token,5,X_WIN_GAME[0])).status,200);
+    assert.equal((await poll(m.code,m.host.token)).body.consecutive_late_turns,2);
+    nowMs+=25_000;
+    await runCleanup(svc,true);
+    const ended=await poll(m.code,m.guest.token);
+    assert.equal(ended.body.end_reason,"timeout");
+    assert.equal(ended.body.consecutive_late_turns,2);
+    assert.equal(ended.body.opponent_consecutive_late_turns,3);
   });
 });

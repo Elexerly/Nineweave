@@ -147,6 +147,8 @@ describe("profile email fields", () => {
     assert.deepEqual(d.player.capabilities, {
       email: true,
       account_deletion: true,
+      account_unlocks: true,
+      tutorial_completion: true,
       online2: true,
       chat: true,
       tournaments: true,
@@ -160,6 +162,8 @@ describe("profile email fields", () => {
     assert.deepEqual((await me(d.token)).capabilities, {
       email: true,
       account_deletion: true,
+      account_unlocks: true,
+      tutorial_completion: true,
       online2: true,
       chat: true,
       tournaments: true,
@@ -172,6 +176,8 @@ describe("profile email fields", () => {
     assert.deepEqual(patched.body.capabilities, {
       email: true,
       account_deletion: true,
+      account_unlocks: true,
+      tutorial_completion: true,
       online2: true,
       chat: true,
       tournaments: true,
@@ -625,6 +631,7 @@ describe("recovery", () => {
 
   it("issues a new device token for a verified email and retires the old one", async () => {
     const d = await device("Recoverer");
+    await call("POST", "/me/tutorial/complete", {token:d.token, body:{}});
     await verify(d.token, "pat@example.com");
     nowMs += 61_000;
     const req = await recover("PAT@example.com");
@@ -636,6 +643,7 @@ describe("recovery", () => {
     assert.match(res.body.token, /^nwd_/);
     assert.equal(res.body.player_id, d.player_id);
     assert.equal(res.body.player.screen_name, "Recoverer");
+    assert.equal(res.body.player.tutorial_completed, true);
     assert.equal(res.body.player.email_status, "verified");
     assert.equal((await call("GET", "/me", { token: d.token })).status, 401);
     assert.equal((await me(res.body.token)).player_id, d.player_id);

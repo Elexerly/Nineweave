@@ -789,6 +789,46 @@ describe("CORS and limits", () => {
     assert.equal(evil.headers.get("access-control-allow-origin"), null);
   });
 
+  it("allows the Sitebloc origin on preflight and errors, and rejects lookalikes", async () => {
+    const origin = "https://nineweave.sitebloc.com";
+    const preflight = await call("OPTIONS", "/auth/device", {
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization, content-type",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), origin);
+    assert.equal(preflight.headers.get("access-control-allow-headers"), "Authorization, Content-Type");
+    assert.equal(
+      preflight.headers.get("access-control-allow-methods"),
+      "GET, POST, PATCH, DELETE, OPTIONS",
+    );
+    assert.equal(preflight.headers.get("access-control-allow-credentials"), null);
+
+    const missing = await call("GET", "/me", { headers: { Origin: origin } });
+    assert.equal(missing.status, 401);
+    assert.equal(missing.headers.get("access-control-allow-origin"), origin);
+    assert.equal(typeof missing.body.error, "string");
+
+    for (const fake of [
+      "https://nineweave.sitebloc.com.evil.example",
+      "https://evil.nineweave.sitebloc.com",
+      "https://www.nineweave.sitebloc.com",
+      "http://nineweave.sitebloc.com",
+      "https://nineweave.sitebloc.co",
+      "https://nineweavesitebloc.com",
+      "*",
+    ]) {
+      const blocked = await call("OPTIONS", "/auth/device", { headers: { Origin: fake } });
+      assert.equal(blocked.headers.get("access-control-allow-origin"), null, fake);
+      const blockedError = await call("GET", "/me", { headers: { Origin: fake } });
+      assert.equal(blockedError.status, 401, fake);
+      assert.equal(blockedError.headers.get("access-control-allow-origin"), null, fake);
+    }
+  });
+
   it("rate-limits room creation per client", async () => {
     svc = createService({ db: pgliteDb(pg), now: () => new Date(nowMs), limits: { create: 2 } });
     const hdr = { "X-Forwarded-For": "203.0.113.9" };

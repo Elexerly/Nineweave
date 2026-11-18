@@ -1,3 +1,4 @@
+import { ApiError, type Service } from "./service.ts";
 /**
  * Canonical hero (character) IDs — mirrors `godot/characters/roster.gd`.
  * Incoming legacy aliases are accepted and canonicalized; responses always
@@ -50,7 +51,24 @@ export const HERO_ALIASES: Readonly<Record<string, string>> = {
 /** The Godot client's legacy default character. */
 export const DEFAULT_HERO = "auric_rex";
 
-const HERO_SET: ReadonlySet<string> = new Set(HERO_IDS);
+export const SECRET_HERO_IDS = ["nick"] as const;
+const SECRET_HERO_SET: ReadonlySet<string> = new Set(SECRET_HERO_IDS);
+const HERO_SET: ReadonlySet<string> = new Set([...HERO_IDS, ...SECRET_HERO_IDS]);
+
+/** Server entitlements, never the client-asserted legacy unlocks JSON. */
+export async function requireHeroOwnership(svc: Service, playerId: string | null, hero: string) {
+  if (!SECRET_HERO_SET.has(hero)) return;
+  const rows = playerId
+    ? await svc.db.query<{ unlock_id: string }>(
+        "select unlock_id from nw_account_unlocks where player_id=$1 and kind='hero' and unlock_id=$2",
+        [playerId, hero],
+      )
+    : [];
+  if (!rows.length)
+    throw new ApiError(403, "Unlock this secret character on your account first.", {
+      code: "hero_locked",
+    });
+}
 
 /** Canonical ID for a known hero or alias, else null. */
 export function canonicalHero(id: unknown): string | null {

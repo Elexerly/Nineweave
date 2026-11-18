@@ -29,7 +29,7 @@
  * update.
  */
 import { createHmac, randomInt } from "node:crypto";
-import { canonicalHero, DEFAULT_HERO } from "./heroes.ts";
+import { canonicalHero, DEFAULT_HERO, requireHeroOwnership } from "./heroes.ts";
 import { validateName } from "./names.ts";
 import { playerByToken, type PlayerRow } from "./players.ts";
 import { O, OPEN, Rules, X, type SerializedState } from "./rules.ts";
@@ -75,6 +75,9 @@ export interface RoomRow {
   turn_started_at: Date | null;
   b_joined_at: Date | null;
   still_here_used: boolean;
+  still_here_confirmed_at: Date | null;
+  a_late_turns: number;
+  b_late_turns: number;
   tournament_id: string | null;
   tournament_code: string | null;
   tournament_round: number | null;
@@ -149,8 +152,20 @@ function turnClock(svc: Service, room: RoomRow) {
   return {
     start,
     stillThereAt: start + svc.turnMs,
-    expiresAt: start + svc.turnMs + svc.stillThereMs,
+    expiresAt: (dueSlot(room) === "a" ? room.a_late_turns : room.b_late_turns) >= LATE_TURN_LIMIT - 1
+      ? start + svc.turnMs
+      : room.still_here_used && room.still_here_confirmed_at
+      ? ms(room.still_here_confirmed_at) + CONFIRMED_MOVE_MS
+      : start + svc.turnMs + svc.stillThereMs,
   };
+}
+
+/** Persist only completed own turns; derive the current strike so polling is idempotent. */
+function lateTurns(svc: Service, room: RoomRow, slot: Slot): number {
+  const completed = slot === "a" ? room.a_late_turns : room.b_late_turns;
+  const clock = turnClock(svc, room);
+  const currentLate = clock && dueSlot(room) === slot && svc.now().getTime() >= clock.stillThereAt;
+  return Math.min(LATE_TURN_LIMIT, completed + (currentLate ? 1 : 0));
 }
 
 function pollAfterMs(room: RoomRow, slot: Slot): number {
@@ -215,6 +230,9 @@ export function roomEnvelope(svc: Service, room: RoomRow, slot: Slot) {
     turn_started_at: clock ? new Date(clock.start).toISOString() : null,
     still_there_at: clock ? new Date(clock.stillThereAt).toISOString() : null,
     still_here_used: clock ? room.still_here_used : false,
+    consecutive_late_turns: lateTurns(svc, room, slot),
+    opponent_consecutive_late_turns: lateTurns(svc, room, o),
+    turn_late_limit: LATE_TURN_LIMIT,
     turn_seconds: svc.turnMs / 1000,
     still_there_seconds: svc.stillThereMs / 1000,
     grace_seconds: svc.graceMs / 1000,
@@ -251,6 +269,8 @@ function readyAt(room: RoomRow, slot: Slot): Date | null {
 // Optimistic commit
 
 type Conflict = typeof CONFLICT;
+const CONFIRMED_MOVE_MS = 10_000;
+const LATE_TURN_LIMIT = 3;
 const CONFLICT = Symbol("conflict");
 
 /** Apply `sets` to the room plus `extra` statements atomically; false on a lost race. */
@@ -362,6 +382,8 @@ async function forfeit(
     room,
     {
       status: "closed",
+      a_late_turns: lateTurns(svc, room, "a"),
+      b_late_turns: lateTurns(svc, room, "b"),
       left_slot: loser,
       winner_slot: winner,
       end_reason: reason,
@@ -369,6 +391,7 @@ async function forfeit(
       b_rematch: false,
       turn_started_at: null,
       still_here_used: false,
+      still_here_confirmed_at: null,
       updated_at: svc.now(),
     },
     matchEndStatements(svc, room, rules, winner, reason),
@@ -396,6 +419,7 @@ async function cancelMatch(
     b_rematch: false,
     turn_started_at: null,
     still_here_used: false,
+    still_here_confirmed_at: null,
     updated_at: svc.now(),
   });
 }
@@ -410,7 +434,8 @@ function pendingExpiry(svc: Service, room: RoomRow): { kind: "turn" | "grace"; s
   if (!clock) return null;
   const now = svc.now().getTime();
   const due = dueSlot(room);
-  if (now >= clock.expiresAt) return { kind: "turn", slot: due };
+  if (lateTurns(svc, room, due) >= LATE_TURN_LIMIT || now >= clock.expiresAt)
+    return { kind: "turn", slot: due };
   const idle = other(due);
   const seen = seenAt(room, idle);
   if (seen && now - ms(seen) >= svc.graceMs) return { kind: "grace", slot: idle };
@@ -419,8 +444,9 @@ function pendingExpiry(svc: Service, room: RoomRow): { kind: "turn" | "grace"; s
 
 /**
  * Resolve an expired turn or a lost disconnect grace. Before both players
- * have moved this round it is a no-show (cancelled, no records); after, the
- * expired player loses ("timeout" / "abandoned"). True when something was due.
+ * have moved this round it is a no-show unless the player confirmed presence.
+ * An expired confirmed turn always loses; otherwise normal early no-show and
+ * post-move timeout/abandon rules apply. True when something was due.
  */
 async function applyExpiry(svc: Service, room: RoomRow): Promise<boolean> {
   const due = pendingExpiry(svc, room);
@@ -430,7 +456,8 @@ async function applyExpiry(svc: Service, room: RoomRow): Promise<boolean> {
     return true;
   }
   // A lost race means someone else already resolved it.
-  if (!bothMoved(room.state)) await cancelMatch(svc, room, due.slot, "no_show");
+  if (!bothMoved(room.state) && !(due.kind === "turn" && room.still_here_used))
+    await cancelMatch(svc, room, due.slot, "no_show");
   else await forfeit(svc, room, due.slot, due.kind === "turn" ? "timeout" : "abandoned");
   return true;
 }
@@ -483,6 +510,7 @@ async function markReady(svc: Service, room: RoomRow, slot: Slot): Promise<RoomR
         status: "active",
         turn_started_at: now,
         still_here_used: false,
+        still_here_confirmed_at: null,
         a_seen_at: now,
         b_seen_at: now,
       });
@@ -543,7 +571,7 @@ export async function runCleanup(svc: Service, force = false): Promise<void> {
       where (status = 'active' and (turn_started_at <= $1 or least(a_seen_at, b_seen_at) <= $2))
          or (status = 'waiting' and tournament_id is not null and ready_deadline <= $3)
       order by updated_at limit 25`,
-    [new Date(nowMs - svc.turnMs - svc.stillThereMs), new Date(nowMs - svc.graceMs), now],
+    [new Date(nowMs - svc.turnMs), new Date(nowMs - svc.graceMs), now],
   );
   for (const room of stale) await applyExpiry(svc, room);
   await runRetention(svc, force);
@@ -661,6 +689,7 @@ async function resolveParticipant(
     if (!canonical) throw new ApiError(400, "Unknown character_id");
     hero = canonical;
   }
+  await requireHeroOwnership(svc, player?.id ?? null, hero);
   return { player, name, hero };
 }
 
@@ -818,6 +847,7 @@ export async function joinRoom(
         b_joined_at: now,
         turn_started_at: now,
         still_here_used: false,
+        still_here_confirmed_at: null,
         updated_at: now,
       },
       rememberHero(svc, participant),
@@ -908,6 +938,11 @@ export async function playMove(
     if (seq !== current + 1)
       throw new ApiError(409, "Move sequence is ahead of the server", snapshot());
 
+    // Authorization/DB reads may span the deadline. Recheck before accepting a move.
+    if (pendingExpiry(svc, room)) {
+      await applyExpiry(svc, room);
+      return CONFLICT;
+    }
     const rules = Rules.fromHistory(history);
     if (rules.turn !== seat) throw new ApiError(403, "It's not your turn", snapshot());
     if (!rules.play(board, cell)) throw new ApiError(422, rules.lastError, snapshot());
@@ -915,9 +950,12 @@ export async function playMove(
     const now = svc.now();
     const sets: Partial<Record<keyof RoomRow, unknown>> = {
       state: rules.serialize(),
+      [`${slot}_late_turns`]: now.getTime() >= turnClock(svc, room)!.stillThereAt
+        ? lateTurns(svc, room, slot) : 0,
       updated_at: now,
       turn_started_at: now,
       still_here_used: false,
+      still_here_confirmed_at: null,
       [`${slot}_seen_at`]: now,
     };
     let extra: Statement[] = [];
@@ -937,6 +975,8 @@ export async function playMove(
       if (room.tournament_id && !winnerSlot) {
         Object.assign(sets, {
           round: room.round + 1,
+          a_late_turns: 0,
+          b_late_turns: 0,
           x_slot: other(room.x_slot),
           state: new Rules().serialize(),
           winner_slot: null,
@@ -999,6 +1039,8 @@ export async function requestRematch(
       ? await commitRoom(svc, room, {
           status: "active",
           round: room.round + 1,
+          a_late_turns: 0,
+          b_late_turns: 0,
           x_slot: other(room.x_slot),
           state: new Rules().serialize(),
           a_rematch: false,
@@ -1008,6 +1050,7 @@ export async function requestRematch(
           left_slot: null,
           turn_started_at: now,
           still_here_used: false,
+          still_here_confirmed_at: null,
           updated_at: now,
           [`${slot}_seen_at`]: now,
         })
@@ -1023,8 +1066,8 @@ export async function requestRematch(
 
 /**
  * POST /rooms/:code/still-here — the player due to move confirms during the
- * "Still there?" phase. Restarts the turn clock (fresh 25 s + 10 s) once per
- * turn; a second confirm in the same turn is 409 and doesn't extend.
+ * "Still there?" phase. Gives ten seconds to move without restarting the turn;
+ * a second confirm in the same turn is 409 and does not extend.
  */
 export async function stillHere(
   svc: Service,
@@ -1042,10 +1085,14 @@ export async function stillHere(
     if (room.still_here_used)
       throw new ApiError(409, "You already confirmed this turn", envelope());
     const now = svc.now();
+    if (now.getTime() >= clock.expiresAt) {
+      await applyExpiry(svc, room);
+      return CONFLICT;
+    }
     if (now.getTime() < clock.stillThereAt)
       throw new ApiError(409, "The Still there? prompt isn't showing yet", envelope());
     const ok = await commitRoom(svc, room, {
-      turn_started_at: now,
+      still_here_confirmed_at: now,
       still_here_used: true,
       updated_at: now,
       [`${slot}_seen_at`]: now,

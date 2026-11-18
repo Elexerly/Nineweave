@@ -5,6 +5,7 @@
 export const ALLOWED_ORIGINS: ReadonlySet<string> = new Set([
   "https://elexerly.github.io", // GitHub Pages (path /Nineweave shares this origin)
   "https://nineweave.grok.me",
+  "https://nineweave.sitebloc.com",
   "http://localhost:8060",
   "http://localhost:8080",
   "http://127.0.0.1:8060",

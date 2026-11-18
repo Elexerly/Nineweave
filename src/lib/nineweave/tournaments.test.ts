@@ -610,6 +610,28 @@ describe("matches", () => {
     assert.equal(t.rounds[0][1].end_reason, "no_show");
   });
 
+  it("third consecutive own late turn eliminates the player and advances the opponent", async () => {
+    const { ps, code, view } = await started(3,4);
+    const [a,b]=entrantsOf(view,ps,1,1);
+    const {room,a:ma,b:mb}=await enter(code,a,b);
+    const [xTok,oTok]=ma.seat===1?[ma.token,mb.token]:[mb.token,ma.token];
+    for(let n=0;n<2;n++) {
+      nowMs+=25_000;
+      assert.equal((await move(room,xTok,n*2+1,X_WIN_GAME[n*2])).status,200);
+      assert.equal((await move(room,oTok,n*2+2,X_WIN_GAME[n*2+1])).status,200);
+    }
+    nowMs+=25_000;
+    const ended=await pollRoom(room,oTok);
+    assert.deepEqual(ended.body.result,{winner:2,reason:"timeout"});
+    const loser=ma.seat===1?a:b;
+    const winner=ma.seat===1?b:a;
+    assert.deepEqual(await record(loser),[0,1,1]);
+    assert.deepEqual(await record(winner),[1,0,1]);
+    const t=(await pollT(code,winner)).body;
+    assert.equal(t.players.find((p:any)=>p.name===loser.name).eliminated,true);
+    assert.equal(t.rounds[1][0].status,"ready");
+  });
+
   it("leaving after both moved is a recorded forfeit that eliminates", async () => {
     const { ps, code, view } = await started(3, 4);
     const [a, b] = entrantsOf(view, ps, 1, 1);

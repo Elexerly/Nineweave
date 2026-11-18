@@ -128,12 +128,12 @@ carries `moves`, `chat` and `chat_seq`.
 | `match.local` / `match.remote` | Whether the caller and the opponent have each asked for a rematch of this round. |
 | `result` | `null`, or `{"winner": 0\|1\|2, "reason": "win"\|"draw"\|"forfeit"\|"timeout"\|"abandoned"}`. `winner` is a seat, and `0` means a draw. Seats are relative to the round that ended until a rematch clears it. A `cancelled` or `no_show` ending has `result: null` (no match was recorded). |
 | `end_reason` | `win`, `draw`, `forfeit`, `timeout`, `abandoned`, `cancelled`, `no_show`, `expired` or `null`. |
-| `turn_expires_at` | ISO hard deadline of the current turn (`active` only, else `null`): 35 s after `turn_started_at`. When it passes, the turn expires (see [Match rules v2](#match-rules-v2)). |
+| `turn_expires_at` | ISO hard deadline of the current turn (`active` only, else `null`): 35 s after `turn_started_at`, 10 s after an accepted still-here confirmation, or 25 s when two consecutive own late turns already occurred. When it passes, the turn expires (see [Match rules v2](#match-rules-v2)). |
 | `protocol` | `2` on this server. |
 | `server_now` | Server time (ISO) when the envelope was built. Use `deadline − server_now` for countdowns so device clock skew doesn't matter. |
-| `turn_started_at` | ISO start of the current turn clock (the last move, match/rematch start, or a still-here restart). `null` unless `active`. |
+| `turn_started_at` | ISO start of the current turn clock (the last move or match/rematch start; not reset by a still-here confirmation). `null` unless `active`. |
 | `still_there_at` | ISO time the "Still there?" prompt should appear for the player due to move (`turn_started_at` + 25 s). `null` unless `active`. |
-| `still_here_used` | Whether the player due to move already used this turn's one still-here restart. |
+| `still_here_used` | Whether the player due to move already used this turn's one still-here confirmation. |
 | `turn_seconds` / `still_there_seconds` / `grace_seconds` | `25` / `10` / `60`. |
 | `both_moved` | `true` once the current round's history has at least one move by seat 1 **and** one by seat 2. Resets on every rematch. Before it is true, leaving or timing out costs nothing. |
 | `opponent_joined_at` | ISO time the opponent took their seat (for the host: when the guest joined; for the guest: when the host created the room), or `null` while nobody has joined. Show "<name> joined". |
@@ -255,8 +255,11 @@ only while the "Still there?" prompt is showing (from `still_there_at` until
 `turn_expires_at`), and **once per turn**.
 
 `200`: the envelope plus `"ok": true`, with `still_here_used: true` and a
-fresh clock: `turn_started_at` = now, `still_there_at` = now + 25 s,
-`turn_expires_at` = now + 35 s.
+`turn_expires_at` = server acknowledgement time + **10 s**. The original
+`turn_started_at` and `still_there_at` remain unchanged. The player must move
+before this deadline: polls, reconnects and repeated confirmations do not
+extend it. Expiry after confirmation is a recorded timeout loss even before
+both players have moved.
 
 | Status | When (all include the current envelope) |
 |---|---|
@@ -655,7 +658,8 @@ them.**
 |---|---|---|
 | `waiting` room, host not polling | **600 s** since creation or the host's last poll | `closed`, `end_reason:"expired"` |
 | `active`, player due to move hasn't moved | **25 s** turn clock | The "Still there?" phase starts (`still_there_at`). Nothing changes on the server yet. |
-| `active`, "Still there?" phase | **10 s** more (35 s after `turn_started_at` = `turn_expires_at`) | The turn expires. Before `both_moved`: `closed`, `end_reason:"no_show"`, no records. After: the player due to move loses, `end_reason:"timeout"`. |
+| `active`, unconfirmed "Still there?" phase | **10 s** more (35 s after `turn_started_at`) | Before `both_moved`: `closed`, `end_reason:"no_show"`, no records. After: the player due to move loses, `end_reason:"timeout"`. |
+| `active`, accepted confirmation | **10 s** from acknowledgement | Must make a valid move before the deadline, otherwise a timeout loss even before both players have moved. |
 | `active`, the seat **not** due to move hasn't polled or moved | **60 s** disconnect grace | Before `both_moved`: `closed`, `end_reason:"no_show"`, no records. After: that seat loses, `end_reason:"abandoned"`. |
 | `finished` room, neither player polling | 600 s | `closed`, records unchanged |
 
@@ -673,8 +677,8 @@ Decided Nov 15, 2026 (Patrick). Applies from protocol 2 on.
 | Waiting room | Unchanged: `waiting` until a guest joins. Leaving or cancelling = cancel, no penalty. `opponent_joined_at` / `players` let the client show "<ScreenName> joined". |
 | "Both players have moved" | The current round's history holds ≥1 move by seat 1 and ≥1 by seat 2 (`both_moved`). Each rematch round starts over. |
 | Turn clock | **25 s** per turn for the player due to move. No time bank. |
-| "Still there?" | After 25 s, a **10 s** prompt. Confirming with `POST /still-here` counts as action and restarts that turn's clock with a fresh 25 s + 10 s, **once per turn**. A second confirm in the same turn is `409` and doesn't extend. A move always ends the turn normally. |
-| Turn expiry (35 s, or 35 s after a still-here restart) | Before `both_moved`: `no_show`, match cancelled, no records. After: `timeout`, the player due to move loses, the opponent wins, records update. |
+| "Still there?" | After 25 s, a **10 s** prompt. Confirming with `POST /still-here` gives **10 s to make a move**, once per turn; it does not reset the normal turn clock. A second confirm in the same turn is `409` and doesn't extend. A move always ends the turn normally. |
+| Turn expiry (35 s, or 10 s after a still-here confirmation) | Before `both_moved` without confirmation: `no_show`, match cancelled, no records. After confirmation, or after both moved: `timeout`, the player due to move loses, the opponent wins, records update. |
 | Disconnect grace | **60 s** without a poll or move by the seat that is **not** due to move. Before `both_moved`: `no_show`. After: `abandoned` loss. While it is your turn, the turn clock governs instead. |
 | Explicit leave | Before `both_moved`: `closed`, `end_reason:"cancelled"`, `result:null`, no records, opponent sees `opponent_left:true`. After: `forfeit` loss. |
 | Finished / rematch | Unchanged. Each rematch round gets a fresh clock and a fresh `both_moved`. |
@@ -1099,3 +1103,41 @@ available yet".
     (`champion`, with `champion` filled for everyone).
   - Leave: confirm "Leave tournament?" after the start, because it forfeits
     your match.
+
+## Account-scoped tutorial completion
+
+`GET /me` and profile responses include `tutorial_completed: boolean` and
+`capabilities.tutorial_completion: true`. A new account starts false.
+`POST /me/tutorial/complete` with Bearer device authentication and `{}` marks
+only that account true and returns the same profile as `GET /me`. It is
+idempotent and cannot reset completion. Extra body fields are rejected (400).
+No authentication returns 401. The marker survives email recovery/token
+rotation and is deleted with its player; there is no independent history.
+
+Show the automatic tutorial after account setup and before entering matchmaking,
+never while an opponent waits. Write completion only after completing or
+explicitly skipping, not opening it. Local offline completion must be associated
+with the same account before syncing; never carry one account's marker into
+another. Manual How to Play remains available. Deploy additive migration
+`0008_nineweave_tutorial_idle.sql` before this server version.
+
+## Three consecutive late own turns
+
+Every room envelope includes `consecutive_late_turns`,
+`opponent_consecutive_late_turns` (mapped to the requesting seat), and
+`turn_late_limit: 3`. Each player's streak is independent. A legal move before
+that player's 25-second prompt resets their streak; the opponent's turns do
+not. A move at/after the prompt counts as late even without an acknowledgement.
+The first two late turns retain the existing one-time acknowledgement and ten
+seconds to move. On the third consecutive late own turn, the player forfeits
+**at the 25-second prompt boundary**, without a third acknowledgement window.
+When two prior late turns exist, `turn_expires_at` therefore equals
+`still_there_at` from the start of the next own turn: warn before this deadline.
+
+The persisted counters represent completed turns; the envelope also includes
+one current strike if the current own turn has reached the prompt. Polling,
+reconnecting, invalid moves, duplicate moves and acknowledgements cannot
+increment or reset the counters. Only a new accepted legal move advances them.
+Both counters reset for a rematch or tournament draw replay. Tournament timeout
+results advance the opponent normally. Migration
+`0009_nineweave_late_turn_streak.sql` must precede this server version.

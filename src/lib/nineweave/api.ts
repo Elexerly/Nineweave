@@ -13,6 +13,7 @@ import {
   reportPlayer,
   unblockPlayer,
 } from "./chat.ts";
+import { redeemUnlock } from "./unlocks.ts";
 import { deleteOwnAccount } from "./account-deletion.ts";
 import { corsHeaders } from "./cors.ts";
 import {
@@ -21,8 +22,9 @@ import {
   requestRecovery,
   requestVerification,
 } from "./email.ts";
-import { HERO_ALIASES, HERO_IDS } from "./heroes.ts";
+import { HERO_ALIASES, HERO_IDS, SECRET_HERO_IDS } from "./heroes.ts";
 import {
+  completeTutorial,
   leaderboard,
   playerByToken,
   profile,
@@ -149,7 +151,7 @@ async function route(
   }
   if (head === "heroes" && segments.length === 1) {
     if (method !== "GET") methodNotAllowed();
-    return [200, { heroes: HERO_IDS, aliases: HERO_ALIASES }];
+    return [200, { heroes: HERO_IDS, secret_heroes: SECRET_HERO_IDS, aliases: HERO_ALIASES }];
   }
   if (head === "auth" && code === "device" && segments.length === 2) {
     if (method !== "POST") methodNotAllowed();
@@ -189,6 +191,20 @@ async function route(
       const player = await requirePlayer(svc, bearer);
       return [200, await confirmVerification(svc, player, await readJson(request))];
     }
+  }
+  if (head === "me" && code === "tutorial" && action === "complete" && rest.length === 0) {
+    if (method !== "POST") methodNotAllowed();
+    limit(svc, "write", request);
+    const player = await requirePlayer(svc, bearer);
+    const body = await readJson(request);
+    if (Object.keys(body).length) throw new ApiError(400, "Send an empty object to complete the tutorial");
+    return [200, await completeTutorial(svc, player)];
+  }
+  if (head === "me" && code === "unlocks" && segments.length === 2) {
+    if (method !== "POST") methodNotAllowed();
+    limit(svc, "write", request);
+    const player = await requirePlayer(svc, bearer);
+    return [200, await redeemUnlock(svc, player, await readJson(request))];
   }
   if (head === "me" && segments.length === 1) {
     if (method === "DELETE") {

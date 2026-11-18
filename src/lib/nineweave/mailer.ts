@@ -15,7 +15,7 @@ export interface EmailMessage {
 /** Sends one message; rejects if the provider didn't accept it. */
 export type Mailer = (message: EmailMessage) => Promise<void>;
 
-export const EMAIL_FROM = "Nineweave <no-reply@nineweave.sitebloc.com>";
+export const EMAIL_FROM = "Lexerly <no-reply@nineweave.sitebloc.com>";
 const RESEND_URL = "https://api.resend.com/emails";
 const SEND_TIMEOUT_MS = 10_000;
 
@@ -67,12 +67,12 @@ export function buildCodeEmail(
   ttlMinutes: number,
 ): EmailMessage {
   const isRecover = purpose === "recover";
-  const subject = isRecover ? "Your Nineweave sign-in code" : "Your Nineweave verification code";
+  const subject = isRecover ? "Your Lexerly sign-in code" : "Your Lexerly verification code";
   const lead = isRecover
-    ? "Use this code to sign in to your Nineweave account on a new device."
-    : "Use this code to verify the email address on your Nineweave account.";
+    ? "Use this code to sign in to your Lexerly account on a new device."
+    : "Use this code to verify the email address on your Lexerly account.";
   const text = [
-    "NINEWEAVE",
+    "LEXERLY",
     "",
     lead,
     "",
@@ -94,7 +94,7 @@ export function buildCodeEmail(
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0b0a12;">
 <tr><td align="center" style="padding:40px 16px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#15121f;border:1px solid #3a2f1c;border-radius:16px;">
-<tr><td align="center" style="padding:36px 32px 8px;font-family:Georgia,'Times New Roman',serif;font-size:28px;letter-spacing:6px;color:#e8c46a;">NINEWEAVE</td></tr>
+<tr><td align="center" style="padding:36px 32px 8px;font-family:Georgia,'Times New Roman',serif;font-size:28px;letter-spacing:6px;color:#e8c46a;">LEXERLY</td></tr>
 <tr><td align="center" style="padding:0 32px;"><div style="height:1px;width:72px;background:#8a6d2f;"></div></td></tr>
 <tr><td align="center" style="padding:24px 32px 8px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;line-height:24px;color:#efe6cf;">${lead}</td></tr>
 <tr><td align="center" style="padding:20px 32px;">
@@ -105,7 +105,7 @@ This code expires in ${ttlMinutes} minutes.<br>
 If you didn't request it, you can safely ignore this email.
 </td></tr>
 </table>
-<div style="padding-top:16px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#5f584a;">Sent by Nineweave to ${escapeHtml(to)}</div>
+<div style="padding-top:16px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#5f584a;">Sent by Lexerly to ${escapeHtml(to)}</div>
 </td></tr>
 </table>
 </body>

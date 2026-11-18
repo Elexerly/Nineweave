@@ -286,8 +286,8 @@ describe("verification", () => {
     const msg = sent[0];
     const code = lastCode();
     assert.equal(msg.to, "pat@example.com");
-    assert.equal(msg.subject, "Your Nineweave verification code");
-    assert.ok(msg.html.includes(code) && msg.html.includes("Nineweave".toUpperCase()));
+    assert.equal(msg.subject, "Your Lexerly verification code");
+    assert.ok(msg.html.includes(code) && msg.html.includes("Lexerly".toUpperCase()));
     assert.ok(msg.text.includes("10 minutes") && msg.text.includes("ignore"));
     assert.ok(!JSON.stringify(req.body).includes(code));
 
@@ -575,7 +575,7 @@ describe("mailer", () => {
     const body = JSON.parse(String(calls[0].init.body));
     assert.deepEqual(Object.keys(body).sort(), ["from", "html", "subject", "text", "to"]);
     assert.equal(body.from, EMAIL_FROM);
-    assert.equal(body.from, "Nineweave <no-reply@nineweave.sitebloc.com>");
+    assert.equal(body.from, "Lexerly <no-reply@nineweave.sitebloc.com>");
 
     const failing = resendMailer(
       key,
@@ -595,14 +595,14 @@ describe("mailer", () => {
 
   it("builds a branded email with no secrets, links or tracking", () => {
     const msg = buildCodeEmail("pat<x>@example.com", "012345", "verify", 10);
-    assert.equal(msg.subject, "Your Nineweave verification code");
+    assert.equal(msg.subject, "Your Lexerly verification code");
     assert.ok(msg.html.includes("012345") && msg.text.includes("012345"));
-    assert.ok(msg.html.includes("NINEWEAVE"));
+    assert.ok(msg.html.includes("LEXERLY"));
     assert.ok(msg.html.includes("10 minutes") && msg.text.includes("10 minutes"));
     assert.ok(!/<img|<a\s|https?:\/\//i.test(msg.html), "no images, links or remote resources");
     assert.ok(!msg.html.includes("pat<x>"), "recipient is escaped");
     const recover = buildCodeEmail("pat@example.com", "012345", "recover", 10);
-    assert.equal(recover.subject, "Your Nineweave sign-in code");
+    assert.equal(recover.subject, "Your Lexerly sign-in code");
   });
 
   it("handler logs never contain the code", async () => {
@@ -637,7 +637,7 @@ describe("recovery", () => {
     const req = await recover("PAT@example.com");
     assert.equal(req.status, 200);
     assert.match(req.body.challenge_id, /^ec_/);
-    assert.equal(sent.at(-1)!.subject, "Your Nineweave sign-in code");
+    assert.equal(sent.at(-1)!.subject, "Your Lexerly sign-in code");
     const res = await recoverConfirm(req.body.challenge_id, lastCode());
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.match(res.body.token, /^nwd_/);

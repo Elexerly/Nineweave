@@ -28,6 +28,7 @@ export interface Service {
   /** Disconnect grace for the seat that is not due to move. */
   graceMs: number;
   lobbyTimeoutMs: number;
+  boardReadyEnabled: boolean;
   /** Minimum gap between opportunistic global cleanup sweeps. */
   cleanupIntervalMs: number;
   lastCleanupMs: number;
@@ -49,6 +50,7 @@ export interface ServiceOptions {
   stillThereMs?: number;
   graceMs?: number;
   lobbyTimeoutMs?: number;
+  boardReadyEnabled?: boolean;
   cleanupIntervalMs?: number;
   retentionIntervalMs?: number;
   mailer?: Mailer | null;
@@ -64,6 +66,7 @@ export function createService(opts: ServiceOptions): Service {
     stillThereMs: opts.stillThereMs ?? STILL_THERE_MS,
     graceMs: opts.graceMs ?? GRACE_MS,
     lobbyTimeoutMs: opts.lobbyTimeoutMs ?? LOBBY_TIMEOUT_MS,
+    boardReadyEnabled: opts.boardReadyEnabled ?? false,
     cleanupIntervalMs: opts.cleanupIntervalMs ?? 5_000,
     lastCleanupMs: Number.NEGATIVE_INFINITY,
     retentionIntervalMs: opts.retentionIntervalMs ?? 60_000,

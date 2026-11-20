@@ -826,3 +826,74 @@ describe("pre-upgrade persisted Kite tournament entries", () => {
     assert.equal(view.body.code, created.body.code);
   });
 });
+
+describe("tournament board readiness", () => {
+  const roomPoll = (code: string, token: string, optIn = true) =>
+    call("GET", `/rooms/${code}${optIn ? "?board_ready_v1=1" : ""}`, { token });
+  const acknowledge = (code: string, token: string) =>
+    call("POST", `/rooms/${code}/board-ready`, { token, body: { round: 1 } });
+
+  async function setupOpening(optIn: boolean) {
+    svc.boardReadyEnabled = true;
+    const { ps, code, view } = await started(3, 4);
+    const [a,b] = entrantsOf(view,ps,1,1);
+    const ma = (await pollT(code,a)).body.your_match;
+    const mb = (await pollT(code,b)).body.your_match;
+    assert.equal(ma.room_code, mb.room_code);
+    const room = ma.room_code;
+    const first = await roomPoll(room,ma.token);
+    assert.equal(first.body.status, "waiting");
+    assert.equal(first.body.turn_started_at, null);
+    assert.equal(first.body.opening, undefined);
+    nowMs += 9_000;
+    const second = await roomPoll(room,mb.token,optIn);
+    assert.equal(second.body.status, "active");
+    return { a, b, ma, mb, room, code, second };
+  }
+
+  it("two arrivals still require two board confirmations, then play the full opening turn", async () => {
+    const { a, ma, mb, room, code, second } = await setupOpening(true);
+    assert.equal(second.body.opening.waiting, true);
+    assert.equal(second.body.turn_started_at, null);
+    assert.equal((await pollT(code,a)).body.rounds[0][1].status, "ready");
+    assert.equal((await acknowledge(room,ma.token)).body.opening.waiting,true);
+    nowMs += 13_000;
+    const active = await acknowledge(room,mb.token);
+    assert.equal(active.body.opening.waiting,false);
+    assert.equal(active.body.turn_started_at,new Date(nowMs).toISOString());
+    assert.equal(active.body.still_there_at,new Date(nowMs+25_000).toISOString());
+    assert.equal(active.body.turn_expires_at,new Date(nowMs+35_000).toISOString());
+    assert.equal((await pollT(code,a)).body.rounds[0][1].status,"live");
+  });
+
+  it("missing board sends no turn penalties, advances the one ready or the existing higher-seed fallback", async () => {
+    for (const oneReady of [true,false]) {
+      // Reset between cases via the in-memory fixture, not a real database.
+      if (!oneReady) {
+        await pg.exec("truncate nw_tournament_matches,nw_tournament_players,nw_tournaments,nw_rooms,nw_players restart identity cascade");
+        nowMs = START;
+      }
+      const { a, b, ma, mb, room, code, second } = await setupOpening(true);
+      if (oneReady) await acknowledge(room,ma.token);
+      nowMs = Date.parse(second.body.opening.deadline_at);
+      const late = await acknowledge(room,mb.token);
+      assert.equal(late.status,409);
+      assert.equal(late.body.opening.expired,true);
+      assert.equal(late.body.turn_started_at,null);
+      assert.equal(late.body.result.winner,oneReady ? ma.seat : 0);
+      const t = (await pollT(code,a)).body;
+      const original = t.rounds[0][1];
+      assert.equal(original.status,"done");
+      assert.equal(original.end_reason,"no_show");
+      assert.equal(original.winner,oneReady ? "a" : original.a.seed < original.b.seed ? "a" : "b");
+      assert.deepEqual(await record(a),[0,0,0]);
+      assert.deepEqual(await record(b),[0,0,0]);
+    }
+  });
+
+  it("one legacy tournament client keeps the existing arrival-based clock", async () => {
+    const { second } = await setupOpening(false);
+    assert.equal(second.body.opening,undefined);
+    assert.equal(second.body.turn_started_at,new Date(nowMs).toISOString());
+  });
+});

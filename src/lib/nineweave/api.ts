@@ -33,6 +33,7 @@ import {
   updateMe,
 } from "./players.ts";
 import {
+  confirmBoardReady,
   createRoom,
   joinRoom,
   leaveRoom,
@@ -131,7 +132,7 @@ async function route(
   }
   if (head === "capabilities" && segments.length === 1) {
     if (method !== "GET") methodNotAllowed();
-    return [200, capabilities()];
+    return [200, { ...capabilities(), ...(svc.boardReadyEnabled ? { board_ready_v1: true } : {}) }];
   }
   if (head === "players" && segments.length === 2 && code === "block") {
     limit(svc, "moderation", request);
@@ -287,8 +288,10 @@ async function roomRoute(
     const chatSince = intParam(url, "chat_since");
     return [
       200,
-      await pollRoom(svc, roomCode, since, [bearer], (room, slot) =>
-        chatFor(svc, room, slot, chatSince),
+      await pollRoom(
+        svc, roomCode, since, [bearer],
+        (room, slot) => chatFor(svc, room, slot, chatSince),
+        url.searchParams.get("board_ready_v1") === "1",
       ),
     ];
   }
@@ -303,6 +306,9 @@ async function roomRoute(
     case "rematch":
       limit(svc, "move", request);
       return [200, await requestRematch(svc, roomCode, await readJson(request), bearer)];
+    case "board-ready":
+      limit(svc, "move", request);
+      return [200, await confirmBoardReady(svc, roomCode, await readJson(request), bearer)];
     case "still-here":
       limit(svc, "move", request);
       return [200, await stillHere(svc, roomCode, await readJson(request), bearer)];

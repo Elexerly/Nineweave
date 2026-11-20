@@ -19,14 +19,17 @@ import { createService, type Service } from "./service.ts";
 let service: Service | undefined;
 let activeDb: Db | undefined;
 let activeKey: string | undefined;
+let activeBoardReady: boolean | undefined;
 
 async function getService(): Promise<Service> {
   const { getSql } = await import("../db");
   const [db, key] = await Promise.all([getSql(), resolveResendKey(process.env, adminConfig)]);
-  if (!service || activeDb !== db || activeKey !== key) {
-    service = createService({ db, mailer: resendMailer(key) });
+  const boardReadyEnabled = process.env.NINEWEAVE_BOARD_READY_V1 === "1";
+  if (!service || activeDb !== db || activeKey !== key || activeBoardReady !== boardReadyEnabled) {
+    service = createService({ db, mailer: resendMailer(key), boardReadyEnabled });
     activeDb = db;
     activeKey = key;
+    activeBoardReady = boardReadyEnabled;
   }
   return service;
 }

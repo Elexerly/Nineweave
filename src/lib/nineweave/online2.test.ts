@@ -992,3 +992,141 @@ describe("three consecutive own late turns", () => {
     assert.equal(ended.body.opponent_consecutive_late_turns,3);
   });
 });
+
+describe("board-ready opening negotiation", () => {
+  async function start(hostOptIn: boolean, guestOptIn: boolean) {
+    const hostDev = await device("OpenerOne");
+    const guestDev = await device("OpenerTwo");
+    const create = await call("POST", "/rooms", { token: hostDev.token,
+      body: hostOptIn ? { board_ready_v1: true } : {} });
+    const code = create.body.code;
+    const join = await call("POST", `/rooms/${code}/join`, { token: guestDev.token,
+      body: guestOptIn ? { board_ready_v1: true } : {} });
+    assert.equal(create.status, 201);
+    assert.equal(join.status, 200);
+    return { code, a: create.body.token, b: join.body.token, opening: join.body, hostDev, guestDev };
+  }
+  const acknowledge = (code: string, token: string, round = 1) =>
+    call("POST", `/rooms/${code}/board-ready`, { token, body: { round } });
+
+  it("both opt in, differing intro lengths, no clock or legal move until both, no extension on retry", async () => {
+    svc.boardReadyEnabled = true;
+    assert.equal((await call("GET", "/capabilities")).body.board_ready_v1, true);
+    const { code, a, b, opening } = await start(true, true);
+    assert.equal(opening.status, "active");
+    assert.equal(opening.turn_started_at, null);
+    assert.equal(opening.turn_expires_at, null);
+    assert.equal(opening.still_there_at, null);
+    assert.deepEqual(opening.opening, { waiting: true, you_ready: false, opponent_ready: false,
+      deadline_at: at(45_000), expired: false });
+    nowMs = START + 4_000;
+    assert.equal((await acknowledge(code, "nws_invalid_ack", 1)).status, 403);
+    assert.equal((await call("POST", `/rooms/${code}/board-ready`, { body: { round: 1 } })).status, 401);
+    assert.equal((await acknowledge(code, a, 2)).status, 409);
+    assert.equal((await acknowledge(code, a, 0)).status, 400);
+    assert.equal((await call("POST", `/rooms/${code}/board-ready`, { token: a, body: {} })).status, 400);
+    assert.equal((await stillHere(code, a)).status, 409);
+    assert.equal((await move(code, a, 1, X_WIN_GAME[0])).status, 409);
+    const aReady = await acknowledge(code, a);
+    assert.equal(aReady.body.opening.you_ready, true);
+    assert.equal(aReady.body.opening.opponent_ready, false);
+    assert.equal(aReady.body.turn_expires_at, null);
+    nowMs = START + 9_000;
+    const repeat = await acknowledge(code, a);
+    assert.equal(repeat.body.opening.deadline_at, at(45_000));
+    assert.equal(repeat.body.turn_started_at, null);
+    nowMs = START + 18_000;
+    const bReady = await acknowledge(code, b);
+    assert.equal(bReady.body.opening.waiting, false);
+    assert.equal(bReady.body.opening.opponent_ready, true);
+    assert.equal(bReady.body.turn_started_at, at(18_000));
+    assert.equal(bReady.body.still_there_at, at(43_000));
+    assert.equal(bReady.body.turn_expires_at, at(53_000));
+    nowMs = START + 20_000;
+    assert.equal((await acknowledge(code, b)).body.turn_started_at, at(18_000));
+    assert.equal((await poll(code, a)).body.turn_started_at, at(18_000));
+    const first = await move(code, a, 1, X_WIN_GAME[0]);
+    assert.equal(first.status, 200);
+    assert.equal(first.body.turn_expires_at, at(55_000));
+  });
+
+  it("one or both missing is bounded, and a late acknowledgement is rejected with no record", async () => {
+    svc.boardReadyEnabled = true;
+    for (const oneReady of [true,false]) {
+      // Use fresh rooms under the same two accounts for both readiness cases.
+      const r: { code: string; a: string; b: string; hostDev?: { token: string } } =
+        oneReady ? await start(true, true) : await (async () => {
+        const made = await call("POST", "/rooms", { body: { name: "A", board_ready_v1: true } });
+        const joined = await call("POST", `/rooms/${made.body.code}/join`, { body: { name: "B", board_ready_v1: true } });
+        return { code: made.body.code, a: made.body.token, b: joined.body.token };
+      })();
+      const beginsAt = nowMs;
+      if (oneReady) assert.equal((await acknowledge(r.code, r.a)).status, 200);
+      nowMs = beginsAt + 44_999;
+      assert.equal((await poll(r.code, r.a)).body.status, "active");
+      assert.equal((await poll(r.code, r.a)).body.turn_started_at, null);
+      nowMs = beginsAt + 45_000;
+      // Opportunistic cleanup should close even if no one polls this room.
+      await runCleanup(svc, true);
+      const late = await acknowledge(r.code, r.b);
+      assert.equal(late.status, 409);
+      assert.equal(late.body.status, "closed");
+      assert.equal(late.body.opening.expired, true);
+      assert.equal(late.body.result, null);
+      assert.equal(late.body.turn_started_at, null);
+      if (r.hostDev) assert.deepEqual(await record(r.hostDev.token), [0, 0, 0]);
+    }
+    assert.equal((await matchRows()).length, 0);
+  });
+
+  it("mixed clients and disabled rollout retain the legacy start and omit opening", async () => {
+    assert.equal((await call("GET", "/capabilities")).body.board_ready_v1, undefined);
+    const disabled = await start(true,true);
+    assert.equal(disabled.opening.opening, undefined);
+    assert.equal(disabled.opening.turn_started_at, at(0));
+    svc.boardReadyEnabled = true;
+    for (const [a,b] of [[true,false],[false,true]]) {
+      const host = await call("POST", "/rooms", { body: { name: "A", board_ready_v1: a } });
+      const guest = await call("POST", `/rooms/${host.body.code}/join`, { body: { name: "B", board_ready_v1: b } });
+      assert.equal(guest.body.opening, undefined);
+      assert.equal(guest.body.turn_started_at, at(0));
+    }
+  });
+
+  it("rematch renegotiates and cannot reuse acknowledgements from the old round", async () => {
+    svc.boardReadyEnabled = true;
+    const { code, a, b } = await start(true,true);
+    await Promise.all([acknowledge(code,a),acknowledge(code,b)]);
+    assert.equal((await poll(code,a)).body.opening.waiting, false);
+    await playMoves(code,a,b,X_WIN_GAME);
+    nowMs = START + 6_000;
+    const rematch = (token: string, round: number, optIn: boolean) =>
+      call("POST", `/rooms/${code}/rematch`, { token, body: { round, board_ready_v1: optIn } });
+    await rematch(a,1,true);
+    const round2 = await rematch(b,1,true);
+    assert.equal(round2.body.match.round, 2);
+    assert.equal(round2.body.seat, 1);
+    assert.equal(round2.body.opening.you_ready, false);
+    assert.equal(round2.body.opening.waiting, true);
+    assert.equal((await acknowledge(code,a,1)).status, 409);
+    await acknowledge(code,b,2);
+    nowMs = START + 14_000;
+    await acknowledge(code,a,2);
+    assert.equal((await poll(code,b)).body.turn_started_at, at(14_000));
+    await playMoves(code,b,a,X_WIN_GAME);
+    await rematch(a,2,false);
+    const mixed = await rematch(b,2,true);
+    assert.equal(mixed.body.match.round, 3);
+    assert.equal(mixed.body.opening, undefined);
+    assert.equal(mixed.body.turn_started_at, at(14_000));
+  });
+
+  it("in-flight readiness can finish after the rollout switch is turned off", async () => {
+    svc.boardReadyEnabled = true;
+    const { code, a, b } = await start(true,true);
+    assert.equal((await acknowledge(code,a)).status, 200);
+    svc.boardReadyEnabled = false;
+    assert.equal((await acknowledge(code,b)).body.opening.waiting, false);
+    assert.equal((await poll(code,a)).body.turn_started_at, at(0));
+  });
+});

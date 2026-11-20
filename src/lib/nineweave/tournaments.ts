@@ -301,7 +301,7 @@ function advance(svc: Service, loaded: Loaded): Plan {
         room.end_reason ?? "no_show",
         roomScore(room),
       );
-    } else if (room.status === "active" && m.status === "ready") {
+    } else if (room.status === "active" && room.turn_started_at && m.status === "ready") {
       m.status = "live";
       plan.changed.add(m);
     }

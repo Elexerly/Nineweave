@@ -85,11 +85,18 @@ export interface RoomRow {
   ready_deadline: Date | null;
   a_ready_at: Date | null;
   b_ready_at: Date | null;
+  a_board_ready_v1: boolean;
+  b_board_ready_v1: boolean;
+  a_board_ready_at: Date | null;
+  b_board_ready_at: Date | null;
+  board_ready_deadline: Date | null;
   created_at: Date;
   updated_at: Date;
 }
 
 const PASSWORD_MAX = 64;
+/** Separate no-show window for the intro and actionable board, not turn time. */
+export const BOARD_READY_WINDOW_MS = 45_000;
 const SEEN_THROTTLE_MS = 10_000;
 const MAX_ATTEMPTS = 5;
 
@@ -173,6 +180,7 @@ function pollAfterMs(room: RoomRow, slot: Slot): number {
     case "waiting":
       return room.tournament_id ? POLL_AFTER_MS.readyWindow : POLL_AFTER_MS.waiting;
     case "active":
+      if (boardWaiting(room)) return POLL_AFTER_MS.readyWindow;
       return dueSlot(room) === slot ? POLL_AFTER_MS.yourTurn : POLL_AFTER_MS.opponentTurn;
     case "finished":
       return POLL_AFTER_MS.finished;
@@ -226,6 +234,17 @@ export function roomEnvelope(svc: Service, room: RoomRow, slot: Slot) {
       ? { winner: room.winner_slot ? seatOf(room, room.winner_slot) : 0, reason: room.end_reason }
       : null,
     end_reason: room.end_reason,
+    ...(room.board_ready_deadline && {
+      opening: {
+        waiting: boardWaiting(room),
+        you_ready: boardReadyAt(room, slot) !== null,
+        opponent_ready: boardReadyAt(room, o) !== null,
+        deadline_at: iso(room.board_ready_deadline),
+        expired:
+          room.status === "closed" && room.end_reason === "no_show" && !room.turn_started_at &&
+          (!room.a_board_ready_at || !room.b_board_ready_at),
+      },
+    }),
     turn_expires_at: clock ? new Date(clock.expiresAt).toISOString() : null,
     turn_started_at: clock ? new Date(clock.start).toISOString() : null,
     still_there_at: clock ? new Date(clock.stillThereAt).toISOString() : null,
@@ -263,6 +282,25 @@ export function roomEnvelope(svc: Service, room: RoomRow, slot: Slot) {
 
 function readyAt(room: RoomRow, slot: Slot): Date | null {
   return slot === "a" ? room.a_ready_at : room.b_ready_at;
+}
+
+function boardReadyAt(room: RoomRow, slot: Slot): Date | null {
+  return slot === "a" ? room.a_board_ready_at : room.b_board_ready_at;
+}
+
+function boardWaiting(room: RoomRow): boolean {
+  return room.status === "active" && !!room.board_ready_deadline && !room.turn_started_at;
+}
+
+function openingFields(now: Date, negotiated: boolean): Pick<RoomRow,
+  "turn_started_at" | "a_board_ready_at" | "b_board_ready_at" | "board_ready_deadline"
+> {
+  return {
+    turn_started_at: negotiated ? null : now,
+    a_board_ready_at: null,
+    b_board_ready_at: null,
+    board_ready_deadline: negotiated ? new Date(now.getTime() + BOARD_READY_WINDOW_MS) : null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +453,7 @@ async function cancelMatch(
     left_slot: leaver,
     winner_slot: tournament ? other(leaver) : null,
     end_reason: tournament ? "no_show" : reason,
+    board_ready_deadline: null,
     a_rematch: false,
     b_rematch: false,
     turn_started_at: null,
@@ -449,6 +488,19 @@ function pendingExpiry(svc: Service, room: RoomRow): { kind: "turn" | "grace"; s
  * post-move timeout/abandon rules apply. True when something was due.
  */
 async function applyExpiry(svc: Service, room: RoomRow): Promise<boolean> {
+  if (boardWindowOver(svc, room)) {
+    const a = room.a_board_ready_at !== null;
+    const b = room.b_board_ready_at !== null;
+    const survivor: Slot | null = a === b ? null : a ? "a" : "b";
+    await commitRoom(svc, room, {
+      status: "closed",
+      left_slot: survivor ? other(survivor) : null,
+      winner_slot: room.tournament_id ? survivor : null,
+      end_reason: "no_show",
+      updated_at: svc.now(),
+    });
+    return true;
+  }
   const due = pendingExpiry(svc, room);
   if (!due) return false;
   if (room.status === "waiting") {
@@ -460,6 +512,10 @@ async function applyExpiry(svc: Service, room: RoomRow): Promise<boolean> {
     await cancelMatch(svc, room, due.slot, "no_show");
   else await forfeit(svc, room, due.slot, due.kind === "turn" ? "timeout" : "abandoned");
   return true;
+}
+
+function boardWindowOver(svc: Service, room: RoomRow): boolean {
+  return boardWaiting(room) && svc.now().getTime() >= ms(room.board_ready_deadline!);
 }
 
 /** A tournament room's ready window ran out before both players opened it. */
@@ -494,7 +550,7 @@ async function closeReadyWindow(svc: Service, room: RoomRow): Promise<boolean> {
  * A player opened their tournament room during the ready window. Once both
  * have, the match starts (turn clock running, both seats seen now).
  */
-async function markReady(svc: Service, room: RoomRow, slot: Slot): Promise<RoomRow> {
+async function markReady(svc: Service, room: RoomRow, slot: Slot, boardOptIn: boolean): Promise<RoomRow> {
   for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
     if (room.status !== "waiting" || !room.tournament_id || readyAt(room, slot)) return room;
     if (readyWindowOver(svc, room)) return room;
@@ -502,13 +558,14 @@ async function markReady(svc: Service, room: RoomRow, slot: Slot): Promise<RoomR
     const otherReady = readyAt(room, other(slot)) !== null;
     const sets: Partial<Record<keyof RoomRow, unknown>> = {
       [`${slot}_ready_at`]: now,
+      [`${slot}_board_ready_v1`]: svc.boardReadyEnabled && boardOptIn,
       [`${slot}_seen_at`]: now,
       updated_at: now,
     };
     if (otherReady)
       Object.assign(sets, {
         status: "active",
-        turn_started_at: now,
+        ...openingFields(now, svc.boardReadyEnabled && boardOptIn && room[`${other(slot)}_board_ready_v1`]),
         still_here_used: false,
         still_here_confirmed_at: null,
         a_seen_at: now,
@@ -569,6 +626,7 @@ export async function runCleanup(svc: Service, force = false): Promise<void> {
   const stale = await svc.db.query<RoomRow>(
     `select * from nw_rooms
       where (status = 'active' and (turn_started_at <= $1 or least(a_seen_at, b_seen_at) <= $2))
+         or (status = 'active' and turn_started_at is null and board_ready_deadline <= $3)
          or (status = 'waiting' and tournament_id is not null and ready_deadline <= $3)
       order by updated_at limit 25`,
     [new Date(nowMs - svc.turnMs), new Date(nowMs - svc.graceMs), now],
@@ -632,10 +690,11 @@ export async function authorizeFresh(
   svc: Service,
   code: string,
   tokens: (string | null | undefined)[],
+  boardOptIn = false,
 ) {
   const found = await authorize(svc, code, tokens);
   const room = await refreshRoom(svc, found.room);
-  return { room: await markReady(svc, room, found.slot), slot: found.slot };
+  return { room: await markReady(svc, room, found.slot, boardOptIn), slot: found.slot };
 }
 
 export async function touchSeen(svc: Service, room: RoomRow, slot: Slot): Promise<void> {
@@ -742,8 +801,9 @@ export async function createRoom(
         {
           text: `insert into nw_rooms
             (id, code, status, is_private, password_hash, round, x_slot, state, rev,
-             a_player_id, a_name, a_hero, a_token_hash, a_seen_at, created_at, updated_at)
-            values ($1, $2, 'waiting', $3, $4, 1, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $12, $12)`,
+             a_player_id, a_name, a_hero, a_token_hash, a_seen_at, created_at, updated_at,
+             a_board_ready_v1)
+            values ($1, $2, 'waiting', $3, $4, 1, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $12, $12, $13)`,
           params: [
             id,
             code,
@@ -757,6 +817,7 @@ export async function createRoom(
             participant.hero,
             hashToken(token),
             now,
+            svc.boardReadyEnabled && body.board_ready_v1 === true,
           ],
         },
         ...rememberHero(svc, participant),
@@ -845,7 +906,8 @@ export async function joinRoom(
         b_token_hash: hashToken(token),
         b_seen_at: now,
         b_joined_at: now,
-        turn_started_at: now,
+        b_board_ready_v1: svc.boardReadyEnabled && body.board_ready_v1 === true,
+        ...openingFields(now, svc.boardReadyEnabled && body.board_ready_v1 === true && room.a_board_ready_v1),
         still_here_used: false,
         still_here_confirmed_at: null,
         updated_at: now,
@@ -864,6 +926,48 @@ function movesSince(state: SerializedState, since: number) {
     .filter((m) => m.seq > since);
 }
 
+/**
+ * POST /rooms/:code/board-ready. A seat may only acknowledge its own board
+ * and the exact round it displayed. The second acknowledgment starts time
+ * in the same revision-guarded write; duplicate delivery never resets time.
+ */
+export async function confirmBoardReady(
+  svc: Service,
+  code: string,
+  body: Record<string, unknown>,
+  bearer: string | null,
+) {
+  const round = requireInt(body.round, "round");
+  if (round < 1) throw new ApiError(400, "round must be 1 or greater");
+  const token = typeof body.token === "string" ? body.token : null;
+  return withRetry(async () => {
+    // A board acknowledgment is not a tournament entrance. Do not let a
+    // premature acknowledgment consume a seat's first opt-in opportunity.
+    const found = await authorize(svc, code, [token, bearer]);
+    const room = await refreshRoom(svc, found.room);
+    const slot = found.slot;
+    const envelope = () => ({ ...roomEnvelope(svc, room, slot), moves: [] as unknown[] });
+    if (round !== room.round) throw new ApiError(409, "Stale board readiness round", envelope());
+    if (room.status !== "active" || !room.board_ready_deadline)
+      throw new ApiError(409, "This room is not accepting board readiness", envelope());
+    if (boardReadyAt(room, slot)) return envelope();
+    if (boardWindowOver(svc, room)) {
+      await applyExpiry(svc, room);
+      return CONFLICT;
+    }
+    const now = svc.now();
+    const otherReady = boardReadyAt(room, other(slot)) !== null;
+    const ok = await commitRoom(svc, room, {
+      [`${slot}_board_ready_at`]: now,
+      [`${slot}_seen_at`]: now,
+      ...(otherReady && { turn_started_at: now, a_seen_at: now, b_seen_at: now }),
+      updated_at: now,
+    });
+    if (!ok) return CONFLICT;
+    return { ...roomEnvelope(svc, await reloadRoom(svc, room.id), slot), moves: [] };
+  });
+}
+
 /** GET /rooms/:code?since=n — `extras` adds fields computed from the fresh room (chat). */
 export async function pollRoom(
   svc: Service,
@@ -871,9 +975,10 @@ export async function pollRoom(
   since: number,
   tokens: (string | null)[],
   extras?: (room: RoomRow, slot: Slot) => Promise<Record<string, unknown>>,
+  boardOptIn = false,
 ) {
   await runCleanup(svc);
-  const { room, slot } = await authorizeFresh(svc, code, tokens);
+  const { room, slot } = await authorizeFresh(svc, code, tokens, boardOptIn);
   await touchSeen(svc, room, slot);
   return {
     ...roomEnvelope(svc, room, slot),
@@ -935,6 +1040,7 @@ export async function playMove(
       throw new ApiError(409, "Waiting for an opponent to join", snapshot());
     if (room.status === "finished") throw new ApiError(422, "Game finished", snapshot());
     if (room.status === "closed") throw new ApiError(409, "This room is closed", snapshot());
+    if (boardWaiting(room)) throw new ApiError(409, "Waiting for both players to reach their boards", snapshot());
     if (seq !== current + 1)
       throw new ApiError(409, "Move sequence is ahead of the server", snapshot());
 
@@ -1048,7 +1154,8 @@ export async function requestRematch(
           winner_slot: null,
           end_reason: null,
           left_slot: null,
-          turn_started_at: now,
+          [`${slot}_board_ready_v1`]: svc.boardReadyEnabled && body.board_ready_v1 === true,
+          ...openingFields(now, svc.boardReadyEnabled && body.board_ready_v1 === true && room[`${other(slot)}_board_ready_v1`]),
           still_here_used: false,
           still_here_confirmed_at: null,
           updated_at: now,
@@ -1056,6 +1163,7 @@ export async function requestRematch(
         })
       : await commitRoom(svc, room, {
           [`${slot}_rematch`]: true,
+          [`${slot}_board_ready_v1`]: svc.boardReadyEnabled && body.board_ready_v1 === true,
           updated_at: now,
           [`${slot}_seen_at`]: now,
         });

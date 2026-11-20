@@ -21,6 +21,7 @@ const Recovery = preload("res://net/account_recovery.gd")
 const RecoveryScreen = preload("res://ui/recovery_screen.gd")
 const EmailScreen = preload("res://ui/email_screen.gd")
 const Tutorial = preload("res://ui/tutorial.gd")
+const StartupCard = preload("res://ui/startup_card.gd")
 const Announcer = preload("res://fx/announcer.gd")
 const Callout = preload("res://fx/comic_callout.gd")
 var _code_taps: int = 0
@@ -142,6 +143,8 @@ var opponent_name: String = "Remote player"
 var remote_ready: bool = false
 var _result_shown: bool = false
 var _pending_result_voice: bool = false
+var _result_victory_pending := false
+var startup_card: Control
 var _result_t: float = 1.0
 var _result_bases: Dictionary = {}
 var _input_beat: float = 0
@@ -268,7 +271,14 @@ func _ready():
 	_rebuild()
 	get_viewport().size_changed.connect(_on_viewport_resize)
 	call_deferred("_clip_preview")
+	if not test_online_bypass and DisplayServer.get_name() != "headless" and not OS.has_environment("NW_SCENARIO"):
+		_show_startup_card()
 	call_deferred("_tutorial_on_home")
+func _show_startup_card():
+	if is_instance_valid(startup_card): return
+	startup_card = StartupCard.new()
+	add_child(startup_card)
+	startup_card.dismissed.connect(func(): _tutorial_on_home())
 func _on_viewport_resize():
 	if _manual_size != Vector2.ZERO: return
 	_resize_pending = true
@@ -353,7 +363,9 @@ func _process(delta):
 	if _resize_pending and not get_viewport().gui_get_focus_owner() is LineEdit:
 		_resize_pending = false; _relayout(); _rebuild()
 	clock += delta
-	if cinematic: cinematic.advance(delta)
+	if cinematic:
+		if cinematic.video_overlay.victory_voice_ducked and not sound.result_victory_playing(): cinematic.video_overlay.set_victory_voice_ducked(false)
+		cinematic.advance(delta)
 	_update_hero_states()
 	P.clock = clock
 	_input_beat = maxf(0,_input_beat-delta)
@@ -468,6 +480,13 @@ func _cinematic_finished(kind: String):
 		_spotlight_done = true; board.frozen = false
 		_result_shown = true; overlay = "result"; _rebuild(); _sync_fx()
 func _input(event):
+	if is_instance_valid(startup_card) and startup_card.active:
+		var dismiss = (event is InputEventScreenTouch and not event.pressed and not event.canceled) or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed) or event.is_action_pressed("ui_accept") or event.is_action_pressed("ui_cancel")
+		get_viewport().set_input_as_handled()
+		if dismiss:
+			startup_card.dismiss()
+			_skip_guard_until = Time.get_ticks_msec()+SKIP_GUARD_MS
+		return
 	if overlay in ["delete_account","local_reset"]:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_deletion_action("cancel"); get_viewport().set_input_as_handled()
@@ -499,7 +518,9 @@ func _input(event):
 		result_skip = event is InputEventKey or (pointer and not g.again.has_point(event.position) and not g.menu.has_point(event.position))
 	if tap and cinematic and cinematic.active and (not cinematic.buttons_shown or result_skip):
 		var was = cinematic.kind
+		var skip_result_voice: bool = cinematic.kind == "spotlight" and sound.result_victory_playing()
 		var skipped = cinematic.skip()
+		if skipped and skip_result_voice: sound.stop_result_victory()
 		if was != "pop":
 			get_viewport().set_input_as_handled()
 			if skipped and not event is InputEventKey: _skip_guard_until = Time.get_ticks_msec()+SKIP_GUARD_MS
@@ -508,13 +529,18 @@ func hero_for(mark: int) -> String:
 func _show_spotlight():
 	if not _debug_capture and game.status != 0: match_ads.match_completed()
 	var winner = game.status if game.status in [1,2] else human_mark
+	var speak: bool = _result_victory_pending and game.status in [1,2] and sound.can_play_result_victory()
+	_result_victory_pending = false
+	cinematic.video_overlay.set_victory_voice_ducked(speak)
 	cinematic.winner_name = side_name(winner); cinematic.loser_name = side_name(3-winner)
 	cinematic.result_title = _victory_title()
 	cinematic.result_detail = end_message if mode == "online" else ""
 	cinematic.result_score = "%d — %d  BOARDS CLAIMED" % [game.owners.count(winner),game.owners.count(3-winner)]
 	cinematic.show_scene("draw" if game.status == 3 else "spotlight",hero_for(winner),hero_for(3-winner),winner,layout)
-	if game.status != 3 and not cinematic.video_playing(): sound.stinger(Roster.audio_index(hero_for(winner)),"full",-.35 if winner == human_mark else .35)
+	if speak: sound.play_result_victory()
+	if game.status != 3 and not speak and not cinematic.video_playing(): sound.stinger(Roster.audio_index(hero_for(winner)),"full",-.35 if winner == human_mark else .35)
 func _begin_versus():
+	sound.stop_result_victory()
 	thinking = false; board.frozen = true
 	cinematic.winner_name = side_name(human_mark); cinematic.loser_name = side_name(3-human_mark)
 	cinematic.show_scene("versus",hero_for(human_mark),hero_for(3-human_mark),human_mark,layout)
@@ -577,7 +603,7 @@ func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = fa
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	sound.prepare_character(Roster.audio_index(profile.data.character_id)); sound.prepare_character(Roster.audio_index(rival_character))
 	mode = new_mode; human_mark = mark; page = "game"; overlay = ""; _debug_capture = false
-	_pending_result_voice = false; game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
+	_pending_result_voice = false; _result_victory_pending = false; game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
 	thinking = false; hint_busy = false; _result_shown = false; match_seconds = 0; message = ""; online_sequence = 0
 	_refresh_labels(); _rebuild()
 	sound.clear_announcer()
@@ -640,11 +666,13 @@ func _intro_owns_audio() -> bool:
 func _announce_match_result():
 	_pending_result_voice = _intro_owns_audio()
 	if _pending_result_voice: return
+	_result_victory_pending = false
 	sound.clear_announcer() # Pending commentary must not delay the final dispatch.
 	if game.status == 3:
 		sound.cue("draw"); _announce("standoff")
 	elif game.status in [1,2]:
 		if mode == "local" or game.status == human_mark:
+			_result_victory_pending = true
 			sound.announce("nineweave","victory")
 			if not sound.enabled: callout.show_callout("nineweave")
 		else:
@@ -751,7 +779,7 @@ func go_home():
 	if _require_screen_name(): return
 	if tutorial.active: tutorial.skip()
 	_pending_game = {}; _select_player = 0
-	sound.clear_announcer()
+	sound.stop_result_victory(); sound.clear_announcer()
 	_save_match(); tournament.match_active = false
 	if online_tournament.match_active:
 		online_tournament.match_active = false; online_tournament._auto_return = -1
@@ -1163,7 +1191,7 @@ func _reset_online_match():
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	_spotlight_done = false; cinematic.clear(); _debug_capture = false; joined_timer.stop(); end_message = ""
 	_prompt_sent = ""; _moved_turn = ""
-	_pending_result_voice = false; game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
+	_pending_result_voice = false; _result_victory_pending = false; game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
 	board.clear_effects(); thinking = false; _result_shown = false; match_seconds = 0; message = ""
 	_refresh_labels(); _rebuild(); _begin_versus()
 func _receive_move(b: int, c: int, seq: int):
@@ -1460,6 +1488,7 @@ func _build_email_screen(s: Vector2):
 	email_view.code_changed.connect(func(value): _email_code_draft = value)
 	add_child(email_view); ui_nodes.append(email_view); controls.merge(email_view.controls,true)
 func _tutorial_on_home():
+	if is_instance_valid(startup_card) and startup_card.active: return
 	if _tutorial_waiting and not account._refreshing and not account.busy:
 		_tutorial_waiting = false
 		var next = _tutorial_continue; _tutorial_continue = Callable()

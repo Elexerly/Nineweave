@@ -115,6 +115,12 @@ func relayout(extent: Vector2):
 		sides[i].frame = frame; sides[i].node.position = frame.position; sides[i].node.size = frame.size
 	queue_redraw()
 	if is_instance_valid(_chrome): _chrome.queue_redraw()
+var victory_voice_ducked := false
+const VICTORY_VOICE_DUCK_DB := -18.0
+func set_victory_voice_ducked(value: bool):
+	if victory_voice_ducked == value: return
+	victory_voice_ducked = value
+	set_sound_enabled(sound_enabled)
 func set_sound_enabled(value: bool):
 	sound_enabled = value
 	var audible = false
@@ -129,7 +135,8 @@ func set_sound_enabled(value: bool):
 				var position = soundtrack_tail_position(side.node.stream_position,side.sound.get_playback_position())
 				if scene_kind == "versus": position = maxf(position,_reveal_age)
 				var gain = soundtrack_tail_gain(side.id,side.kind,position,_soundtrack_end(side))
-				side.sound.volume_db = VIDEO_GAIN_DB+linear_to_db(gain) if enabled and gain > 0 else -80.0
+				var duck := VICTORY_VOICE_DUCK_DB if scene_kind == "spotlight" and victory_voice_ducked else 0.0
+				side.sound.volume_db = VIDEO_GAIN_DB+duck+linear_to_db(gain) if enabled and gain > 0 else -80.0
 			audible = audible or enabled
 	_set_audio(active and audible)
 static func soundtrack_tail_position(video_position: float, audio_position: float) -> float:

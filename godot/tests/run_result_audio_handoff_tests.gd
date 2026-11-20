@@ -18,6 +18,8 @@ func run():
 	ui.profile.choose("cryon","Tester")
 	root.add_child(ui); ui.set_process(false); await process_frame
 	ui.sound.set_process(false); ui.sound.unlocked = true
+	var reveals: Array[String] = []
+	ui.sound.result_victory_started.connect(func(): reveals.append(ui.cinematic.kind))
 	var started: Array[String] = []
 	ui.sound.voice_started.connect(func(id): started.append(id))
 	for mode in ["computer","local","online"]:
@@ -44,6 +46,7 @@ func run():
 	ui._online_room_update({"status":"finished","result":{"winner":1}})
 	ok(started == ["nineweave"],"authoritative forfeit result announces once")
 	ui.debug_load_position(F.big_tactic(1).serialize(),"local")
+	ui.profile.choose("shard_jack","Tester")
 	ui.sound.set_hero_video_audio(true)
 	started.clear(); ui._apply_move(2,2)
 	ok(started.is_empty() and ui._pending_result_voice,"ongoing intro defers rather than drops result voice")
@@ -71,6 +74,49 @@ func run():
 	print("RESULT_AUDIO_FADE playback_seconds=",ui.sound._brand_elapsed," wall_seconds=",seconds)
 	ui._process(0)
 	ok(ui.cinematic.active,"next ready board frame immediately hands off to results")
+	ok(reveals == ["spotlight"] and ui.sound.result_victory_playing(),"spoken Victory starts exactly on existing result card reveal")
+	ok(ui.cinematic.video_playing() and ui.cinematic.video_overlay.victory_voice_ducked,"hero video starts with the card; only soundtrack is ducked")
+	var video_audio = ui.cinematic.video_overlay.sides[0].sound
+	ok(video_audio != null and video_audio.volume_db < -15.0,"competing hero soundtrack is quieter during the spoken clip")
+	ui.sound.clear_announcer()
+	ok(ui.sound.result_victory_playing(),"legacy queue clear cannot cut off the separate clip")
+	ui._process(.25); ui._process(.25)
+	ok(reveals.size() == 1,"subsequent result frames do not repeat Victory")
+	var voice_length: float = ui.sound._result_victory.stream.get_length()
+	ok(ui.sound._result_victory.stream is AudioStreamOggVorbis,"full existing spoken recording is used")
+	ui.sound._result_victory.play()
+	ui.sound.advance_mix(100)
+	ok(ui.sound.result_victory_playing(),"result speech follows real completion, not frame estimates")
+	await ui.sound._result_victory.finished
+	ok(not ui.sound.result_victory_playing(),"separate spoken clip plays through natural completion")
+	ui._process(0)
+	ok(not ui.cinematic.video_overlay.victory_voice_ducked and video_audio.volume_db > -15.0,"hero soundtrack restored after word ends")
+	print("VICTORY_REVEAL clip_seconds=",voice_length)
+	ui.cinematic.clear(); ui.sound.stop_playback()
+	ui.debug_load_position(F.big_tactic(1).serialize(),"computer"); ui.sound.enabled = false
+	ui._apply_move(2,2); ui.board.win_fx.age = 100; ui._process(0)
+	ok(reveals.size() == 1 and not ui.sound.result_victory_playing(),"mute suppresses dedicated victory cue")
+	ui.cinematic.clear(); ui.sound.enabled = true
+	ui.debug_load_position(F.big_tactic(1).serialize(),"computer"); ui._apply_move(2,2)
+	ui.sound.advance_mix(5); ui.board.win_fx.age = 100; ui._process(0)
+	ui.cinematic.age = 1.0
+	var skip := InputEventKey.new(); skip.keycode = KEY_ESCAPE; skip.pressed = true
+	root.push_input(skip,true)
+	ok(reveals.size() == 2 and not ui.sound.result_victory_playing() and not ui.cinematic.active,"explicit result skip stops dedicated word and keeps result card")
+	ui.cinematic.clear(); ui.sound.stop_playback()
+	var initial_page: String = ui.page
+	ui._show_startup_card()
+	var startup = ui.startup_card
+	ok(startup.active and startup.THANK_YOU == "Thanks for playing Lexerly!" and startup.SIGNATURE == "Patrick Booth","startup thanks players and uses personal signature")
+	for view in [Vector2(320,568),Vector2(390,844),Vector2(867,553),Vector2(1366,1024)]:
+		var rect: Rect2 = startup.card_rect(view)
+		ok(Rect2(Vector2.ZERO,view).encloses(rect) and rect.get_center() == view*.5,"startup centered and safe for "+str(view))
+	ok(startup.ink_alpha(0) == 0 and startup.ink_alpha(.4) == 1 and startup.ink_alpha(2.9) < 1,"startup fades gently at both ends")
+	startup._process(2.99)
+	ok(startup.active,"startup card remains before timeout")
+	startup._process(.02)
+	ui._show_startup_card()
+	ok(not startup.active and not startup.visible and ui.startup_card == startup and ui.page == initial_page,"startup auto-dismisses once and preserves existing route")
 	ui.cinematic.clear(); ui.sound.stop_playback(); ui.queue_free()
 	await process_frame; await process_frame
 	print("RESULT_AUDIO_HANDOFF ",checks," checks, ",failures," failures")

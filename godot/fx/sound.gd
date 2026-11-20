@@ -9,6 +9,7 @@ const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11]
 const REAL_SFX = {"claim_x":"claim_crystal_shatter","claim_o":"claim_gold_clang","claim":"claim_crystal_shatter","victory":"victory_fanfare","defeat":"defeat_sting","route":"board_whoosh_chime","ui":"button_tick","invalid":"invalid_thunk"}
 const VOICES = ["ready","weave","first_claim","double_lock","triple_weave","match_point","turnaround","shutout","nineweave","clean_sweep","standoff","victory","defeat"]
 signal voice_started(id: String)
+signal result_victory_started
 const VOICE_GAP = .1
 const BRAND_FADE_START := 4.0
 const BRAND_FADE_END := 4.45
@@ -45,6 +46,8 @@ var _brand_elapsed := 0.0
 var _voice_base_db := 0.0
 var _players: Array = []
 var _voice: AudioStreamPlayer
+var _result_victory: AudioStreamPlayer
+var _result_victory_left := 0.0
 var _unlock_player: AudioStreamPlayer
 var voice_queue: Array = []
 var voice_id: String = ""
@@ -58,6 +61,8 @@ func _ready():
 		var p = AudioStreamPlayer.new(); add_child(p); _players.append(p)
 	_voice = AudioStreamPlayer.new(); _voice.bus = "Announcer"; add_child(_voice)
 	_voice.finished.connect(_voice_finished)
+	_result_victory = AudioStreamPlayer.new(); _result_victory.bus = "Announcer"; add_child(_result_victory)
+	_result_victory.finished.connect(stop_result_victory)
 	_unlock_player = AudioStreamPlayer.new(); _unlock_player.volume_db = -80; add_child(_unlock_player)
 	cache.unlock = generate("unlock")
 	_warm = ["ui","place_x","place_o","invalid","route","claim","victory","defeat","draw"]
@@ -88,6 +93,7 @@ static func _append_bus() -> int:
 func stop_playback():
 	for p in _players: p.stop()
 	if is_instance_valid(_voice): _voice.stop()
+	stop_result_victory()
 	clear_announcer()
 func configure(values: Dictionary):
 	enabled = bool(values.get("sound",true))
@@ -134,6 +140,8 @@ func _process(delta):
 	generation_us += Time.get_ticks_usec()-start
 func advance_mix(delta: float):
 	if voice_id == "nineweave": _advance_brand_fade(delta)
+	if _result_victory_left > 0 and (not enabled or float(volumes.announcer_volume) <= 0): stop_result_victory()
+	elif _result_victory_left > 0 and not _result_victory.playing: _result_victory_left = maxf(0,_result_victory_left-delta)
 	var remaining = delta
 	if _announcer_left > 0:
 		remaining = maxf(0,delta-_announcer_left)
@@ -199,6 +207,23 @@ func result_announcement_pending() -> bool:
 	for entry in voice_queue:
 		if entry.id in RESULT_VOICES: return true
 	return false
+## A one-shot presentation cue intentionally lives outside the gameplay queue:
+## revealing a hero video may clear that queue, but never this dedicated line.
+func can_play_result_victory() -> bool:
+	return enabled and unlocked and float(volumes.announcer_volume) > 0 and load_real(real_path("ann_victory")) != null
+func play_result_victory():
+	if not can_play_result_victory(): return
+	var stream = stream_for("ann_victory")
+	_result_victory.stream = stream
+	_result_victory.volume_db = -1.0
+	_result_victory_left = stream.get_length()
+	if DisplayServer.get_name() != "headless": _result_victory.play()
+	result_victory_started.emit()
+func result_victory_playing() -> bool:
+	return _result_victory_left > 0 and enabled and float(volumes.announcer_volume) > 0
+func stop_result_victory():
+	if is_instance_valid(_result_victory): _result_victory.stop()
+	_result_victory_left = 0
 func stop_versus_prelude():
 	if voice_id == "versus_prelude": clear_announcer()
 func play_versus_clash():

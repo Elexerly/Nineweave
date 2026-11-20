@@ -13,6 +13,7 @@ const Store = preload("res://settings/store.gd")
 const Loopback = preload("res://net/loopback_transport.gd")
 const HTTP = preload("res://net/http_polling_transport.gd")
 const JsonAPI = preload("res://net/json_api.gd")
+const AppEnvironment = preload("res://net/game_environment.gd")
 const AccountDeletion = preload("res://net/account_deletion.gd")
 const DeletionScreen = preload("res://ui/deletion_screen.gd")
 const DeviceAccount = preload("res://net/device_account.gd")
@@ -404,6 +405,10 @@ func _process(delta):
 ## Round 5a: re-evaluate the "Still there?" prompt as the local countdown crosses still_there_at.
 func tick_online():
 	if mode != "online" or page != "game" or not transport is HTTP: return
+	# The normal intro must finish (or be skipped), and the board must actually
+	# be visible and interactive before asking the server to start the clock.
+	if remote_ready and game.status == 0 and overlay.is_empty() and not tutorial.active and not board.frozen and not cinematic.active:
+		transport.acknowledge_board()
 	if overlay.is_empty() and prompt_state() != _prompt_key: _clock_changed()
 	if is_instance_valid(prompt_layer): prompt_layer.queue_redraw()
 ## Effects that depend on the board's animation clock: statue glow, result panel entrance.
@@ -981,10 +986,11 @@ func _turn_key() -> String:
 ## Presentation never changes the server-owned turn or assumes the local seat is X.
 func local_online_turn() -> bool:
 	if not remote_ready or game.status != 0 or game.turn != human_mark: return false
-	if transport is HTTP and (transport.reconnecting or transport._inflight == "move" or transport.turn_phase().phase == "expired"): return false
+	if transport is HTTP and (transport.opening_pending() or transport.reconnecting or transport._inflight == "move" or transport.turn_phase().phase == "expired"): return false
 	return true
 func online_turn_caption() -> String:
 	if not remote_ready: return "Waiting for opponent"
+	if transport is HTTP and transport.opening_pending(): return "Waiting for both boards…"
 	if transport is HTTP and transport.reconnecting: return "Reconnecting…"
 	if transport is HTTP and transport._inflight == "move": return "Sending move…"
 	if transport is HTTP and transport.turn_phase().phase == "expired": return "Checking result…"
@@ -1030,6 +1036,8 @@ func idle_turn_warning() -> String:
 func online_lines() -> Array:
 	if mode != "online" or page != "game" or game.status != 0: return ["",""]
 	if not transport is HTTP: return [online_turn_caption(),""]
+	if transport.opening_pending():
+		return ["Reconnecting before the match…" if transport.reconnecting else "Waiting for both boards…","The turn clock starts when both players are ready."]
 	if transport.reconnecting: return ["Reconnecting — timer continues",idle_turn_warning()]
 	if transport._inflight == "move": return ["Sending move…",""]
 	var info = turn_info()
@@ -1213,6 +1221,22 @@ func _receive_state(state: Dictionary, seq: int):
 			if was_live and page == "game": _announce_match_result()
 
 func _online_room_update(data: Dictionary):
+	var opening = data.get("opening")
+	var result = data.get("result")
+	var opening_expired: bool = data.get("status") == "closed" and opening is Dictionary and opening.get("expired") == true
+	if opening_expired and (not result is Dictionary or int(result.get("winner",0)) == 0):
+		# Nobody won on the board. A tournament server may still resolve the
+		# bracket by seed, but do not present that as a played draw.
+		if online_tournament.match_active:
+			online_tournament.return_to_bracket(); return
+		cinematic.clear(); board.frozen = false
+		sound.stop_versus_prelude()
+		remote_ready = false; thinking = false; chat_open = false; callout.callout = ""
+		end_message = "The boards weren't ready in time. Match cancelled, no loss."
+		message = end_message
+		if page == "game": overlay = "online_end"
+		elif page == "online": online_state = "waiting"
+		_rebuild(); return
 	if online_tournament.match_active: online_tournament.match_ended(data)
 	var you = data.get("you")
 	if you is Dictionary and you.get("name") is String and not str(you.name).is_empty(): _you_name = str(you.name)
@@ -1228,7 +1252,6 @@ func _online_room_update(data: Dictionary):
 				remote_ready = false; thinking = false; chat_open = false; callout.callout = ""; overlay = "online_end"; _rebuild()
 			elif winner == -1 and page == "online": online_state = "waiting" if online_state == "joined" else online_state; _rebuild()
 	# Forfeits/timeouts are authoritative full-match results, outside board mechanics.
-	var result = data.get("result")
 	if data.get("status","") in ["finished","closed"] and result is Dictionary and (game.status == 0 or (online_tournament.match_active and game.status == 3)):
 		var winner = int(result.get("winner",-1))
 		if winner in [0,1,2] and (game.status == 0 or winner != 0):
@@ -1762,7 +1785,27 @@ func _rebuild():
 	elif overlay == "account": _build_email_screen(s)
 	elif overlay == "result": _winner_controls(s); _result_chat()
 	elif not overlay.is_empty(): _overlay_controls(s)
+	if AppEnvironment.staging(): _test_server_badge(s)
 	queue_redraw()
+func _test_server_badge(extent: Vector2):
+	var badge := Label.new()
+	badge.name = "TestServerBadge"
+	badge.text = "TEST SERVER"
+	badge.add_theme_font_override("font",P.SANS)
+	badge.add_theme_font_size_override("font_size",12)
+	badge.add_theme_color_override("font_color",P.GOLD)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("16233d"); style.border_color = P.GOLD; style.set_border_width_all(1)
+	badge.add_theme_stylebox_override("normal",style)
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.z_index = 110
+	# Leave the center hinge unobstructed on the Duo.
+	var edge: float = layout.hinge.position.x if layout.hinge.size.x > 0 else extent.x
+	badge.position = Vector2(maxf(4.0,edge-108.0),maxf(0.0,extent.y-24.0))
+	badge.size = Vector2(100,22)
+	add_child(badge); ui_nodes.append(badge)
 func _create_field_heroes():
 	var r: Rect2 = layout.players
 	for mark in [human_mark,3-human_mark]:

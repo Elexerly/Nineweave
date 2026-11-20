@@ -1,4 +1,5 @@
 extends RefCounted
+const AppEnvironment = preload("res://net/game_environment.gd")
 ## Separate from character-select onboarding. No room/seat credential is persisted here.
 const TOS_VERSION = "2026-11-15"
 const PRIVACY_VERSION = "2026-11-15"
@@ -7,8 +8,8 @@ var deletion_reset_required = false
 var deletion_reset_reason = ""
 var path: String
 var data: Dictionary = {"tutorial_completed":false,"tutorial_pending":false,"pending_hero":"","pending_hero_owner":"","signed_out":false,"deletion_uncertain":false,"deletion_resolution":"","device_token":"","screen_name":"","tos_version":"","privacy_version":"","accepted_at":"","age_confirmed":false,"pending_sync":false,"registration_rejected":false,"email":"","email_status":"not_verified","email_verified_at":"","email_prompt_done":false}
-func _init(file_path: String = "user://nineweave-device.cfg"):
-	path = file_path; data = data.duplicate(true)
+func _init(file_path: String = ""):
+	path = AppEnvironment.save_path("nineweave-device.cfg") if file_path.is_empty() else file_path; data = data.duplicate(true)
 	var cfg = ConfigFile.new()
 	if cfg.load(path) == OK:
 		for key in data:

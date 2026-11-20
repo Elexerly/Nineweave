@@ -1,11 +1,12 @@
 extends RefCounted
+const AppEnvironment = preload("res://net/game_environment.gd")
 const Roster = preload("res://characters/roster.gd")
 var path: String
 ## Identity is a replaceable envelope: future verified server identity can replace
 ## {kind:local,id:...} without changing character selection or UI consumers.
 var data: Dictionary = {"version":1,"identity":{},"display_name":"You","character_id":"vesper_vale","onboarded":false}
-func _init(file_path: String = "user://nineweave-profile.cfg"):
-	path = file_path
+func _init(file_path: String = ""):
+	path = AppEnvironment.save_path("nineweave-profile.cfg") if file_path.is_empty() else file_path
 	data = data.duplicate(true)
 	var cfg = ConfigFile.new()
 	var corrupt = FileAccess.file_exists(path) and FileAccess.get_file_as_bytes(path).has(0)

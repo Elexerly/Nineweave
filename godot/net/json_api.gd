@@ -1,11 +1,12 @@
 extends Node
 ## Shared JSON boundary. Injectable HTTPRequest factory keeps every test off network.
-const LIVE_ORIGIN = "https://nineweave.grok.me"
-const TEST_ORIGIN = "https://br-still-mode-bdsyavce-lexerlytest.compute.c-8.us-east-2.aws.neon.tech"
+const AppEnvironment = preload("res://net/game_environment.gd")
+const LIVE_ORIGIN = AppEnvironment.LIVE_ORIGIN
+const TEST_ORIGIN = AppEnvironment.STAGING_ORIGIN
 const API_PATH = "/api/nineweave"
 const Clock = preload("res://net/turn_clock.gd")
 signal completed(operation: String, response: int, data: Dictionary, problem: String)
-var base_url: String = TEST_ORIGIN if OS.has_feature("lexerly_test") else LIVE_ORIGIN
+var base_url: String = AppEnvironment.origin()
 var request_factory: Callable
 var _request
 var _queue: Array = []
@@ -13,22 +14,23 @@ var _current: Dictionary = {}
 static func origin_base(origin: String) -> String:
 	# HTTPRequest rejects scheme-less URLs (ERR_INVALID_PARAMETER), so the live
 	# page must use its absolute origin, never "" or a relative path.
-	return LIVE_ORIGIN
+	return AppEnvironment.origin()
 static func request_url(base: String, path: String) -> String:
-	var absolute = base if base.begins_with("https://") or base.begins_with("http://") else (TEST_ORIGIN if OS.has_feature("lexerly_test") else LIVE_ORIGIN)
-	return absolute+API_PATH+path
+	return AppEnvironment.pinned_base(base)+API_PATH+path
 static func authorization(credential: String) -> PackedStringArray:
 	var headers = PackedStringArray(["Content-Type: application/json"])
 	if not credential.is_empty(): headers.append("Authorization: Bearer "+credential)
 	return headers
 func _ready():
-	if OS.has_feature("web"):
+	if OS.has_feature("web") and not AppEnvironment.staging():
 		# Local QA only: ?api=http://127.0.0.1:PORT is honoured on a localhost page, never elsewhere.
 		var local = Clock.api_override(str(JavaScriptBridge.eval("window.location.hostname")),str(JavaScriptBridge.eval("(new URLSearchParams(window.location.search)).get('api')||''")))
 		if not local.is_empty(): base_url = local
 		elif base_url == LIVE_ORIGIN: base_url = origin_base(str(JavaScriptBridge.eval("window.location.origin")))
 	_request = request_factory.call() if request_factory.is_valid() else HTTPRequest.new()
-	_request.timeout = 8.0; add_child(_request)
+	_request.timeout = 8.0
+	if AppEnvironment.staging() and _request is HTTPRequest: _request.max_redirects = 0
+	add_child(_request)
 	_request.request_completed.connect(_complete)
 	_start_next()
 func submit(path: String, method: int, body: Dictionary, operation: String, credential: String = ""):

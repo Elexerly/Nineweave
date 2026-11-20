@@ -1,12 +1,13 @@
 class_name NineweaveSettings
 extends RefCounted
+const AppEnvironment = preload("res://net/game_environment.gd")
 const Themes = preload("res://themes/registry.gd")
-var path: String = "user://nineweave.cfg"
+var path: String
 const DEFAULTS = {"sound":true,"music":false,"reduced_motion":false,"difficulty":"Hard","show_hints":true,"player_name":"You","sfx_volume":.85,"announcer_volume":.9,"music_volume":.45,"audio_version":3,"background_theme":"crystal","board_theme":"crystal","tutorial_completed":false,"unlocked_backgrounds":[],"unlocked_heroes":[]}
 var values: Dictionary = DEFAULTS.duplicate(true)
 var saved_game = {}
-func _init(file_path: String = "user://nineweave.cfg"):
-	path = file_path
+func _init(file_path: String = ""):
+	path = AppEnvironment.save_path("nineweave.cfg") if file_path.is_empty() else file_path
 	var c = ConfigFile.new()
 	# Round 3b: a binary-corrupt file (NULs from a torn write) is treated as missing
 	# instead of handing it to the text parser, which logs engine errors.

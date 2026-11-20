@@ -11,8 +11,8 @@ signal chat_failed(message: String)
 signal chat_sent
 signal link_changed(reconnecting: bool)
 signal clock_changed
-const ROOM_KEYS = ["tournament","status","private","opponent","opponent_left","result","end_reason","turn_expires_at","protocol","turn_started_at","still_there_at","still_here_used","consecutive_late_turns","opponent_consecutive_late_turns","turn_late_limit","turn_seconds","still_there_seconds","grace_seconds","both_moved","opponent_joined_at","opponent_last_seen_at","opponent_connected","you","players","poll_after_ms"]
-var base_url: String = LIVE_ORIGIN
+const ROOM_KEYS = ["opening","tournament","status","private","opponent","opponent_left","result","end_reason","turn_expires_at","protocol","turn_started_at","still_there_at","still_here_used","consecutive_late_turns","opponent_consecutive_late_turns","turn_late_limit","turn_seconds","still_there_seconds","grace_seconds","both_moved","opponent_joined_at","opponent_last_seen_at","opponent_connected","you","players","poll_after_ms"]
+var base_url: String = API.AppEnvironment.origin()
 var device_token: String = ""
 var token: String = "" # Seat only; never copied into the device store.
 var private_room: bool = false
@@ -43,6 +43,8 @@ var _chat_busy: bool = false
 var _chat_more: bool = false
 var _still_here_turn: String = ""
 var _last_stamp: float = 0.0
+var _board_ready_retry_at := 0.0
+var _board_ready_denied_round := 0
 func _ready():
 	api.base_url = base_url; api.completed.connect(_response); add_child(api); base_url = api.base_url
 	aux_api.base_url = base_url; aux_api.completed.connect(_aux_response); add_child(aux_api)
@@ -58,6 +60,7 @@ func _send(path: String, method: int, body: Dictionary, operation: String) -> vo
 func lobby_payload() -> Dictionary:
 	var payload = super.lobby_payload()
 	payload["private"] = private_room
+	payload["board_ready_v1"] = true
 	if not password.is_empty(): payload["password"] = password
 	return payload
 func create_room() -> void:
@@ -71,20 +74,24 @@ func join_room(room_code: String) -> void:
 		if not ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789": code = ""; error.emit("Use letters and numbers in the room code"); return
 	if password.length() > 64: code = ""; error.emit("Passwords can have at most 64 characters."); return
 	var payload = super.lobby_payload()
+	payload["board_ready_v1"] = true
 	if not password.is_empty(): payload["password"] = password
 	_send("/rooms/"+code+"/join",HTTPClient.METHOD_POST,payload,"join")
 func send_move(board: int, cell: int, seq: int) -> void:
+	if opening_pending(): return
 	if _inflight not in ["","poll"]: error.emit("Syncing room. Try again in a moment."); return
 	_send("/rooms/"+code+"/moves",HTTPClient.METHOD_POST,{"board":board,"cell":cell,"seq":seq,"token":token},"move")
 func _poll():
 	if _inflight.is_empty() and not code.is_empty() and not token.is_empty():
-		_send("/rooms/"+code+"?since="+str(sequence)+("&chat_since="+str(chat_since) if chat_enabled else ""),HTTPClient.METHOD_GET,{},"poll")
+		var opening_opt_in := "&board_ready_v1=1" if room.get("tournament") is Dictionary else ""
+		_send("/rooms/"+code+"?since="+str(sequence)+("&chat_since="+str(chat_since) if chat_enabled else "")+opening_opt_in,HTTPClient.METHOD_GET,{},"poll")
 ## Hidden web tab (document.visibilityState) or unfocused/backgrounded app.
 func is_hidden() -> bool:
 	if background: return true
 	return OS.has_feature("web") and str(JavaScriptBridge.eval("document.visibilityState")) == "hidden"
 func poll_delay_ms() -> int:
 	var ms = Clock.poll_ms(room,seat,is_hidden())
+	if ms > 0 and opening_pending() and not is_hidden(): ms = mini(ms,1000)
 	if ms > 0 and reconnecting: ms = maxi(Clock.backoff_ms(poll_failures),Clock.HIDDEN_POLL_MS if is_hidden() else 0)
 	return ms
 func _schedule():
@@ -100,6 +107,15 @@ func set_background(value: bool):
 	if not value and is_instance_valid(_timer) and not _timer.is_stopped() and _timer.time_left*1000.0 > poll_delay_ms(): _schedule()
 func _response(operation: String, response_code: int, data: Dictionary, problem: String):
 	_inflight = ""
+	if operation == "board_ready":
+		# This acknowledgement is idempotent. Poll normally on hiccups and retry
+		# only while the current board is still actionable and expects our ack.
+		if data.has("state"): _envelope(data)
+		if not problem.is_empty() and response_code in [400,401,403,404,405,422]:
+			_board_ready_denied_round = match_round
+		_board_ready_retry_at = now()+1.0
+		_schedule()
+		return
 	if not problem.is_empty():
 		if operation == "poll" and (response_code == 0 or response_code >= 500 or response_code in [408,429]):
 			# Keep retrying quietly with backoff; the server grants a 60 s grace.
@@ -133,7 +149,9 @@ func _envelope(data: Dictionary):
 	if data.has("characters"):
 		if not data.characters is Dictionary or not receive_characters(data.characters): seat = old_seat; return
 	if info is Dictionary: receive_match_info(info)
-	if match_round > previous_round: sequence = 0
+	if match_round > previous_round:
+		sequence = 0
+		room.erase("opening"); _board_ready_retry_at = 0.0; _board_ready_denied_round = 0
 	_absorb_room(data)
 	var opponent = Clock.opponent_name(data,seat)
 	if not opponent.is_empty():
@@ -157,12 +175,26 @@ func _envelope(data: Dictionary):
 func _absorb_room(data: Dictionary):
 	if (data.get("protocol") is int or data.get("protocol") is float) and int(data.protocol) >= 2: online2 = true
 	var stamp = Clock.parse(data.get("server_now"))
-	if stamp > 0:
-		if stamp+0.001 < _last_stamp:
-			_receive_chat(data); return
-		_last_stamp = stamp; clock_offset = stamp-now()
+	if stamp > 0 and stamp+0.001 < _last_stamp:
+		_receive_chat(data); return
+	var previous_opening = room.get("opening")
+	var candidate_opening = data.get("opening")
+	if previous_opening is Dictionary and previous_opening.get("waiting") == false and candidate_opening is Dictionary and candidate_opening.get("waiting") == true:
+		# Some servers can issue equal timestamps; do not replace a running
+		# clock with an older snapshot from before the second readiness ack.
+		_receive_chat(data); return
+	if stamp > 0: _last_stamp = stamp; clock_offset = stamp-now()
 	for key in ROOM_KEYS:
-		if data.has(key): room[key] = data[key]
+		if data.has(key):
+			if key == "opening" and data.opening is Dictionary:
+				var old = room.get("opening")
+				var next: Dictionary = data.opening.duplicate()
+				if old is Dictionary:
+					# Equal-stamp polls/aux replies must not undo acknowledged readiness.
+					if old.get("you_ready") == true: next.you_ready = true
+					if old.get("opponent_ready") == true: next.opponent_ready = true
+				room.opening = next
+			else: room[key] = data[key]
 	if data.get("state") is Dictionary: room.state = data.state
 	room.seat = seat
 	_receive_chat(data)
@@ -182,7 +214,16 @@ func _receive_chat(data: Dictionary):
 	# A full page means more are waiting: fetch the rest on the next tick.
 	var seq = data.get("chat_seq")
 	if (seq is int or seq is float) and int(seq) > chat_since and data.chat.size() >= 50: _chat_more = true
+func opening_pending() -> bool:
+	var opening = room.get("opening")
+	return room.get("status") == "active" and opening is Dictionary and opening.get("waiting") == true
+func acknowledge_board() -> void:
+	if not opening_pending() or room.opening.get("you_ready") == true or _board_ready_denied_round == match_round: return
+	if is_hidden() or code.is_empty() or token.is_empty() or now() < _board_ready_retry_at: return
+	if not _inflight.is_empty(): return
+	_send("/rooms/"+code+"/board-ready",HTTPClient.METHOD_POST,{"round":match_round,"token":token},"board_ready")
 func my_turn() -> bool:
+	if opening_pending(): return false
 	var state = room.get("state",{})
 	return str(room.get("status","")) == "active" and state is Dictionary and int(state.get("turn",0)) == seat
 ## Unknown both_moved (round 1–4 server): an active match counts as a loss to leave.
@@ -191,6 +232,7 @@ func leave_costs_loss() -> bool:
 	if room.has("both_moved"): return bool(room.both_moved)
 	return true
 func turn_phase() -> Dictionary:
+	if opening_pending(): return {"phase":"none","mine":false,"remaining":0.0,"fraction":0.0,"tier":"calm","turn":0}
 	return Clock.phase(room,seat,clock_offset,now())
 func can_still_here() -> bool:
 	return online2 and my_turn() and not bool(room.get("still_here_used",false)) and _still_here_turn != str(room.get("turn_started_at",""))
@@ -250,10 +292,11 @@ func leave() -> void:
 	match_round = 1; reset_agreement(); _left_emitted = false; _opponent_connected = false
 	room = {}; chat_since = 0; chat_log = []; _chat_ids = {}; _chat_busy = false; _still_here_turn = ""; _last_stamp = 0.0
 	reconnecting = false; poll_failures = 0; chat_retry_until = 0.0
+	_board_ready_retry_at = 0.0; _board_ready_denied_round = 0
 func request_rematch() -> void:
 	if room.get("tournament") is Dictionary: return
 	if _inflight not in ["","poll"] or local_rematch or token.is_empty(): return
-	_send("/rooms/"+code+"/rematch",HTTPClient.METHOD_POST,{"round":match_round,"token":token},"rematch")
+	_send("/rooms/"+code+"/rematch",HTTPClient.METHOD_POST,{"round":match_round,"token":token,"board_ready_v1":true},"rematch")
 
 func enter_tournament_match(match_info: Dictionary):
 	# Already seated by online3: never POST /join or use the device token as a seat.

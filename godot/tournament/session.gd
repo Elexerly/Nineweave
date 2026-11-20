@@ -1,4 +1,5 @@
 extends RefCounted
+const AppEnvironment = preload("res://net/game_environment.gd")
 ## Local tournament policy + one atomic save. No network dependencies.
 const Bracket = preload("res://tournament/bracket.gd")
 const Roster = preload("res://characters/roster.gd")
@@ -9,8 +10,8 @@ var path: String
 var active: Dictionary = {}
 var wins: Dictionary = {}
 var last_events: Array = []
-func _init(save_path: String = "user://nineweave-tournament.cfg"):
-	path = save_path
+func _init(save_path: String = ""):
+	path = AppEnvironment.save_path("nineweave-tournament.cfg") if save_path.is_empty() else save_path
 	var cfg = ConfigFile.new()
 	if FileAccess.file_exists(path) and not FileAccess.get_file_as_bytes(path).has(0) and cfg.load(path) == OK:
 		var counts = cfg.get_value("tournament","wins",{})

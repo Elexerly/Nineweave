@@ -1,5 +1,6 @@
 extends Node
 ## Verified Ogg files only. Readiness is an O(1) lookup; prefetch never awaits HTTP.
+const AppEnvironment = preload("res://net/game_environment.gd")
 const Roster = preload("res://characters/roster.gd")
 # Bump when approved media replaces clips at the same sidecar URLs.
 const CONTENT_VERSION = "r5s-hero-redo"
@@ -8,7 +9,7 @@ const MAX_CLIPS = 8
 const MAX_ATTEMPTS = 3
 const MAX_DOWNLOADS = 2
 const RETRY_SECONDS = .25
-var root_path: String = "user://hero_video"
+var root_path: String = AppEnvironment.save_path("hero_video")
 var max_bytes: int = MAX_BYTES
 var max_clips: int = MAX_CLIPS
 var catalog: Dictionary = {}

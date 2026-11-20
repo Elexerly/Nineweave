@@ -277,6 +277,8 @@ func _ready():
 func _show_startup_card():
 	if is_instance_valid(startup_card): return
 	startup_card = StartupCard.new()
+	startup_card.reduced_motion = bool(settings.values.reduced_motion)
+	startup_card.seam = layout.get("hinge",Rect2())
 	add_child(startup_card)
 	startup_card.dismissed.connect(func(): _tutorial_on_home())
 func _on_viewport_resize():
@@ -303,6 +305,7 @@ func _relayout():
 	if get_window().content_scale_size != Vector2i(logical): get_window().content_scale_size = Vector2i(logical)
 	layout = Layout.compute(logical,hinge_rect)
 	layout.scale = physical.x/logical.x
+	if is_instance_valid(startup_card): startup_card.seam = layout.hinge
 	if hinge_overlay: hinge_overlay.queue_redraw()
 	_last_size = logical
 	board.place(layout.board)

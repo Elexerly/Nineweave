@@ -6,6 +6,7 @@ const P = preload("res://ui/paint.gd")
 const Motion = preload("res://characters/cinematic_motion.gd")
 const Sway = preload("res://characters/victory_sway.gdshader")
 const VideoOverlay = preload("res://characters/hero_video_overlay.gd")
+const GoldLabel = preload("res://ui/gold_label.gd")
 const Badge = preload("res://characters/loser_badge.gdshader")
 signal finished(kind: String)
 signal buttons_ready
@@ -19,6 +20,9 @@ var winner_name: String = "YOU"
 var loser_name: String = "COMPUTER"
 var result_score: String = ""
 var front: Control
+var _gold_result_title: Label
+var _result_copy_key: Array = []
+var _result_copy_rows: Array = []
 var _sway: ShaderMaterial
 var _badge: ShaderMaterial
 var _dots_cool: ArrayMesh
@@ -50,6 +54,7 @@ func _ready():
 	front = Control.new(); front.mouse_filter = Control.MOUSE_FILTER_IGNORE; front.draw.connect(_draw_front); add_child(front)
 	video_overlay = VideoOverlay.new(); video_overlay.source = video_source; front.add_child(video_overlay)
 	video_overlay.finished.connect(_video_finished)
+	_gold_result_title = GoldLabel.new(); front.add_child(_gold_result_title); _gold_result_title.hide()
 func video_playing() -> bool: return is_instance_valid(video_overlay) and video_overlay.visible
 func duration() -> float:
 	# Videos end on decoder signals (the longer intro wins), never the old 3s clock.
@@ -119,10 +124,12 @@ func _place(layout: Dictionary, claimed_board: int):
 		_build_halftone(s)
 		if not combined_result: _build_letters(g)
 		else: _letters.clear()
+		_refresh_gold_result_title()
 		return
 	var safe = Rect2(Vector2(14,14),s-Vector2(28,28))
 	if seam.size.x > 0: safe = Rect2(seam.end.x+12,14,s.x-seam.end.x-26,s.y-28)
 	region = safe
+	_refresh_gold_result_title()
 	if kind == "pop":
 		region = pop_region(layout,claimed_board)
 		banner = region.size.y < CARD_MIN.y
@@ -250,6 +257,7 @@ func complete(preserve_video: bool = false):
 func clear():
 	if is_instance_valid(video_overlay): video_overlay.clear()
 	combined_result = false; active = false; visible = false; kind = ""; buttons_shown = false; mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if is_instance_valid(_gold_result_title): _gold_result_title.hide()
 	position = Vector2.ZERO; scale = Vector2.ONE; modulate.a = 1
 func buttons_at() -> float: return .25 if reduced_motion else Motion.BUTTONS_AT
 func buttons_progress() -> float:
@@ -745,58 +753,106 @@ func _wrapped(value: String, rect: Rect2, fs: int, color: Color):
 	var line_h = minf(P.SANS.get_height(fs)+2,rect.size.y/maxi(1,lines.size()))
 	for i in range(lines.size()):
 		P.text(front,lines[i],Rect2(rect.position+Vector2(0,i*line_h),Vector2(rect.size.x,line_h)),fs,color,P.SANS,HORIZONTAL_ALIGNMENT_LEFT)
-## Shared by rendering and tests: every next baseline follows the measured
-## previous block, including font ascent/descent, keyline and inter-block padding.
-func result_text_layout(s: Vector2) -> Array:
+## Break genuinely oversized tokens instead of shrinking the entire line to dust.
+static func result_wrapped_lines(value: String, width: float, fs: int) -> Array:
+	var tokens: Array[String] = []
+	for word in value.split(" ",false):
+		if P.text_width(word,fs) <= width:
+			tokens.append(word); continue
+		var chunk := ""
+		for glyph in word:
+			if not chunk.is_empty() and P.text_width(chunk+glyph,fs) > width:
+				tokens.append(chunk); chunk = ""
+			chunk += glyph
+		if not chunk.is_empty(): tokens.append(chunk)
+	var lines: Array[String] = []
+	var line := ""
+	for token in tokens:
+		var candidate := token if line.is_empty() else line+" "+token
+		if not line.is_empty() and P.text_width(candidate,fs) > width:
+			lines.append(line); line = token
+		else: line = candidate
+	if not line.is_empty(): lines.append(line)
+	return lines
+## Text has its own padded right-hand column. Hero art and action rects are unchanged.
+func result_text_layout(s: Vector2, seam: Rect2 = Rect2()) -> Array:
 	var g = combined_geometry(s)
-	var short = s.y < 500
-	var title_fs = 40 if short or s.x < 700 else 48
-	var name_fs = 24 if short else (28 if s.x < 700 else 32)
-	var body_fs = 22 if short else (20 if s.x < 700 else 24)
-	var score_fs = 16 if short or s.x < 700 else 20
-	var winner = R.get_hero(winner_id).name
-	var defeated = R.get_hero(loser_id).name
-	var values = [result_title,winner_name+" WINS",winner+" won and defeated "+defeated+".",result_score]
-	var fonts = [title_fs,name_fs,body_fs,score_fs]
-	var colors = [P.GOLD,P.WHITE,P.PALE,P.MUTED]
-	var gap = 12.0 if short else 14.0
-	var text_top = 46.0 if short else maxf(64,minf(s.y*.14,90))
 	var width: float = g.name.size.x
-	var available: float = g.again.position.y-text_top-18
+	var inset := clampf(width*.04,7.0,25.0)
+	var left: float = g.name.position.x+inset
+	if seam.has_area() and left < seam.end.x and seam.end.x < g.name.end.x: left = seam.end.x+inset
+	width = maxf(14,g.name.end.x-inset-left)
+	var short := s.y < 500
+	var top := maxf(48,minf(s.y*.1,105))
+	var bottom: float = g.again.position.y-13.0
+	var available := maxf(1.0,bottom-top)
+	var gap := clampf(available*.037,8.0,21.0)
+	var name_text := winner_name.strip_edges()
+	var winner: String = R.get_hero(winner_id).name if R.valid(winner_id) else ""
+	var defeated: String = R.get_hero(loser_id).name if R.valid(loser_id) else ""
+	var outcome := ""
+	if not winner.is_empty() and not defeated.is_empty(): outcome = winner+" defeats "+defeated
+	elif not winner.is_empty() and name_text.is_empty(): outcome = winner+" wins"
+	var values := [result_title,name_text,outcome,result_score,result_detail]
+	var kinds := ["heading","player","matchup","score","detail"]
+	var fonts := [
+		maxi(24,mini(80,roundi(width*.27))),
+		clampi(roundi(width*.093),14,33),
+		clampi(roundi(width*.079),12,27),
+		clampi(roundi(width*.061),11,22),
+		14 if short else 17
+	]
+	var colors := [P.GOLD,P.WHITE,P.PALE,P.MUTED,P.PALE]
 	var sections: Array = []
-	for attempt in range(40):
+	for attempt in range(42):
 		sections.clear()
-		var y: float = text_top
+		var y := 0.0
 		for i in range(values.size()):
+			var value: String = values[i].strip_edges()
+			if value.is_empty(): continue
+			var font: Font = P.DISPLAY if i == 0 else P.SANS
 			var fs: int = fonts[i]
-			# A single long screen name must fit without hidden per-line shrinking.
-			for word in values[i].split(" "):
-				fs = mini(fs,P.fit_size(word,width-12,fs,P.SANS))
-			var lines = wrapped_lines(values[i],width-12,fs)
-			var border = maxi(2,int(fs*.14))
-			var line_h = P.SANS.get_ascent(fs)+P.SANS.get_descent(fs)+border*2+4
-			var rect = Rect2(g.name.position.x,y,width,lines.size()*line_h)
-			sections.append({"lines":lines,"font_size":fs,"border":border,"line_height":line_h,"rect":rect,"color":colors[i]})
+			if i == 0: fs = mini(fs,P.fit_size(value,width-10,fs,font))
+			var lines: Array = [value] if i == 0 else result_wrapped_lines(value,width-9,fs)
+			var border := maxi(2,roundi(fs*.085))
+			var line_h := font.get_height(fs)+border*2+3
+			var rect := Rect2(left,y,width,lines.size()*line_h)
+			sections.append({"lines":lines,"font":font,"kind":kinds[i],"font_size":fs,"border":border,"line_height":line_h,"rect":rect,"color":colors[i]})
 			y = rect.end.y+gap
-		if y-gap-text_top <= available:
-			if not result_detail.is_empty():
-				var fs = 14 if s.x < 700 else 18
-				var lines = wrapped_lines(result_detail,width-12,fs)
-				var border = maxi(2,int(fs*.14))
-				var line_h = P.SANS.get_ascent(fs)+P.SANS.get_descent(fs)+border*2+4
-				if y+lines.size()*line_h <= g.again.position.y-18:
-					sections.append({"lines":lines,"font_size":fs,"border":border,"line_height":line_h,"rect":Rect2(g.name.position.x,y,width,lines.size()*line_h),"color":P.PALE})
+		var content_height := maxf(0.0,y-gap)
+		if content_height <= available or attempt == 41:
+			var offset := top+maxf(0.0,(available-content_height)*.29)
+			for row in sections: row.rect.position.y += offset
 			return sections
-		# Preserve the display hierarchy. Only shrink to fit a genuinely short view.
-		for i in range(fonts.size()): fonts[i] = maxi(11,fonts[i]-1)
+		for i in range(fonts.size()): fonts[i] = maxi(10,fonts[i]-1)
+		gap = maxf(6,gap-.45)
 	return sections
+func _current_result_rows() -> Array:
+	var seam: Rect2 = _layout.get("hinge",Rect2())
+	var key := [region.size,seam,result_title,winner_name,winner_id,loser_id,result_score,result_detail]
+	if key != _result_copy_key:
+		_result_copy_key = key
+		_result_copy_rows = result_text_layout(region.size,seam)
+	return _result_copy_rows
+func _refresh_gold_result_title():
+	if not is_instance_valid(_gold_result_title): return
+	_gold_result_title.visible = combined_result and visible and result_title == "VICTORY"
+	if not _gold_result_title.visible: return
+	for row in _current_result_rows():
+		if row.kind == "heading":
+			_gold_result_title.place(row.rect,result_title,row.font,row.font_size,reduced_motion)
+			break
 func _draw_combined():
 	var s = region.size; var g = combined_geometry(s)
 	P.text(front,"LEXERLY / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
 	P.outline(front,g.hero.grow(2),Color(P.GOLD,.55),1)
-	for section in result_text_layout(s):
+	for section in _current_result_rows():
+		if section.kind == "heading" and result_title == "VICTORY": continue
 		var fs: int = section.font_size
+		var font: Font = section.font
 		for i in range(section.lines.size()):
-			var baseline = section.rect.position+Vector2(4,section.border+P.SANS.get_ascent(fs)+i*section.line_height)
-			front.draw_string_outline(P.SANS,baseline+Vector2(0,1),section.lines[i],HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.border,Color(0,0,0,.75))
-			front.draw_string(P.SANS,baseline,section.lines[i],HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.color)
+			var line: String = section.lines[i]
+			var x: float = section.rect.get_center().x-font.get_string_size(line,HORIZONTAL_ALIGNMENT_LEFT,-1,fs).x*.5
+			var baseline := Vector2(x,section.rect.position.y+section.border+font.get_ascent(fs)+i*section.line_height)
+			front.draw_string_outline(font,baseline+Vector2(0,1),line,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.border,Color(0,0,0,.75))
+			front.draw_string(font,baseline,line,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.color)

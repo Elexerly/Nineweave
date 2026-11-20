@@ -45,12 +45,14 @@ func run():
 func lazy_selection():
 	ok(Art.textures.is_empty(),"no eager hero texture loads")
 	var select = Select.new(); select.selected_id = "kellen_byte"; select.size = Vector2(390,844); root.add_child(select)
-	ok(select.page == 2 and Art.textures.size() == 9,"only selected splash plus eight current-page heads")
+	var initial = select.portraits.filter(func(tile): return tile.visible).size()
+	ok(select.scroll_offset > 0 and initial < select.portraits.size() and Art.textures.size() == initial+1,"only selected splash plus viewport heads loaded")
 	for path in Art.textures:
 		ok(path.ends_with("/splash.webp") if "kellen_byte" in path and path.ends_with("/splash.webp") else path.ends_with("/head_neutral.webp"),"no versus/victory/expressions loaded by selection")
-	select.set_page(3)
-	ok(Art.textures.size() == 17,"paging loads only the next eight heads")
-	ok(not Art.textures.has("res://assets/heroes/cryon/head_neutral.webp"),"unvisited pages remain unloaded")
+	select.reveal_index(select.portraits.size()-1)
+	var bottom = select.portraits.filter(func(tile): return tile.visible).size()
+	ok(Art.textures.size() > initial+1 and Art.textures.size() <= initial+bottom+1,"only visited scroll regions load heads")
+	ok(not Art.textures.has("res://assets/heroes/cryon/head_neutral.webp"),"unvisited rows remain unloaded")
 	select.queue_free(); await frames()
 func assets():
 	ok(R.DATA.size() == 35 and R.selectable_indices().size() == 32,"32 public plus secret Nick, Professor and JB")
@@ -101,36 +103,19 @@ func selection(ui):
 	for s in SIZES:
 		ui.set_view_size(s); ui.request_game("computer")
 		var select = ui.hero_select; var g = select.geo; var view = Rect2(Vector2.ZERO,s)
-		var phone = Layout.mode_for(s) == "phone_portrait"
-		ok(g.pages == 4 and g.per_page == 8 and g.columns == 4 and g.rows == 2 if phone else (g.per_page == 32 and g.pages == 1 and g.columns == 8 and g.rows == 4) or (g.pages == 2 and g.per_page == 16),"adaptive grid "+str(s))
-		ok(select.paging_controls.size() == (g.pages+2 if g.paged else 0),"arrow and dot count "+str(s))
-		var seen = {}
-		for page in range(g.pages):
-			select.set_page(page)
-			for tile in select.portraits:
-				if not tile.visible: continue
-				seen[tile.index] = true
-				var minimum = 56 if g.per_page == 32 else 44
-				ok(tile.size.x >= minimum and tile.size.y >= minimum and view.encloses(tile.get_rect()),"tile size/viewport "+str(s)+str(tile.index))
-				var lines = R.tile_lines(R.DATA[tile.index].id)
-				for line in lines:
-					ok(P.text_width(line,P.fit_size(line,tile.size.x-8,14)) <= tile.size.x-8,"tile label fits "+line+str(s)+str(tile.size))
-				ok(tile.rig.texture != null and tile.rig.visible_art_rect().has_area(),"visible page head "+str(tile.index))
-		ok(seen.size() == 32,"every hero reachable "+str(s))
+		ok(g.columns == 4 and g.tiles.size() == select.visible_indices.size(),"adaptive complete grid "+str(s))
+		for tile in select.portraits:
+			select.reveal_index(tile.display_index)
+			ok(tile.visible and tile.size.x >= 44 and tile.size.y >= 44,"tile size and reachability "+str(s)+str(tile.index))
+			for line in R.tile_lines(R.DATA[tile.index].id):
+				ok(P.text_width(line,P.fit_size(line,tile.size.x-8,14)) <= tile.size.x-8,"tile label fits "+line+str(s))
+			ok(tile.rig.texture != null and tile.rig.visible_art_rect().has_area(),"visible scrolled head "+str(tile.index))
+
 		for key in ["hero","plaque","field","confirm"]: ok(view.encloses(g[key]) and g[key].has_area(),"detail/control fits "+key+str(s))
 		ok(not g.hero.intersects(g.grid) and not g.plaque.intersects(g.grid),"splash/detail clear of grid "+str(s))
 		ok(select.field.get_theme_stylebox("normal") is StyleBoxEmpty and select.field.placeholder_text == "Your screen name","styled screen name retains placeholder")
 		select.field.text = "Test Weaver"; select.field.text_changed.emit(select.field.text)
 		ok(select.display_name == "Test Weaver","screen name editing retained")
-		if g.paged:
-			select.set_page(0); select.paging_controls[0].pressed.emit(); ok(select.page == g.pages-1,"left arrow wraps")
-			select.paging_controls[1].pressed.emit(); ok(select.page == 0,"right arrow wraps")
-			for dot in range(g.pages): select.paging_controls[2+dot].pressed.emit(); ok(select.page == dot,"page dot "+str(dot))
-			select.set_page(0)
-			var touch = InputEventScreenTouch.new(); touch.pressed = true; touch.position = Vector2(280,400); select._input(touch)
-			touch = InputEventScreenTouch.new(); touch.pressed = false; touch.position = Vector2(100,400); select._input(touch)
-			ok(select.page == 1,"left touch swipe advances")
-			select.swipe(Vector2(100,0)); ok(select.page == 0,"right swipe reverses")
 		await frames(1)
 	var folded = Select.geometry(Vector2(867,553),Rect2(426,0,15,553))
 	for tile in folded.tiles:

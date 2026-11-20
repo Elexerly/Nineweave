@@ -170,7 +170,7 @@ func run():
 		ok(ui.layout.has("character") == (ui.layout.mode in ["duo_landscape","duo_portrait"]),"Duo-only side panel "+str(size_value))
 		ok(ui.hero_state(1) == "idle_power" and ui.hero_state(2) == "idle_stagger","board count controls stance "+str(ui.game.owners)+" states="+ui.hero_state(1)+"/"+ui.hero_state(2))
 		var geo = Select.geometry(size_value)
-		for rect in geo.tiles: ok(Rect2(Vector2.ZERO,size_value).encloses(rect) and rect.size.x >= 44 and rect.size.y >= 44,"all roster tiles fit touch targets "+str(size_value))
+		for rect in geo.tiles: ok(rect.position.x >= geo.grid.position.x and rect.end.x <= geo.grid.end.x and rect.end.y-geo.scroll_max <= geo.grid.end.y and rect.size.x >= 44 and rect.size.y >= 44,"all roster tiles fit reachable touch targets "+str(size_value))
 		for scenario in ["character_select","lock_in","claim_pop","win_spotlight","duo_panel"]:
 			ui.debug_scenario(scenario,.5); ui.debug_refresh()
 			await process_frame

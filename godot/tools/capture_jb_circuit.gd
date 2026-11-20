@@ -30,7 +30,7 @@ func run():
 		if scenario == "professor_unlocked": main.settings.values.unlocked_heroes = ["nick","professor_gilt"]
 		main.page = "character_select"; main._rebuild()
 		main.hero_select.focus_hero("professor_gilt" if scenario == "professor_unlocked" else main.profile.data.character_id)
-		if scenario == "professor_unlocked": main.hero_select.set_page(main.hero_select.geo.pages-1)
+		if scenario == "professor_unlocked": main.hero_select.reveal_hero("professor_gilt")
 	elif scenario in ["versus","versus_still"]:
 		if scenario == "versus_still": main.cinematic.video_source.catalog = {}
 		main.start_game("computer",1,true,true)

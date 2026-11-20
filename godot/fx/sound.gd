@@ -53,6 +53,7 @@ func _ready():
 	for i in range(10):
 		var p = AudioStreamPlayer.new(); add_child(p); _players.append(p)
 	_voice = AudioStreamPlayer.new(); _voice.bus = "Announcer"; add_child(_voice)
+	_voice.finished.connect(_voice_finished)
 	_unlock_player = AudioStreamPlayer.new(); _unlock_player.volume_db = -80; add_child(_unlock_player)
 	cache.unlock = generate("unlock")
 	_warm = ["ui","place_x","place_o","invalid","route","claim","victory","defeat","draw"]
@@ -132,7 +133,7 @@ func advance_mix(delta: float):
 	if _announcer_left > 0:
 		remaining = maxf(0,delta-_announcer_left)
 		_announcer_left = maxf(0,_announcer_left-delta)
-		if versus_prelude_playing(): _announcer_left = maxf(.001,_announcer_left)
+		if versus_prelude_playing() or _result_voice_playing(): _announcer_left = maxf(.001,_announcer_left)
 		if _announcer_left == 0: voice_id = ""; _gap_left = VOICE_GAP
 	if _announcer_left == 0: _gap_left = maxf(0,_gap_left-remaining); _drain_voice()
 	# Lines waiting for the first gesture are silent; they must not hold music/SFX ducked.
@@ -164,6 +165,20 @@ func play_versus_prelude() -> float:
 	return _announcer_left
 func versus_prelude_playing() -> bool:
 	return enabled and voice_id == "versus_prelude" and is_instance_valid(_voice) and _voice.playing
+## Keep the board celebration visible until result speech AND its recorded tail
+## complete. Check the player, not just estimated stream duration: Web audio may
+## start late. Headless tests retain the deterministic duration fallback.
+func _voice_finished():
+	if voice_id in RESULT_VOICES:
+		_announcer_left = 0; voice_id = ""; _gap_left = VOICE_GAP
+func _result_voice_playing() -> bool:
+	return voice_id in RESULT_VOICES and is_instance_valid(_voice) and _voice.playing
+func result_announcement_pending() -> bool:
+	if not enabled or not unlocked or hero_video_audio or float(volumes.announcer_volume) <= 0: return false
+	if voice_id in RESULT_VOICES and (_announcer_left > 0 or _result_voice_playing()): return true
+	for entry in voice_queue:
+		if entry.id in RESULT_VOICES: return true
+	return false
 func stop_versus_prelude():
 	if voice_id == "versus_prelude": clear_announcer()
 func play_versus_clash():

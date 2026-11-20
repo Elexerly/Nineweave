@@ -1,4 +1,6 @@
 extends Control
+const KeyboardSafe = preload("res://ui/keyboard_safe_form.gd")
+var keyboard_safe = KeyboardSafe.new()
 const P = preload("res://ui/paint.gd")
 const ButtonArt = preload("res://ui/ornate_button.gd")
 const Store = preload("res://net/device_store.gd")
@@ -13,6 +15,7 @@ func _ready():
 	queue_redraw()
 	var scroll = ScrollContainer.new(); scroll.position = panel_rect.position+Vector2(18,18); scroll.size = panel_rect.size-Vector2(36,36)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; add_child(scroll)
+	keyboard_safe.attach(self,scroll)
 	var box = VBoxContainer.new(); box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation",14); scroll.add_child(box)
 	label(box,"WELCOME BACK",28)
@@ -30,7 +33,9 @@ func _ready():
 	if not flow.challenge.is_empty():
 		var code = LineEdit.new(); code.text = flow.code; code.placeholder_text = "6-digit email code"; code.max_length = 6; code.custom_minimum_size.y = 52
 		style_field(code); code.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
-		code.editable = not flow.busy; code.text_changed.connect(func(value): flow.code = value); code.text_submitted.connect(func(_v): action.emit("confirm"))
+		code.editable = not flow.busy; code.text_changed.connect(func(value):
+			flow.code = value
+			keyboard_safe.code_changed(value,code,controls.get("confirm_recovery"))); code.text_submitted.connect(func(_v): action.emit("confirm"))
 		box.add_child(code); controls.recovery_code = code
 		button(box,"confirm_recovery","Continue · Sign in","confirm").disabled = flow.busy
 	controls.message = label(box,flow.message,18)

@@ -372,7 +372,7 @@ func _process(delta):
 			hint_busy = false
 			# Only show a hint computed for the position still on the board.
 			if _hint_ply == game.history.size() and game.is_legal(hint_ai.best_move.x,hint_ai.best_move.y): board.hint_move = hint_ai.best_move
-	if page == "game" and not tutorial.active and game.status != 0 and not board.win_fx.is_empty() and board.win_progress() >= RESULT_AT and not _result_shown:
+	if page == "game" and not tutorial.active and game.status != 0 and not board.win_fx.is_empty() and board.win_progress() >= RESULT_AT and not _result_shown and not sound.result_announcement_pending():
 		if not _spotlight_done:
 			if not cinematic.active:
 				board.frozen = true
@@ -489,6 +489,13 @@ func _input(event):
 	if tap and overlay == "settings":
 		var difficulty_control = controls.get("difficulty")
 		if pointer and (not is_instance_valid(difficulty_control) or not difficulty_control.get_global_rect().has_point(event.position)): _code_taps = 0
+	# An explicit tap can skip the announcement hold, but must not also activate
+	# the result buttons appearing on the next frame.
+	if tap and page == "game" and game.status != 0 and overlay.is_empty() and not cinematic.active and sound.result_announcement_pending():
+		sound.clear_announcer()
+		get_viewport().set_input_as_handled()
+		if not event is InputEventKey: _skip_guard_until = Time.get_ticks_msec()+SKIP_GUARD_MS
+		return
 	var result_skip = false
 	if tap and cinematic and cinematic.combined_result:
 		var g = cinematic.result_geometry(layout.size)
@@ -2621,8 +2628,9 @@ func debug_scenario(scenario: String, progress: float = .45):
 		if scenario == "select_p2":
 			_confirm_hero("vesper_vale","PLAYER 1"); _hero_focus = "ryan_blaze"; _rebuild()
 		if is_instance_valid(hero_select):
-			hero_select.set_page(int(scenario.right(1))-1)
-			if scenario in ["select_p3","select_p4"]: hero_select.focus_hero(Roster.DATA[(int(scenario.right(1))-1)*8].id)
+			if scenario in ["select_p3","select_p4"]:
+				var id: String = Roster.DATA[(int(scenario.right(1))-1)*8].id
+				hero_select.focus_hero(id); hero_select.reveal_hero(id)
 		return
 	if scenario == "versus":
 		profile.data.character_id = OS.get_environment("NW_HERO") if OS.has_environment("NW_HERO") else "vesper_vale"; profile.data.display_name = "Patrick"; settings.values.player_name = "Patrick"

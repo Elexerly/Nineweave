@@ -64,24 +64,12 @@ func visible_tiles(select) -> Array:
 func selection(ui):
 	for entry in SIZES:
 		var s = Layout.logical_size(Vector2(entry[0],entry[1])); ui.set_view_size(s); ui.request_game("computer")
-		var select = ui.hero_select; var phone = Layout.mode_for(s) == "phone_portrait"
-		ok((select.geo.paged and select.geo.per_page == 8 and select.geo.pages == 4) if phone else (select.geo.per_page in [16,32] and select.geo.pages == (2 if select.geo.paged else 1)),"select mode "+str(s))
-		ok(visible_tiles(select).size() == select.geo.per_page,"visible count "+str(s))
-		ok(select.paging_controls.size() == (2+select.geo.pages if select.geo.paged else 0),"arrows and page dots when paged "+str(s))
-		for p in range(select.geo.pages):
-			select.set_page(p)
-			for tile in visible_tiles(select):
-				ok(tile.size.x >= 44 and tile.size.y >= 44 and Rect2(Vector2.ZERO,s).encloses(tile.get_rect()),"tile touch and viewport %s %d" % [s,tile.index])
-		if phone:
-			select.set_page(0); select.paging_controls[1].pressed.emit(); ok(select.page == 1,"next arrow")
-			select.paging_controls[0].pressed.emit(); ok(select.page == 0,"previous arrow")
-			select.paging_controls[3].pressed.emit(); ok(select.page == 1,"second page dot")
-			select.paging_controls[2].pressed.emit(); ok(select.page == 0,"first page dot")
-			var press = InputEventScreenTouch.new(); press.pressed = true; press.position = Vector2(280,440); select._input(press)
-			var release = InputEventScreenTouch.new(); release.pressed = false; release.position = Vector2(100,440); select._input(release)
-			ok(select.page == 1,"real touch swipe")
-			select.swipe(Vector2(100,0)); ok(select.page == 0,"right swipe")
-			select.change_page(-1); ok(select.page == select.geo.pages-1,"page wraps consistently")
+		var select = ui.hero_select
+		ok(select.geo.columns == 4 and select.geo.scroll_max > 0,"continuous roster "+str(s))
+		ok(select.grid_view.clip_contents,"viewport clips scrolled portraits")
+		for tile in select.portraits:
+			select.reveal_index(tile.display_index)
+			ok(tile.visible and tile.size.x >= 44 and tile.size.y >= 44,"reachable touch target %s %d" % [s,tile.index])
 		await frames(1)
 	ui.set_view_size(Vector2(390,844)); ui.request_game("local")
 	ok(ui.hero_select.heading.begins_with("PLAYER 1"),"P1 select header")

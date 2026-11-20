@@ -18,7 +18,7 @@ func run():
 	ok(R.selectable_indices(["nick","nick","fake"]).size() == 33,"duplicate/unknown grants cannot add roster entries")
 	for size in [Vector2(390,844),Vector2(867,553)]:
 		var g = Select.geometry(size,Rect2(),33)
-		ok(g.pages == (5 if size.x < size.y else 3),"unlocked Nick adds final page")
+		ok(g.tiles.size() == 33 and g.tiles[-1].end.y-g.scroll_max <= g.grid.end.y,"unlocked Nick adds a reachable final row")
 	for kind in ["intro","victory"]:
 		var clip = Audio.load_clip("res://assets/hero_video/nick/"+kind+".ogv")
 		ok(clip != null and clip.get_length() > 6.0 and clip.get_length() < 6.1,"separate Vorbis track " + kind)
@@ -33,8 +33,8 @@ func run():
 	ok(ui.settings.values.unlocked_heroes == ["nick"] and "Nick" in ui._code_message,"Nick redemption updates account inventory")
 	ui.page = "character_select"; ui._rebuild()
 	ok(ui.hero_select.portraits.size() == 33,"owned Nick appended to regular selection")
-	ui.hero_select.focus_hero("nick"); ui.hero_select.set_page(4)
-	ok(ui.hero_select.selected_id == "nick" and ui.hero_select.portraits[-1].visible,"Nick selectable on fifth phone page")
+	ui.hero_select.focus_hero("nick"); ui.hero_select.reveal_hero("nick")
+	ok(ui.hero_select.selected_id == "nick" and ui.hero_select.portraits[-1].visible,"Nick selectable at end of scroll grid")
 	ui._account_player({"unlocked_heroes":[],"last_hero_id":"nick"})
 	ui._rebuild()
 	ok(ui.hero_select.portraits.size() == 32,"account switch removes previous owner hero")

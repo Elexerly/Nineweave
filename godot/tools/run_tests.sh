@@ -9,7 +9,7 @@ LOGS=${LOGS:-/tmp/nineweave-test-logs}
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$LOGS"
 failed=0
 total=0
-for suite in rules ai layout ui round3 round3b round3c audio round3e round4 round4b round4c hero_video round4e round4g round5a round5b round5c round5d rename recovery versus_flow deletion signout hero_audio_playback hero_sync selector_readability comic_prelude recovery_layout result_spacing hero_redo native_readiness match_ad_gate store_entitlement consent_snapshot account_entry online_turn online_character online_audio tutorial_account idle_warning settings_responsive unlock unlock_contract nick intro_duration jb_circuit lexerly; do
+for suite in rules ai layout ui round3 round3b round3c audio round3e round4 round4b round4c hero_video round4e round4g round5a round5b round5c round5d rename recovery versus_flow deletion signout hero_audio_playback hero_sync selector_readability comic_prelude recovery_layout result_spacing hero_redo native_readiness match_ad_gate store_entitlement consent_snapshot account_entry online_turn online_character online_audio tutorial_account idle_warning settings_responsive unlock unlock_contract nick intro_duration jb_circuit lexerly keyboard_safe; do
   total=$((total+1))
   status=0
   script="res://tests/run_${suite}_tests.gd"

@@ -32,7 +32,7 @@ class Portrait extends Button:
 			var half = band*.5
 			P.text(self,lines[0],Rect2(3,size.y-band,size.x-6,half),fs,P.PALE,P.SANS)
 			P.text(self,lines[1],Rect2(3,size.y-band+half,size.x-6,half),fs,P.PALE,P.SANS)
-		if selected: P.outline(self,r.grow(-1),P.BLUE,2)
+		if selected or has_focus(): P.outline(self,r.grow(-1),P.BLUE,2)
 		if trophies > 0:
 			draw_rect(Rect2(size.x-27,3,24,17),Color("091224"))
 			preload("res://tournament/bracket_view.gd").trophy(self,Rect2(size.x-26,5,12,12),P.GOLD)
@@ -62,27 +62,42 @@ var hero
 var portraits: Array = []
 var field: LineEdit
 var confirm_button
-var page: int = 0
-var paging_controls: Array = []
-var _drag_start = Vector2.ZERO
+var grid_view: Control
+var grid_content: Control
+var scroll_offset := 0.0
+const DRAG_SLOP := 10.0
+var _pointer_index := -2 # -2 idle, -1 mouse, >= 0 touch ID
+var _pointer_start := Vector2.ZERO
+var _scroll_start := 0.0
+var _dragged := false
+var _pressed_tile := -1
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	visible_indices = R.selectable_indices(unlocked_heroes)
-	if not R.selectable(selected_id,unlocked_heroes): selected_id = R.DATA[visible_indices[0]].id
+	if not R.selectable(selected_id,unlocked_heroes) or selected_id == blocked_id:
+		for i in visible_indices:
+			if R.DATA[i].id != blocked_id:
+				selected_id = R.DATA[i].id
+				break
 	geo = geometry(size,hinge,visible_indices.size())
-	page = int(visible_indices.find(R.index_of(selected_id))/geo.per_page) if geo.paged else 0
 	hero = Rig.new(); hero.hero_id = selected_id; hero.bust = false; hero.art_key = "splash"
 	hero.position = geo.hero.position; hero.size = geo.hero.size; hero.reduced_motion = reduced_motion; add_child(hero)
+	grid_view = Control.new(); grid_view.position = geo.grid.position; grid_view.size = geo.grid.size
+	grid_view.clip_contents = true; grid_view.mouse_filter = Control.MOUSE_FILTER_STOP; add_child(grid_view)
+	grid_content = Control.new(); grid_content.mouse_filter = Control.MOUSE_FILTER_IGNORE; grid_view.add_child(grid_content)
 	for display_index in range(visible_indices.size()):
 		var i = visible_indices[display_index]
 		var tile = Portrait.new(); tile.index = i; tile.display_index = display_index; tile.selected = R.DATA[i].id == selected_id
 		tile.trophies = int(trophy_counts.get(R.DATA[i].id,0))
-		tile.position = geo.tiles[display_index%geo.per_page].position; tile.size = geo.tiles[display_index%geo.per_page].size
+		tile.position = geo.tiles[display_index].position-geo.grid.position; tile.size = geo.tiles[display_index].size
 		tile.disabled = R.DATA[i].id == blocked_id; tile.modulate.a = .28 if tile.disabled else 1.0
 		tile.pressed.connect(func(): focus_hero(R.DATA[i].id))
-		tile.focus_entered.connect(func(): focus_hero(R.DATA[i].id))
-		tile.visible = not geo.paged or int(display_index/geo.per_page) == page
-		add_child(tile); portraits.append(tile)
+		tile.focus_entered.connect(func(): reveal_index(display_index); focus_hero(R.DATA[i].id); tile.queue_redraw())
+		tile.focus_exited.connect(tile.queue_redraw)
+		tile.tooltip_text = R.get_hero(R.DATA[i].id).name
+		tile.hide() # Only load portrait textures once they enter the viewport.
+		grid_content.add_child(tile); portraits.append(tile)
+	_wire_grid_focus()
 	var exit_button = ButtonArt.new(); exit_button.icon_kind = "back"; exit_button.position = geo.back.position; exit_button.size = geo.back.size
 	exit_button.pressed.connect(func(): back.emit()); add_child(exit_button)
 	field = LineEdit.new(); field.position = geo.field.position; field.size = geo.field.size; field.text = display_name
@@ -100,42 +115,109 @@ func _ready():
 	confirm_button = ButtonArt.new(); confirm_button.caption = confirm_caption; confirm_button.accent = true
 	confirm_button.position = geo.confirm.position; confirm_button.size = geo.confirm.size
 	confirm_button.pressed.connect(_confirm); add_child(confirm_button)
-	if geo.paged:
-		for direction in [-1,1]:
-			var arrow = ButtonArt.new(); arrow.caption = "‹" if direction < 0 else "›"
-			arrow.position = Vector2(geo.nav.position.x if direction < 0 else geo.nav.end.x-44,geo.nav.position.y); arrow.size = Vector2(44,44)
-			arrow.pressed.connect(func(): change_page(direction)); add_child(arrow); paging_controls.append(arrow)
-		for dot in range(geo.pages):
-			var button = Button.new(); button.text = "•"; button.position = Vector2(geo.nav.get_center().x-geo.pages*22+dot*44,geo.nav.position.y); button.size = Vector2(44,44)
-			button.add_theme_font_override("font",P.SANS); button.add_theme_font_size_override("font_size",36)
-			for state in ["normal","hover","pressed","focus"]: button.add_theme_stylebox_override(state,StyleBoxEmpty.new())
-			button.pressed.connect(func(): set_page(dot)); add_child(button); paging_controls.append(button)
-	_sync_page()
-func _input(event):
-	if not geo.get("paged",false) or not is_visible_in_tree(): return
-	if event is InputEventScreenTouch:
-		if event.pressed: _drag_start = event.position
-		else: swipe(event.position-_drag_start)
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed: _drag_start = event.position
-		else: swipe(event.position-_drag_start)
-func swipe(distance: Vector2):
-	if absf(distance.x) > 48 and absf(distance.x) > absf(distance.y)*1.3:
-		change_page(1 if distance.x < 0 else -1)
-func change_page(direction: int): set_page(page+direction)
-func set_page(value: int):
-	page = posmod(value,geo.pages) if geo.paged else 0; _sync_page()
-func _sync_page():
+	reveal_hero(selected_id)
+	_update_visible_tiles()
+func _wire_grid_focus():
 	for tile in portraits:
-		var local_index = tile.display_index%geo.per_page
-		tile.position = geo.tiles[local_index].position; tile.size = geo.tiles[local_index].size
-		tile.visible = not geo.paged or int(tile.display_index/geo.per_page) == page
-		if is_instance_valid(tile.rig):
-			tile.rig.size = Vector2(tile.size.x-6,tile.size.y-tile.caption_height())
-			if tile.visible and tile.rig.texture == null: tile.rig.refresh_texture()
-	if geo.paged:
-		for dot in range(geo.pages): paging_controls[2+dot].add_theme_color_override("font_color",P.BLUE if page == dot else P.MUTED)
+		var column: int = tile.display_index % geo.columns
+		for link in [["focus_neighbor_left",-1,column],["focus_neighbor_right",1,geo.columns-1-column],["focus_neighbor_top",-geo.columns,geo.rows],["focus_neighbor_bottom",geo.columns,geo.rows]]:
+			for distance in range(1,link[2]+1):
+				var target: int = tile.display_index+link[1]*distance
+				if target < 0 or target >= portraits.size(): break
+				if portraits[target].disabled: continue
+				tile.set(link[0],tile.get_path_to(portraits[target]))
+				break
+		# Offscreen neighbors cannot receive built-in focus, so reveal them first.
+		tile.gui_input.connect(func(event): _grid_key(event,tile))
+func _grid_key(event: InputEvent, tile):
+	for link in [["ui_left",tile.focus_neighbor_left],["ui_right",tile.focus_neighbor_right],["ui_up",tile.focus_neighbor_top],["ui_down",tile.focus_neighbor_bottom]]:
+		if not event.is_action_pressed(link[0]) or link[1].is_empty(): continue
+		var target = tile.get_node_or_null(link[1])
+		if target:
+			reveal_index(target.display_index)
+			target.grab_focus()
+			tile.accept_event()
+		return
+func _input(event):
+	if not is_instance_valid(grid_view) or not is_visible_in_tree(): return
+	var local: Vector2
+	if event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventMouse or event is InputEventPanGesture:
+		local = get_global_transform_with_canvas().affine_inverse()*event.position
+	else: return
+	if event is InputEventPanGesture:
+		if geo.grid.has_point(local):
+			_set_scroll(scroll_offset+event.delta.y*32)
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_WHEEL_UP,MOUSE_BUTTON_WHEEL_DOWN]:
+		if event.pressed and geo.grid.has_point(local):
+			_set_scroll(scroll_offset+(1 if event.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1)*maxf(1.0,event.factor)*48)
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventScreenTouch:
+		if event.device == InputEvent.DEVICE_ID_EMULATION: return
+		if event.pressed: _begin_pointer(event.index,local)
+		else: _end_pointer(event.index,local,event.canceled)
+	elif event is InputEventScreenDrag:
+		if event.device != InputEvent.DEVICE_ID_EMULATION: _move_pointer(event.index,local)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		# Godot can dispatch a second, emulated mouse event for a real touch.
+		if event.device == InputEvent.DEVICE_ID_EMULATION:
+			if _pointer_index >= 0 or geo.grid.has_point(local): get_viewport().set_input_as_handled()
+			return
+		if event.pressed: _begin_pointer(-1,local)
+		else: _end_pointer(-1,local,false)
+	elif event is InputEventMouseMotion and event.device != InputEvent.DEVICE_ID_EMULATION:
+		_move_pointer(-1,local)
+func _begin_pointer(index: int, at: Vector2):
+	if not geo.grid.has_point(at): return
+	get_viewport().set_input_as_handled()
+	if _pointer_index != -2: return
+	_pointer_index = index
+	_pointer_start = at
+	_scroll_start = scroll_offset
+	_dragged = false
+	_pressed_tile = _tile_at(at)
+func _move_pointer(index: int, at: Vector2):
+	if _pointer_index != index: return
+	get_viewport().set_input_as_handled()
+	var delta = at-_pointer_start
+	_dragged = _dragged or delta.length() >= DRAG_SLOP
+	if _dragged: _set_scroll(_scroll_start-delta.y)
+func _end_pointer(index: int, at: Vector2, canceled: bool):
+	if _pointer_index != index: return
+	_move_pointer(index,at)
+	var target = _tile_at(at)
+	if not canceled and not _dragged and target >= 0 and target == _pressed_tile and not portraits[target].disabled:
+		portraits[target].grab_focus()
+		focus_hero(R.DATA[portraits[target].index].id)
+	_pointer_index = -2
+func _tile_at(at: Vector2) -> int:
+	if not geo.grid.has_point(at): return -1
+	var content_at = at+Vector2(0,scroll_offset)
+	for tile in portraits:
+		if tile.visible and geo.tiles[tile.display_index].has_point(content_at): return tile.display_index
+	return -1
+func reveal_hero(id: String):
+	reveal_index(visible_indices.find(R.index_of(id)))
+func reveal_index(index: int):
+	if index < 0 or index >= geo.tiles.size(): return
+	var tile: Rect2 = geo.tiles[index]
+	var top: float = tile.position.y-geo.grid.position.y
+	var bottom: float = tile.end.y-geo.grid.position.y
+	if top < scroll_offset: _set_scroll(top)
+	elif bottom > scroll_offset+geo.grid.size.y: _set_scroll(bottom-geo.grid.size.y)
+func _set_scroll(value: float):
+	scroll_offset = clampf(value,0,geo.scroll_max)
+	grid_content.position.y = -scroll_offset
+	_update_visible_tiles()
 	queue_redraw()
+func _update_visible_tiles():
+	var view: Rect2 = geo.grid
+	view.position.y += scroll_offset
+	for tile in portraits:
+		tile.visible = geo.tiles[tile.display_index].intersects(view)
+		if tile.visible and tile.rig.texture == null: tile.rig.refresh_texture()
 func _confirm():
 	if confirm_button.disabled or selected_id == blocked_id or not R.selectable(selected_id,unlocked_heroes): return
 	confirm_button.disabled = true; field.release_focus(); confirmed.emit(selected_id,display_name)
@@ -145,53 +227,50 @@ func focus_hero(id: String):
 	selected_id = id; hero.configure(id); hero.art_key = "splash"; hero.refresh_texture(); hero.set_clip("hover_react"); focused.emit(id)
 	for tile in portraits: tile.selected = R.DATA[tile.index].id == id; tile.queue_redraw()
 	queue_redraw()
-static func geometry(s: Vector2, seam: Rect2 = Rect2(), hero_count: int = 32) -> Dictionary:
+static func geometry(s: Vector2, seam: Rect2 = Rect2(), hero_count: int = R.DATA.size()) -> Dictionary:
 	var mode = Layout.mode_for(s)
 	var phone = mode == "phone_portrait" and seam.size.x <= 0
-	var g = {"tiles":[],"back":Rect2(12,12,44,44),"paged":true,"pages":4 if phone else 2,"per_page":8 if phone else 16,"nav":Rect2(),"columns":4,"rows":2}
+	var g = {"tiles":[],"back":Rect2(12,12,44,44),"columns":4,"rows":ceili(float(hero_count)/4.0)}
 	var grid: Rect2
 	if phone:
 		g.heading = Rect2(66,12,s.x-78,40)
 		g.hero = Rect2(12,60,s.x-24,s.y-480)
 		g.plaque = Rect2(20,s.y-412,s.x-40,60)
-		grid = Rect2(16,s.y-348,s.x-32,176)
-		g.nav = Rect2(20,s.y-164,s.x-40,44)
+		grid = Rect2(16,s.y-348,s.x-32,228)
 		g.field = Rect2(24,s.y-112,s.x-48,44)
 		g.confirm = Rect2(24,s.y-60,s.x-48,48)
 	else:
-		# Split hero preview and four-column paginated roster.
+		# Split hero preview and four-column scrolling roster.
 		var split = seam.end.x+12 if seam.size.x > 0 else s.x*(.46 if s.y < 360 else .42)
 		var left_end = seam.position.x-12 if seam.size.x > 0 else split-12
 		g.hero = Rect2(12,58,left_end-24,s.y-146)
 		g.plaque = Rect2(16,s.y-80,left_end-32,64)
 		g.heading = Rect2(split,12,s.x-split-16,38)
 		grid = Rect2(split,58,s.x-split-12,s.y-132)
-		# Sixteen larger portraits per wide page; narrow phones keep eight.
-		g.paged = true; g.pages = 2; g.per_page = 16
-		g.columns = 4; g.rows = 4
-		grid.size.y -= 48
-		g.nav = Rect2(split, s.y-116,s.x-split-12,44)
 		g.field = Rect2(split,s.y-62,(s.x-split-20)*.55,44)
 		g.confirm = Rect2(g.field.end.x+8,s.y-62,(s.x-split-20)*.45,44)
 		if s.y < 360:
-			# Put the form below the splash so four touchable rows have real room.
-			g.paged = true; g.pages = 2; g.per_page = 16; g.columns = 4; g.rows = 4
+			# Put the form below the splash so the roster has full-height scrolling.
 			g.hero = Rect2(12,58,left_end-24,s.y-234)
 			g.plaque = Rect2(16,s.y-172,left_end-32,60)
 			g.field = Rect2(24,s.y-104,left_end-48,44)
 			g.confirm = Rect2(24,s.y-52,left_end-48,44)
-			grid = Rect2(split,58,s.x-split-12,s.y-114)
-			g.nav = Rect2(split,s.y-52,s.x-split-12,44)
-	g.pages = maxi(1,int(ceil(float(hero_count)/g.per_page)))
+			grid = Rect2(split,58,s.x-split-12,s.y-68)
 	g.grid = grid
-	var pitch = Vector2(grid.size.x/g.columns,minf(grid.size.y/g.rows,grid.size.x/g.columns*1.30))
-	var top = grid.position+Vector2(0,(grid.size.y-pitch.y*g.rows)*.5)
-	for i in range(g.per_page): g.tiles.append(Rect2(top+Vector2(i%g.columns*pitch.x,int(i/g.columns)*pitch.y),pitch-Vector2(4,3)))
+	var width = grid.size.x/g.columns
+	var row_height = clampf(width*1.1,58,156)
+	for i in range(hero_count):
+		g.tiles.append(Rect2(grid.position+Vector2(i%g.columns*width,floorf(float(i)/g.columns)*row_height),Vector2(width-6,row_height-4)))
+	g.scroll_max = maxf(0,g.rows*row_height-grid.size.y)
 	return g
 
 func _draw():
 	if geo.is_empty(): return
 	draw_rect(Rect2(Vector2.ZERO,size),Color("081326"))
+	if geo.scroll_max > 0:
+		var grid: Rect2 = geo.grid
+		var thumb = maxf(20.0,grid.size.y*grid.size.y/(grid.size.y+geo.scroll_max))
+		draw_rect(Rect2(grid.end.x-3,grid.position.y+(grid.size.y-thumb)*scroll_offset/geo.scroll_max,3,thumb),P.GOLD)
 	var r: Rect2 = geo.field
 	var edge = P.BLUE if is_instance_valid(field) and field.has_focus() else P.GOLD
 	var points = PackedVector2Array([r.position+Vector2(10,0),Vector2(r.end.x,r.position.y),r.end-Vector2(10,0),Vector2(r.position.x,r.end.y)])

@@ -1,5 +1,7 @@
 extends Control
 ## Shared address editor and optional code-entry stage for onboarding/Settings.
+const KeyboardSafe = preload("res://ui/keyboard_safe_form.gd")
+var keyboard_safe = KeyboardSafe.new()
 const P = preload("res://ui/paint.gd")
 const ButtonArt = preload("res://ui/ornate_button.gd")
 const Store = preload("res://net/device_store.gd")
@@ -31,6 +33,7 @@ func _ready():
 	var scroll = ScrollContainer.new(); scroll.position = Vector2((size.x-width)/2,maxf(12,(size.y-height)/2))
 	scroll.size = Vector2(width,minf(height,size.y-24)); scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	add_child(scroll)
+	keyboard_safe.attach(self,scroll)
 	card = Panel.new(); card.custom_minimum_size = Vector2(width-14,height); card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var style = StyleBoxFlat.new(); style.bg_color = P.NAVY; style.border_color = P.GOLD_DARK
 	style.set_border_width_all(2); style.set_corner_radius_all(10); card.add_theme_stylebox_override("panel",style); card.clip_contents = true; scroll.add_child(card)
@@ -56,7 +59,9 @@ func _ready():
 	if stage:
 		var code_field = _field("email_code",code,"6-digit code",Rect2(x,256,w,48),16)
 		code_field.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER; code_field.editable = not busy and not challenge.is_empty()
-		code_field.text_changed.connect(func(value): code_changed.emit(value))
+		code_field.text_changed.connect(func(value):
+			code_changed.emit(value)
+			keyboard_safe.code_changed(value,code_field,controls.get("confirm_email")))
 		code_field.text_submitted.connect(func(value): action.emit("confirm_email",value))
 		controls["email_expiry"] = _label(card,"",Rect2(x,344,w,48),18,P.WHITE)
 		_button(card,"confirm_email","Verify email",Rect2(x,404,w,48),func(): action.emit("confirm_email",code_field.text),true)

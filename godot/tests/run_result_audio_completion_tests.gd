@@ -50,7 +50,7 @@ func run():
 	ok(not s.result_announcement_pending(),"cinematic ownership clears stale commentary")
 	var main = FileAccess.get_file_as_string("res://main/main.gd")
 	ok(main.contains("not _result_shown and not sound.result_announcement_pending()"),"automatic result path gates handoff")
-	ok(main.contains("if not event is InputEventKey: _skip_guard_until"),"explicit tap keeps release guard")
+	ok(main.contains("if skipped and not event is InputEventKey: _skip_guard_until"),"intentional cinematic skip keeps release guard")
 	s.stop_playback(); s.queue_free()
 	await process_frame
 	await process_frame

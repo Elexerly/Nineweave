@@ -141,6 +141,7 @@ var online_sequence: int = 0
 var opponent_name: String = "Remote player"
 var remote_ready: bool = false
 var _result_shown: bool = false
+var _pending_result_voice: bool = false
 var _result_t: float = 1.0
 var _result_bases: Dictionary = {}
 var _input_beat: float = 0
@@ -372,6 +373,9 @@ func _process(delta):
 			hint_busy = false
 			# Only show a hint computed for the position still on the board.
 			if _hint_ply == game.history.size() and game.is_legal(hint_ai.best_move.x,hint_ai.best_move.y): board.hint_move = hint_ai.best_move
+	if _pending_result_voice:
+		if page != "game" or game.status == 0: _pending_result_voice = false
+		elif not _intro_owns_audio(): _announce_match_result()
 	if page == "game" and not tutorial.active and game.status != 0 and not board.win_fx.is_empty() and board.win_progress() >= RESULT_AT and not _result_shown and not sound.result_announcement_pending():
 		if not _spotlight_done:
 			if not cinematic.active:
@@ -489,13 +493,6 @@ func _input(event):
 	if tap and overlay == "settings":
 		var difficulty_control = controls.get("difficulty")
 		if pointer and (not is_instance_valid(difficulty_control) or not difficulty_control.get_global_rect().has_point(event.position)): _code_taps = 0
-	# An explicit tap can skip the announcement hold, but must not also activate
-	# the result buttons appearing on the next frame.
-	if tap and page == "game" and game.status != 0 and overlay.is_empty() and not cinematic.active and sound.result_announcement_pending():
-		sound.clear_announcer()
-		get_viewport().set_input_as_handled()
-		if not event is InputEventKey: _skip_guard_until = Time.get_ticks_msec()+SKIP_GUARD_MS
-		return
 	var result_skip = false
 	if tap and cinematic and cinematic.combined_result:
 		var g = cinematic.result_geometry(layout.size)
@@ -580,7 +577,7 @@ func start_game(new_mode: String = "computer", mark: int = 1, rematch: bool = fa
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	sound.prepare_character(Roster.audio_index(profile.data.character_id)); sound.prepare_character(Roster.audio_index(rival_character))
 	mode = new_mode; human_mark = mark; page = "game"; overlay = ""; _debug_capture = false
-	game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
+	_pending_result_voice = false; game.new_game(); board.game = game; board.clear_effects(); board.hint_move = Vector2i(-1,-1)
 	thinking = false; hint_busy = false; _result_shown = false; match_seconds = 0; message = ""; online_sequence = 0
 	_refresh_labels(); _rebuild()
 	sound.clear_announcer()
@@ -630,17 +627,30 @@ func _apply_move(b: int, c: int) -> bool:
 	if game.status != 0:
 		var line = game.big_lines[0] if not game.big_lines.is_empty() else []
 		board.start_win(line,game.status); thinking = false
-		if game.status == 3: sound.cue("draw")
-		elif mode == "local": sound.cue("victory")
-	var line_id = Announcer.detect(previous,Announcer.snapshot(game))
-	if mode == "local" and game.status in [1,2]: line_id = "nineweave"
-	_announce(line_id)
-	if game.status in [1,2] and mode != "local":
-		var result_id = "victory" if game.status == human_mark else "defeat"
-		sound.announce(result_id,result_id)
+		_announce_match_result()
+	else:
+		_announce(Announcer.detect(previous,Announcer.snapshot(game)))
 	_react_to_move(previous,player,b)
 	_refresh_labels(); _save_match(); _refresh_history(); _schedule_ai()
 	return true
+## Completed wins always route the branded recording for the winner. The
+## clean-sweep detector still describes the board, not the result audio choice.
+func _intro_owns_audio() -> bool:
+	return sound.hero_video_audio or (cinematic.active and cinematic.kind == "versus")
+func _announce_match_result():
+	_pending_result_voice = _intro_owns_audio()
+	if _pending_result_voice: return
+	sound.clear_announcer() # Pending commentary must not delay the final dispatch.
+	if game.status == 3:
+		sound.cue("draw"); _announce("standoff")
+	elif game.status in [1,2]:
+		if mode == "local" or game.status == human_mark:
+			_announce("nineweave")
+			if mode == "local": sound.cue("victory")
+			else: sound.announce("victory","victory")
+		else:
+			sound.announce("defeat","defeat")
+			if not sound.enabled: callout.show_callout("defeat")
 func _react_to_move(previous: Dictionary, mover: int, board_index: int):
 	var claimed = previous.owners[board_index] == 0 and game.owners[board_index] == mover
 	var threats = Announcer.threats(Array(game.owners),mover)
@@ -1154,7 +1164,7 @@ func _reset_online_match():
 	hero_video.prefetch_pair(str(profile.data.character_id),rival_character)
 	_spotlight_done = false; cinematic.clear(); _debug_capture = false; joined_timer.stop(); end_message = ""
 	_prompt_sent = ""; _moved_turn = ""
-	game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
+	_pending_result_voice = false; game.new_game(); mode = "online"; page = "game"; overlay = ""; online_sequence = 0
 	board.clear_effects(); thinking = false; _result_shown = false; match_seconds = 0; message = ""
 	_refresh_labels(); _rebuild(); _begin_versus()
 func _receive_move(b: int, c: int, seq: int):
@@ -1163,12 +1173,14 @@ func _receive_move(b: int, c: int, seq: int):
 	if _apply_move(b,c): online_sequence = seq
 func _receive_state(state: Dictionary, seq: int):
 	if seq == online_sequence and state.get("cells","") == game.serialize().cells: return
+	var was_live: bool = game.status == 0
 	if game.deserialize(state):
 		online_sequence = seq; _refresh_labels(); _refresh_history()
 		if tutorial.active: return
 		board.clear_effects(); _schedule_ai()
 		if game.status != 0:
 			board.start_win(game.big_lines[0] if not game.big_lines.is_empty() else [],game.status)
+			if was_live and page == "game": _announce_match_result()
 
 func _online_room_update(data: Dictionary):
 	if online_tournament.match_active: online_tournament.match_ended(data)
@@ -1189,11 +1201,13 @@ func _online_room_update(data: Dictionary):
 	var result = data.get("result")
 	if data.get("status","") in ["finished","closed"] and result is Dictionary and (game.status == 0 or (online_tournament.match_active and game.status == 3)):
 		var winner = int(result.get("winner",-1))
-		if winner in [0,1,2]:
+		if winner in [0,1,2] and (game.status == 0 or winner != 0):
 			game.status = 3 if winner == 0 else winner; thinking = false
-			if not tutorial.active: board.start_win([],game.status)
+			if not tutorial.active:
+				board.start_win([],game.status)
+				if page == "game": _announce_match_result()
 			_refresh_labels()
-	if online_tournament.match_active and data.get("status","") in ["finished","closed"] and result is Dictionary and not _result_shown:
+	if online_tournament.match_active and data.get("status","") in ["finished","closed"] and result is Dictionary and not _result_shown and not cinematic.active and not _pending_result_voice and not sound.result_announcement_pending():
 		_show_spotlight()
 	if data.get("status","") == "closed" and page == "online":
 		message = end_message if not end_message.is_empty() else "This room is closed. Return to the lobby to play again."; _online_status()

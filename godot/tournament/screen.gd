@@ -187,21 +187,15 @@ func _draw_outcome():
 	if _hero_texture:
 		var dim = _hero_texture.get_size()*minf(hero.size.x/_hero_texture.get_width(),hero.size.y/_hero_texture.get_height())*lerpf(.92,1,t)
 		draw_texture_rect(_hero_texture,Rect2(hero.get_center()-dim*.5,dim),false,Color(1,1,1,t) if champion else Color(.48,.55,.64,.75*t))
-	var trophy_rect = trophy_pose(age)
 	if champion:
+		var trophy_rect = trophy_pose(age)
 		P.halo(self,trophy_rect.get_center(),66,Color(P.GOLD,.24)); View.trophy(self,trophy_rect,P.GOLD)
-	else:
-		P.diamond(self,trophy_rect.get_center(),27,P.MUTED)
-		P.text(self,"×",trophy_rect,46,Color("071222"))
 	P.text(self,R.get_hero(data.hero).name.to_upper(),geo.name,26 if geo.phone else 36,P.PALE,P.SERIF)
-	P.panel(self,geo.count,false,1,false)
-	var r: Rect2 = geo.count
 	if champion:
+		var r: Rect2 = geo.count
+		P.panel(self,r,false,1,false)
 		P.text(self,"TROPHY EARNED  ·  %d WITH THIS HERO" % hero_trophies,Rect2(r.position+Vector2(12,8),Vector2(r.size.x-24,26)),17,P.GOLD)
 		P.text(self,"%d TOTAL TROPHIES  /  SAVED ON THIS DEVICE" % trophies,Rect2(r.position+Vector2(12,37),Vector2(r.size.x-24,24)),13,P.MUTED)
-	else:
-		P.text(self,"Every legend begins again.",Rect2(r.position+Vector2(12,9),Vector2(r.size.x-24,26)),19,P.WHITE)
-		P.text(self,"TRY A FRESH BRACKET WITH THE SAME HERO",Rect2(r.position+Vector2(12,38),Vector2(r.size.x-24,22)),13,P.MUTED)
 func trophy_pose(seconds: float) -> Rect2:
 	# Reserve the whole drop lane in layout; even the spring's overshoot stays
 	# between the subtitle and hero, on both phone and desktop.

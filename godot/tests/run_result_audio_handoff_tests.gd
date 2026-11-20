@@ -119,6 +119,19 @@ func run():
 	startup._process(.02)
 	ui._show_startup_card()
 	ok(not startup.active and not startup.visible and ui.startup_card == startup and ui.page == initial_page,"startup auto-dismisses once and preserves existing route")
+	startup.queue_free()
+	await process_frame
+	ui._show_startup_card()
+	startup = ui.startup_card
+	var dismiss := InputEventScreenTouch.new()
+	dismiss.position = Vector2(90,120); dismiss.pressed = true
+	root.push_input(dismiss,true)
+	ok(startup.active,"press alone does not leak past cold-start card")
+	dismiss = InputEventScreenTouch.new()
+	dismiss.position = Vector2(90,120); dismiss.pressed = false
+	root.push_input(dismiss,true)
+	ok(not startup.active and ui.page == initial_page,"release dismisses welcome without acting on the underlying screen")
+
 	ui.cinematic.clear(); ui.sound.stop_playback(); ui.queue_free()
 	await process_frame; await process_frame
 	print("RESULT_AUDIO_HANDOFF ",checks," checks, ",failures," failures")

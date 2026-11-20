@@ -8,6 +8,7 @@ const Sway = preload("res://characters/victory_sway.gdshader")
 const VideoOverlay = preload("res://characters/hero_video_overlay.gd")
 const RESULTS_CASTLE = preload("res://assets/art/distant_castle.png")
 const RESULTS_SKY = preload("res://assets/art/sky_plate.png")
+const RESULTS_CRYSTALS = preload("res://assets/art/crystal_cluster.png")
 const GoldLabel = preload("res://ui/gold_label.gd")
 const Badge = preload("res://characters/loser_badge.gdshader")
 signal finished(kind: String)
@@ -875,38 +876,55 @@ func _refresh_gold_result_title():
 ## moving hero, results copy or buttons. Wide scenes stay exactly as before.
 static func portrait_result_decor(s: Vector2, core: Rect2) -> Dictionary:
 	if not core.has_area() or s.x < 360 or s.y < 650: return {}
-	var upper := maxf(0,core.position.y-54)
-	var lower := maxf(0,s.y-core.end.y-20)
-	var top_w := minf(minf(s.x*.64,380.0),upper*.84*float(RESULTS_CASTLE.get_width())/RESULTS_CASTLE.get_height())
-	var top_size := Vector2(top_w,top_w*float(RESULTS_CASTLE.get_height())/RESULTS_CASTLE.get_width())
-	var bottom_h := minf(lower*.54,126)
-	var bottom_w := minf(s.x*.62,bottom_h*3.4)
-	var y := core.end.y+lower*.54-bottom_h*.5
 	return {
-		"castle":Rect2(Vector2((s.x-top_size.x)*.5,54+(upper-top_size.y)*.45),top_size),
-		"footer":Rect2(Vector2((s.x-bottom_w)*.5,y),Vector2(bottom_w,bottom_h))
+		"castle":Rect2(0,0,s.x,maxf(0,core.position.y-10)),
+		"footer":Rect2(0,core.end.y+10,s.x,maxf(0,s.y-core.end.y-10))
 	}
+## Fill a band by cropping at the source aspect ratio. Four softly feathered
+## sides let the home-screen scenery blend into the existing two-tone result.
+static func scenery_uv(bounds: Rect2, pixels: Vector2) -> Rect2:
+	var aspect := bounds.size.aspect()
+	var texture_aspect := pixels.aspect()
+	var extent := Vector2(minf(1,aspect/texture_aspect),minf(1,texture_aspect/aspect))
+	return Rect2((Vector2.ONE-extent)*.5,extent)
+func _draw_scenery_band(tex: Texture2D, bounds: Rect2, tint: Color, mirror: bool = false):
+	if bounds.size.x < 12 or bounds.size.y < 12: return
+	var crop := scenery_uv(bounds,tex.get_size())
+	var across := [0.0,.11,.89,1.0]
+	var down := [0.0,.18,.80,1.0]
+	for y in 3:
+		for x in 3:
+			var points := PackedVector2Array()
+			var colors := PackedColorArray()
+			var uvs := PackedVector2Array()
+			for corner in [Vector2i(x,y),Vector2i(x+1,y),Vector2i(x+1,y+1),Vector2i(x,y+1)]:
+				var q := Vector2(across[corner.x],down[corner.y])
+				points.append(bounds.position+q*bounds.size)
+				var edge: bool = corner.x in [0,3] or corner.y in [0,3]
+				colors.append(Color(tint,0.0 if edge else tint.a))
+				uvs.append(crop.position+Vector2(1.0-q.x if mirror else q.x,q.y)*crop.size)
+			front.draw_polygon(points,colors,uvs,tex)
 func _draw_portrait_result_decor(s: Vector2, core: Rect2):
 	var art := portrait_result_decor(s,core)
 	if art.is_empty(): return
-	if art.castle.size.y >= 15:
-		P.halo_rect(front,art.castle,Color(.26,.53,1,.19))
-		front.draw_texture_rect(RESULTS_CASTLE,art.castle,false,Color(.73,.84,1,.42))
-	if art.footer.size.y >= 15:
-		# Use the home screen sky plate as a soft atmospheric wash, then a
-		# single restrained crystal ornament rather than two tiny art strips.
-		front.draw_texture_rect(RESULTS_SKY,art.footer,false,Color(.23,.41,.70,.10))
-		P.halo_rect(front,art.footer,Color(.22,.48,1,.13))
-		var center: Vector2 = art.footer.get_center()
-		var reach := minf(116.0,art.footer.size.x*.31)
+	_draw_scenery_band(RESULTS_CASTLE,art.castle,Color(.68,.80,1,.55))
+	var footer: Rect2 = art.footer
+	_draw_scenery_band(RESULTS_SKY,footer,Color(.27,.49,.91,.27))
+	if footer.size.y >= 20:
+		var wing := Vector2(footer.size.x*.33,footer.size.y)
+		_draw_scenery_band(RESULTS_CRYSTALS,Rect2(footer.position,wing),Color(.48,.65,1,.27),true)
+		_draw_scenery_band(RESULTS_CRYSTALS,Rect2(footer.end.x-wing.x,footer.position.y,wing.x,wing.y),Color(.48,.65,1,.27))
+		var center: Vector2 = footer.position+footer.size*Vector2(.5,.55)
+		var reach := minf(420.0,footer.size.x*.39)
 		for side in [-1,1]:
-			front.draw_line(center+Vector2(side*22,0),center+Vector2(side*reach,0),Color(P.GOLD,.34),1.0,true)
-			P.diamond(front,center+Vector2(side*reach,0),2.7,Color(P.GOLD,.47))
-		P.crystal(front,center,minf(16.0,art.footer.size.y*.20),Color(P.GOLD,.52),0.0)
+			var inner := center+Vector2(side*22,0)
+			var outer := center+Vector2(side*reach,0)
+			front.draw_line(inner,outer,Color(P.GOLD,.34),1.0,true)
+			P.diamond(front,outer,2.7,Color(P.GOLD,.47))
+		P.crystal(front,center,minf(22.0,footer.size.y*.20),Color(P.GOLD,.57),0.0)
 func _draw_combined():
 	var s = region.size; var g = combined_geometry(s)
 	_draw_portrait_result_decor(s,g.core)
-	P.text(front,"LEXERLY / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
 	P.outline(front,g.hero.grow(2),Color(P.GOLD,.55),1)
 	for section in _current_result_rows():
 		if section.kind == "heading" and result_title == "VICTORY": continue

@@ -17,6 +17,11 @@ func _initialize():
 			ok(g.core.encloses(g.hero) and g.core.encloses(g.again) and g.core.encloses(g.menu),"portrait hero and controls share compact footprint "+str(size))
 			ok(g.core.size.y < size.y*.84 and is_equal_approx(g.core.get_center().y,size.y*.5),"portrait core vertically centered with room outside "+str(size))
 			ok(decor.is_empty() == (size.x < 360 or size.y < 650),"omit portrait ornament on small screens")
+			if not decor.is_empty():
+				ok(decor.castle.size.x == size.x and decor.footer.size.x == size.x,"art spans both outside margins")
+				for band in decor.values():
+					var uv := Cinema.scenery_uv(band,Vector2(330,104))
+					ok(Rect2(0,0,1,1).encloses(uv) and is_equal_approx((uv.size*Vector2(330,104)).aspect(),band.size.aspect()),"scenery crop preserves aspect ratio")
 			for area in decor.values():
 				ok(not area.intersects(g.core) and Rect2(Vector2.ZERO,size).encloses(area),"portrait art stays outside core "+str(size))
 		else:
@@ -43,6 +48,9 @@ func _initialize():
 	var hinge := Rect2(318,0,44,787)
 	for row in cinema.result_text_layout(size,hinge):
 		ok(not row.rect.intersects(hinge),"result text safe of hinge")
+	ok(not ProjectSettings.get_setting("application/boot_splash/show_image"),"Godot boot logo disabled")
+	ok(ProjectSettings.get_setting("application/boot_splash/bg_color").to_html(false) == "080d1b","boot veil matches thank-you navy")
+	ok(ProjectSettings.get_setting("application/config/name") == "Nineweave","internal app identity and save location preserved")
 	cinema.free()
 	print("NINEWEAVE_RESULT_SPACING ","PASS" if failures == 0 else "FAIL"," checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)

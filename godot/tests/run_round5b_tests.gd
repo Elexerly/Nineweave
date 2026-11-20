@@ -149,7 +149,7 @@ func controller_cases():
 	ui._show_spotlight()
 	ok(ui.cinematic.kind == "spotlight" and ui.cinematic.winner_id == "shard_jack","normal winner layer retained")
 	ui.cinematic.complete(); ui._winner_controls(ui.layout.size)
-	ok(ui.controls.again.caption == "VIEW BRACKET","result action continues tournament instead of starting a quick rematch")
+	ok(ui.controls.again.caption == "CONTINUE","result action continues tournament instead of starting a quick rematch")
 	ui.controls.again.pressed.emit()
 	ok(ui.page == "tournament" and not ui.tournament.screen.bracket.results.is_empty(),"bracket receives reusable result animation batch")
 	settle(ui); ui.controls.play.pressed.emit()

@@ -785,7 +785,7 @@ func go_home():
 	sound.stop_result_victory(); sound.clear_announcer()
 	_save_match(); tournament.match_active = false
 	if online_tournament.match_active:
-		online_tournament.match_active = false; online_tournament._auto_return = -1
+		online_tournament.match_active = false; online_tournament._reset_result_handoff()
 	_leave_online(); thinking = false; page = "title"; overlay = ""; board.clear_effects(); cinematic.clear(); callout.callout = ""; _rebuild()
 	_tutorial_on_home()
 func show_settings():
@@ -2770,9 +2770,10 @@ func _winner_controls(s: Vector2):
 	var g = cinematic.result_geometry(s) if cinematic.combined_result else Cinematic.card_geometry(s,"draw" if game.status == 3 else "spotlight")
 	for item in [["again","REMATCH",g.again,rematch,true],["menu","MAIN MENU",g.menu,go_home,false]]:
 		if item[0] == "again" and online_tournament.match_active:
-			item[1] = "VIEW BRACKET"; item[3] = online_tournament.return_to_bracket
+			item[1] = "CONTINUE" if online_tournament.can_advance_result(game.status) else "VIEW BRACKET"; item[3] = online_tournament.return_to_bracket
 		if item[0] == "again" and tournament.match_active:
-			item[1] = "REPLAY MATCH" if game.status == 3 else ("THE CROWN" if tournament.session.active.get("status","") == "champion" else "VIEW BRACKET")
+			var tournament_status = tournament.session.active.get("status","")
+			item[1] = "REPLAY MATCH" if game.status == 3 else ("THE CROWN" if tournament_status == "champion" else ("CONTINUE" if game.status == human_mark and tournament_status == "bracket" else "VIEW BRACKET"))
 			item[3] = tournament.after_match
 		var button = preload("res://characters/match_button.gd").new()
 		button.caption = item[1]; button.position = item[2].position; button.size = item[2].size; button.accent = item[4]

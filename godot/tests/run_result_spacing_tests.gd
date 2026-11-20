@@ -7,10 +7,21 @@ func ok(value: bool, label: String):
 	if not value: failures += 1; print("FAIL ",label)
 func _initialize():
 	var cinema = Cinema.new()
-	for size in [Vector2(320,568),Vector2(390,844),Vector2(568,320),Vector2(844,390),Vector2(867,553),Vector2(669,787),Vector2(1280,720),Vector2(1920,1080)]:
+	for size in [Vector2(320,568),Vector2(390,844),Vector2(1081,1536),Vector2(1536,1081),Vector2(568,320),Vector2(844,390),Vector2(867,553),Vector2(669,787),Vector2(1280,720),Vector2(1920,1080)]:
 		var g = Cinema.combined_geometry(size)
 		for row in [g.again,g.menu]:
 			ok(Rect2(Vector2.ZERO,size).encloses(row) and not row.intersects(g.hero),"buttons preserved beside hero "+str(size))
+		var decor := Cinema.portrait_result_decor(size,g.core)
+		if Cinema.compact_portrait_result(size):
+			ok(is_equal_approx(g.hero.size.aspect(),.75),"portrait frame matches video native aspect "+str(size))
+			ok(g.core.encloses(g.hero) and g.core.encloses(g.again) and g.core.encloses(g.menu),"portrait hero and controls share compact footprint "+str(size))
+			ok(g.core.size.y < size.y*.84 and is_equal_approx(g.core.get_center().y,size.y*.5),"portrait core vertically centered with room outside "+str(size))
+			ok(decor.is_empty() == (size.x < 360 or size.y < 650),"omit portrait ornament on small screens")
+			for area in decor.values():
+				ok(not area.intersects(g.core) and Rect2(Vector2.ZERO,size).encloses(area),"portrait art stays outside core "+str(size))
+		else:
+			ok(decor.is_empty(),"wide composition remains free of portrait decoration")
+			ok(g.hero == Rect2(12 if size.x < 700 else 32,64,size.x*.5-(12 if size.x < 700 else 32)*1.5,size.y-128),"wide hero geometry unchanged")
 		for info in [["VICTORY","Nightly","bramble_ox","madame_solstice",""],["VICTORY","WWWWWWWWWWWWWWWWWWWWWWWW","shard_jack","ryan_blaze","Opponent ran out of time"],["DEFEAT","TwentyCharacterNameX","ryan_blaze","shard_jack",""],["X WINS","","shard_jack","unknown",""],["DEFEAT","Nobody","unknown","unknown","Connection lost"]]:
 			cinema.result_title = info[0]; cinema.winner_name = info[1]
 			cinema.winner_id = info[2]; cinema.loser_id = info[3]; cinema.result_detail = info[4]; cinema.result_score = "4 – 0 BOARDS CLAIMED"
@@ -27,7 +38,7 @@ func _initialize():
 			var matchup := rows.filter(func(row): return row.kind == "matchup")
 			ok(matchup.is_empty() if info[2] == "unknown" else not matchup.is_empty(),"unknown heroes do not invent a matchup")
 			if info[2] == "bramble_ox" and not matchup.is_empty():
-				ok(" ".join(matchup[0].lines) == "Bramble Ox defeats Beth Solstice","concise winner and loser names")
+				ok(matchup[0].lines == ["Bramble Ox","defeats","Beth Solstice"],"three centered lines keep full character names")
 	var size := Vector2(669,787)
 	var hinge := Rect2(318,0,44,787)
 	for row in cinema.result_text_layout(size,hinge):

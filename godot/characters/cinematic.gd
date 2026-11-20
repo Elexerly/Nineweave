@@ -6,6 +6,8 @@ const P = preload("res://ui/paint.gd")
 const Motion = preload("res://characters/cinematic_motion.gd")
 const Sway = preload("res://characters/victory_sway.gdshader")
 const VideoOverlay = preload("res://characters/hero_video_overlay.gd")
+const RESULTS_CASTLE = preload("res://assets/art/distant_castle.png")
+const RESULTS_SKY = preload("res://assets/art/sky_plate.png")
 const GoldLabel = preload("res://ui/gold_label.gd")
 const Badge = preload("res://characters/loser_badge.gdshader")
 signal finished(kind: String)
@@ -703,7 +705,9 @@ func _draw_front():
 			var fs = score_font_size()
 			P.text(front,result_score,Rect2(g.subtitle.position+Vector2(0,g.subtitle.size.y+2)+offset,Vector2(g.subtitle.size.x,fs*1.25)),fs,Color(P.PALE,fade))
 
-## The same left-video / right-result layout, including on phones.
+## Wide matches preserve the approved composition. In portrait, the same video
+## stays at its native aspect and the result copy/actions are centered beside it.
+static func compact_portrait_result(s: Vector2) -> bool: return s.y > s.x*1.10
 static func combined_geometry(s: Vector2) -> Dictionary:
 	var gap = 12.0 if s.x < 700 else 32.0
 	var right = s.x*.50+gap*.5
@@ -715,9 +719,22 @@ static func combined_geometry(s: Vector2) -> Dictionary:
 	if short:
 		again = Rect2(right,s.y-68,(width-10)*.5,48)
 		menu = Rect2(right+(width+10)*.5,s.y-68,(width-10)*.5,48)
+	var hero := Rect2(gap,64,s.x*.50-gap*1.5,s.y-128)
+	var core := Rect2()
+	if compact_portrait_result(s):
+		var target_h := clampf(s.y*.51,340,580)
+		var hero_h := hero.size.x*VideoOverlay.PORTRAIT.y/VideoOverlay.PORTRAIT.x
+		var core_h := minf(s.y-105,maxf(target_h,hero_h+10))
+		var core_y := (s.y-core_h)*.5
+		core = Rect2(gap,core_y,s.x-gap*2,core_h)
+		var fitted_h := minf(hero_h,core_h-10)
+		var fitted_w := fitted_h*VideoOverlay.PORTRAIT.x/VideoOverlay.PORTRAIT.y
+		hero = Rect2(hero.get_center().x-fitted_w*.5,core.get_center().y-fitted_h*.5,fitted_w,fitted_h)
+		menu = Rect2(right,core.end.y-bh,width,bh)
+		again = Rect2(right,menu.position.y-bh-12,width,bh)
 	# Allocate non-overlapping text lanes before the action buttons. Previous
 	# fixed offsets put the player name inside the hero outcome's first line.
-	var top = 46.0 if short else s.y*.19
+	var top = core.position.y if core.has_area() else (46.0 if short else s.y*.19)
 	var available = maxf(100,again.position.y-top-16)
 	var spacing = clampf(available*.035,5,16)
 	var usable = available-spacing*4
@@ -726,7 +743,7 @@ static func combined_geometry(s: Vector2) -> Dictionary:
 	var outcome_h = usable*.32
 	var score_h = usable*.12
 	var y = top
-	var g = {"hero":Rect2(gap,64,s.x*.50-gap*1.5,s.y-128),"rival":Rect2(),"again":again,"menu":menu}
+	var g = {"hero":hero,"rival":Rect2(),"again":again,"menu":menu,"core":core}
 	g.name = Rect2(right,y,width,title_h); y += title_h+spacing
 	g.names = Rect2(right,y,width,names_h); y += names_h+spacing
 	g.outcome = Rect2(right,y,width,outcome_h); y += outcome_h+spacing
@@ -783,16 +800,15 @@ func result_text_layout(s: Vector2, seam: Rect2 = Rect2()) -> Array:
 	if seam.has_area() and left < seam.end.x and seam.end.x < g.name.end.x: left = seam.end.x+inset
 	width = maxf(14,g.name.end.x-inset-left)
 	var short := s.y < 500
-	var top := maxf(48,minf(s.y*.1,105))
+	var top: float = g.core.position.y if g.core.has_area() else maxf(48,minf(s.y*.1,105))
 	var bottom: float = g.again.position.y-13.0
 	var available := maxf(1.0,bottom-top)
 	var gap := clampf(available*.037,8.0,21.0)
 	var name_text := winner_name.strip_edges()
 	var winner: String = R.get_hero(winner_id).name if R.valid(winner_id) else ""
 	var defeated: String = R.get_hero(loser_id).name if R.valid(loser_id) else ""
-	var outcome := ""
-	if not winner.is_empty() and not defeated.is_empty(): outcome = winner+" defeats "+defeated
-	elif not winner.is_empty() and name_text.is_empty(): outcome = winner+" wins"
+	var has_matchup := not winner.is_empty() and not defeated.is_empty()
+	var outcome := winner if has_matchup else (winner+" wins" if not winner.is_empty() and name_text.is_empty() else "")
 	var values := [result_title,name_text,outcome,result_score,result_detail]
 	var kinds := ["heading","player","matchup","score","detail"]
 	var fonts := [
@@ -814,6 +830,10 @@ func result_text_layout(s: Vector2, seam: Rect2 = Rect2()) -> Array:
 			var fs: int = fonts[i]
 			if i == 0: fs = mini(fs,P.fit_size(value,width-10,fs,font))
 			var lines: Array = [value] if i == 0 else result_wrapped_lines(value,width-9,fs)
+			if i == 2 and has_matchup:
+				# A deliberate typographic stack: neither character name wraps mid-name.
+				fs = mini(P.fit_size(winner,width-10,fs,font),P.fit_size(defeated,width-10,fs,font))
+				lines = [winner,"defeats",defeated]
 			var border := maxi(2,roundi(fs*.085))
 			var line_h := font.get_height(fs)+border*2+3
 			var rect := Rect2(left,y,width,lines.size()*line_h)
@@ -821,7 +841,16 @@ func result_text_layout(s: Vector2, seam: Rect2 = Rect2()) -> Array:
 			y = rect.end.y+gap
 		var content_height := maxf(0.0,y-gap)
 		if content_height <= available or attempt == 41:
-			var offset := top+maxf(0.0,(available-content_height)*.29)
+			# Keep the original widescreen heading/player anchor when the new
+			# three-line group has room below it.
+			var anchor_height := content_height
+			if has_matchup and not g.core.has_area():
+				for row in sections:
+					if row.kind == "matchup":
+						var old_count := result_wrapped_lines(winner+" defeats "+defeated,width-9,row.font_size).size()
+						anchor_height += (old_count-3)*row.line_height
+						break
+			var offset := top+clampf((available-anchor_height)*.29,0.0,maxf(0,available-content_height))
 			for row in sections: row.rect.position.y += offset
 			return sections
 		for i in range(fonts.size()): fonts[i] = maxi(10,fonts[i]-1)
@@ -842,8 +871,41 @@ func _refresh_gold_result_title():
 		if row.kind == "heading":
 			_gold_result_title.place(row.rect,result_title,row.font,row.font_size,reduced_motion)
 			break
+## The home-screen castle and crystals fill only portrait margins, never the
+## moving hero, results copy or buttons. Wide scenes stay exactly as before.
+static func portrait_result_decor(s: Vector2, core: Rect2) -> Dictionary:
+	if not core.has_area() or s.x < 360 or s.y < 650: return {}
+	var upper := maxf(0,core.position.y-54)
+	var lower := maxf(0,s.y-core.end.y-20)
+	var top_w := minf(minf(s.x*.64,380.0),upper*.84*float(RESULTS_CASTLE.get_width())/RESULTS_CASTLE.get_height())
+	var top_size := Vector2(top_w,top_w*float(RESULTS_CASTLE.get_height())/RESULTS_CASTLE.get_width())
+	var bottom_h := minf(lower*.54,126)
+	var bottom_w := minf(s.x*.62,bottom_h*3.4)
+	var y := core.end.y+lower*.54-bottom_h*.5
+	return {
+		"castle":Rect2(Vector2((s.x-top_size.x)*.5,54+(upper-top_size.y)*.45),top_size),
+		"footer":Rect2(Vector2((s.x-bottom_w)*.5,y),Vector2(bottom_w,bottom_h))
+	}
+func _draw_portrait_result_decor(s: Vector2, core: Rect2):
+	var art := portrait_result_decor(s,core)
+	if art.is_empty(): return
+	if art.castle.size.y >= 15:
+		P.halo_rect(front,art.castle,Color(.26,.53,1,.19))
+		front.draw_texture_rect(RESULTS_CASTLE,art.castle,false,Color(.73,.84,1,.42))
+	if art.footer.size.y >= 15:
+		# Use the home screen sky plate as a soft atmospheric wash, then a
+		# single restrained crystal ornament rather than two tiny art strips.
+		front.draw_texture_rect(RESULTS_SKY,art.footer,false,Color(.23,.41,.70,.10))
+		P.halo_rect(front,art.footer,Color(.22,.48,1,.13))
+		var center: Vector2 = art.footer.get_center()
+		var reach := minf(116.0,art.footer.size.x*.31)
+		for side in [-1,1]:
+			front.draw_line(center+Vector2(side*22,0),center+Vector2(side*reach,0),Color(P.GOLD,.34),1.0,true)
+			P.diamond(front,center+Vector2(side*reach,0),2.7,Color(P.GOLD,.47))
+		P.crystal(front,center,minf(16.0,art.footer.size.y*.20),Color(P.GOLD,.52),0.0)
 func _draw_combined():
 	var s = region.size; var g = combined_geometry(s)
+	_draw_portrait_result_decor(s,g.core)
 	P.text(front,"LEXERLY / MATCH RESULT",Rect2(16,16,s.x-32,30),16,P.GOLD)
 	P.outline(front,g.hero.grow(2),Color(P.GOLD,.55),1)
 	for section in _current_result_rows():
@@ -855,4 +917,5 @@ func _draw_combined():
 			var x: float = section.rect.get_center().x-font.get_string_size(line,HORIZONTAL_ALIGNMENT_LEFT,-1,fs).x*.5
 			var baseline := Vector2(x,section.rect.position.y+section.border+font.get_ascent(fs)+i*section.line_height)
 			front.draw_string_outline(font,baseline+Vector2(0,1),line,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.border,Color(0,0,0,.75))
-			front.draw_string(font,baseline,line,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,section.color)
+			var color: Color = P.MUTED if section.kind == "matchup" and line == "defeats" else section.color
+			front.draw_string(font,baseline,line,HORIZONTAL_ALIGNMENT_LEFT,-1,fs,color)

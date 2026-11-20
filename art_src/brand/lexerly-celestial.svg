@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs>
+ <radialGradient id="bg" cx=".48" cy=".44" r=".72"><stop stop-color="#274365"/><stop offset=".45" stop-color="#121f36"/><stop offset=".82" stop-color="#091325"/><stop offset="1" stop-color="#040911"/></radialGradient>
+ <radialGradient id="halo"><stop stop-color="#f1ab4d" stop-opacity=".27"/><stop offset=".62" stop-color="#a77547" stop-opacity=".1"/><stop offset="1" stop-color="#7f5439" stop-opacity="0"/></radialGradient>
+ <linearGradient id="gold" x1=".12" y1="0" x2=".82" y2="1"><stop stop-color="#ad6d24"/><stop offset=".18" stop-color="#ffe5a1"/><stop offset=".35" stop-color="#fff6cc"/><stop offset=".51" stop-color="#d9943d"/><stop offset=".72" stop-color="#ffe39a"/><stop offset="1" stop-color="#8c501c"/></linearGradient>
+ <linearGradient id="glint" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffdf95"/><stop offset=".43" stop-color="#fff7d8"/><stop offset="1" stop-color="#d99746"/></linearGradient>
+ <path id="star" d="M0-47Q5-8 34 0 5 8 0 47-5 8-34 0-5-8 0-47Z"/>
+ <path id="pathL" d="M382 300h223v25c-46 1-61 18-61 62v266h82c64 0 105-38 122-97h25l-25 153H382v-25c44-3 63-23 63-65V389c0-44-14-62-63-64Z"/>
+</defs>
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<circle cx="508" cy="496" r="430" fill="url(#halo)"/>
+<path d="M512 100l410 412-410 412L102 512z" fill="none" stroke="#c69c65" stroke-opacity=".14" stroke-width="3"/>
+<g fill="none">
+ <circle cx="512" cy="512" r="327" stroke="#101321" stroke-width="28"/>
+ <circle cx="512" cy="512" r="327" stroke="url(#gold)" stroke-width="13"/>
+ <circle cx="512" cy="512" r="304" stroke="#e3bb79" stroke-width="2" stroke-opacity=".58"/>
+ <path d="M263 729C176 717 177 625 265 520c118-143 373-281 516-279 131 0 135 95 34 212" stroke="#b9946a" stroke-width="4" stroke-opacity=".67"/>
+ <path d="M775 787C631 784 381 645 259 501c-87-105-85-192-1-205" stroke="#b6d5f4" stroke-width="3" stroke-opacity=".36"/>
+ <path d="M762 430c93-65 143-131 113-174-33-53-215-6-393 101" stroke="#9c5c29" stroke-width="14" stroke-opacity=".67"/>
+ <path d="M762 430c93-65 143-131 113-174-33-53-215-6-393 101" stroke="url(#gold)" stroke-width="8"/>
+</g>
+<ellipse cx="504" cy="522" rx="238" ry="222" fill="url(#halo)" opacity=".66"/>
+<use xlink:href="#pathL" transform="translate(-45 13)" fill="#090a14" stroke="#090a14" stroke-width="16"/>
+<use xlink:href="#pathL" transform="translate(-45 0)" fill="url(#gold)" stroke="#92551e" stroke-width="6" stroke-linejoin="round"/>
+<use xlink:href="#pathL" transform="translate(-45 0)" fill="none" stroke="#ffe5a3" stroke-opacity=".68" stroke-width="2"/>
+<g fill="url(#glint)">
+ <use xlink:href="#star" transform="translate(514 181) scale(1.12)"/><use xlink:href="#star" transform="translate(812 312) scale(.85)"/>
+ <use xlink:href="#star" transform="translate(251 693) scale(.73)"/><use xlink:href="#star" transform="translate(666 783) scale(.46)"/>
+ <use xlink:href="#star" transform="translate(295 294) scale(.34)"/>
+</g>
+<g fill="#fff2bd" opacity=".76"><circle cx="398" cy="220" r="4"/><circle cx="696" cy="256" r="4"/><circle cx="752" cy="705" r="5"/><circle cx="219" cy="479" r="4"/><circle cx="832" cy="573" r="4"/></g>
+<path d="M512 843l-9 9 9 9 9-9Z M180 512l-9 9 9 9 9-9Z" fill="#f5ca79"/>
+</svg>

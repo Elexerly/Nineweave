@@ -234,7 +234,7 @@ func run():
 	for mark in [1,2]:
 		ui.debug_load_position(F.big_tactic(mark).serialize(),"computer"); ui.sound.enabled = true; ui.sound.unlocked = true; ui.sound.clear_announcer()
 		ui._apply_move(2,2)
-		ok((ui.sound.voice_id == "nineweave" and ui.sound.voice_queue.back().id == "victory") if mark == 1 else (ui.sound.voice_id == "defeat" and ui.sound.voice_queue.is_empty()),"real match result voice routing "+str(mark))
+		ok((ui.sound.voice_id == "nineweave" and ui.sound.voice_queue.is_empty()) if mark == 1 else (ui.sound.voice_id == "defeat" and ui.sound.voice_queue.is_empty()),"real match result voice routing "+str(mark))
 	ui.debug_load_position(F.big_tactic(1).serialize(),"local"); ui.sound.clear_announcer(); ui._apply_move(2,2)
 	ok(ui.sound.voice_id == "nineweave" and ui.sound.voice_queue.is_empty(),"local result has no player victory/defeat")
 	ui.sound.enabled = false

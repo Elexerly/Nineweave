@@ -645,9 +645,8 @@ func _announce_match_result():
 		sound.cue("draw"); _announce("standoff")
 	elif game.status in [1,2]:
 		if mode == "local" or game.status == human_mark:
-			_announce("nineweave")
-			if mode == "local": sound.cue("victory")
-			else: sound.announce("victory","victory")
+			sound.announce("nineweave","victory")
+			if not sound.enabled: callout.show_callout("nineweave")
 		else:
 			sound.announce("defeat","defeat")
 			if not sound.enabled: callout.show_callout("defeat")

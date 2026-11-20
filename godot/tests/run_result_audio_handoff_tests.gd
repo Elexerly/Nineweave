@@ -29,6 +29,7 @@ func run():
 		ok(game_win(ui) and started == ["nineweave"],mode+" clean sweep starts branded speech, not stale Ready or Clean Sweep")
 		ok(ui.sound._voice.stream is AudioStreamOggVorbis and absf(ui.sound._voice.stream.get_length()-6.8) < .08,mode+" selects full imported recording")
 		ok(ui.sound.result_announcement_pending(),mode+" keeps result audio protected")
+		ok(ui.sound.voice_queue.is_empty(),mode+" results not delayed by a second victory voice")
 	ui.debug_load_position(F.big_tactic(2).serialize(),"computer")
 	started.clear(); ui._apply_move(2,2)
 	ok(started == ["defeat"],"AI victory gives the player the defeat call only")
@@ -59,9 +60,17 @@ func run():
 	ui.sound.advance_mix(100)
 	ui._process(0)
 	ok(ui.sound._voice.playing and not ui.cinematic.active,"real recording remains playing after animation and estimate expire")
-	await ui.sound._voice.finished
+	var start := Time.get_ticks_msec()
+	var saw_fade := false
+	while ui.sound.result_announcement_pending() and Time.get_ticks_msec()-start < 6000:
+		await process_frame
+		ui.sound.advance_mix(0)
+		if ui.sound._voice.playing and ui.sound._voice.volume_db < ui.sound._voice_base_db-.5: saw_fade = true
+	var seconds := float(Time.get_ticks_msec()-start)/1000.0
+	ok(saw_fade and ui.sound._brand_elapsed >= 4.45 and ui.sound._brand_elapsed < 4.57 and not ui.sound._voice.playing,"live recording fades audibly to silence around 4.45s (measured %.3fs)" % seconds)
+	print("RESULT_AUDIO_FADE playback_seconds=",ui.sound._brand_elapsed," wall_seconds=",seconds)
 	ui._process(0)
-	ok(ui.cinematic.active,"spotlight starts only after natural completion of full recording")
+	ok(ui.cinematic.active,"next ready board frame immediately hands off to results")
 	ui.cinematic.clear(); ui.sound.stop_playback(); ui.queue_free()
 	await process_frame; await process_frame
 	print("RESULT_AUDIO_HANDOFF ",checks," checks, ",failures," failures")

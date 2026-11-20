@@ -10,6 +10,8 @@ const REAL_SFX = {"claim_x":"claim_crystal_shatter","claim_o":"claim_gold_clang"
 const VOICES = ["ready","weave","first_claim","double_lock","triple_weave","match_point","turnaround","shutout","nineweave","clean_sweep","standoff","victory","defeat"]
 signal voice_started(id: String)
 const VOICE_GAP = .1
+const BRAND_FADE_START := 4.0
+const BRAND_FADE_END := 4.45
 ## Pending lines beyond this are stale (fast claims); the oldest non-result line is dropped.
 const VOICE_QUEUE_MAX = 3
 const RESULT_VOICES = ["victory","defeat","nineweave","clean_sweep","standoff"]
@@ -39,6 +41,8 @@ func set_hero_video_audio(value: bool):
 		duck_db = -12.0
 		_apply_mix()
 var _announcer_left: float = 0.0
+var _brand_elapsed := 0.0
+var _voice_base_db := 0.0
 var _players: Array = []
 var _voice: AudioStreamPlayer
 var _unlock_player: AudioStreamPlayer
@@ -129,6 +133,7 @@ func _process(delta):
 			cache[_job.kind] = _finish(_job); _job = {}
 	generation_us += Time.get_ticks_usec()-start
 func advance_mix(delta: float):
+	if voice_id == "nineweave": _advance_brand_fade(delta)
 	var remaining = delta
 	if _announcer_left > 0:
 		remaining = maxf(0,delta-_announcer_left)
@@ -168,6 +173,21 @@ func versus_prelude_playing() -> bool:
 ## Keep the board celebration visible until result speech AND its recorded tail
 ## complete. Check the player, not just estimated stream duration: Web audio may
 ## start late. Headless tests retain the deterministic duration fallback.
+static func brand_fade_gain(seconds: float) -> float:
+	return 1.0-smoothstep(BRAND_FADE_START,BRAND_FADE_END,seconds)
+func _advance_brand_fade(delta: float):
+	# Use the actual player clock on devices so buffering or a late audio start
+	# never shortens the audible clip. Headless fixtures retain a deterministic clock.
+	if _voice.playing:
+		_brand_elapsed = maxf(_brand_elapsed,_voice.get_playback_position()+AudioServer.get_time_since_last_mix())
+	else:
+		_brand_elapsed += delta
+	var gain := brand_fade_gain(_brand_elapsed)
+	if gain <= 0.0:
+		_voice.stop()
+		_voice_finished()
+	else:
+		_voice.volume_db = _voice_base_db+linear_to_db(gain)
 func _voice_finished():
 	if voice_id in RESULT_VOICES:
 		_announcer_left = 0; voice_id = ""; _gap_left = VOICE_GAP
@@ -187,7 +207,7 @@ func play_versus_clash():
 	cue("claim_o",0,-9.0)
 func clear_announcer():
 	if is_instance_valid(_voice): _voice.stop()
-	voice_queue.clear(); voice_id = ""; _announcer_left = 0; _gap_left = 0
+	voice_queue.clear(); voice_id = ""; _announcer_left = 0; _gap_left = 0; _brand_elapsed = 0.0
 func announce(id: String, paired_sfx: String = ""):
 	if not id in VOICES or not enabled or hero_video_audio: return
 	voice_queue.append({"id":id,"sfx":paired_sfx})
@@ -203,7 +223,8 @@ func _drain_voice():
 	var entry = voice_queue.pop_front(); voice_id = entry.id
 	var stream = stream_for("ann_"+voice_id)
 	_voice.stop(); _voice.stream = stream
-	_voice.volume_db = -3.0+float(Announcer.WEIGHT.get(voice_id,2))*.45
+	_voice_base_db = -3.0+float(Announcer.WEIGHT.get(voice_id,2))*.45
+	_voice.volume_db = _voice_base_db; _brand_elapsed = 0.0
 	_announcer_left = stream.get_length()
 	if DisplayServer.get_name() != "headless": _voice.play()
 	if not entry.sfx.is_empty(): cue(entry.sfx)

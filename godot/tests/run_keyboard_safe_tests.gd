@@ -26,6 +26,44 @@ func run():
 		ok(field.has_focus(),"can edit code without losing focus")
 		helper.apply_height(0); ok(is_equal_approx(scroll.size.y,original),"full scroll height restored")
 		view.queue_free(); await process_frame
+	# Native screenshots show keyboard pixels, while the Godot controls use
+	# logical points. Folded, unfolded and landscape must not collapse the clip.
+	for item in [
+		{"view":Vector2(480,712),"raw":910.0,"pixels":2034.0},
+		{"view":Vector2(390,844),"raw":948.0,"pixels":2532.0},
+		{"view":Vector2(320,568),"raw":636.0,"pixels":1704.0},
+		{"view":Vector2(867,390),"raw":588.0,"pixels":1170.0}
+	]:
+		var view = load("res://ui/recovery_screen.gd").new()
+		view.flow = load("res://net/account_recovery.gd").new()
+		view.add_child(view.flow)
+		view.size = item.view
+		root.add_child(view); await process_frame
+		var helper = view.keyboard_safe; helper.set_process(false)
+		var scroll = helper.scroll
+		var field = view.controls.recovery_email
+		field.grab_focus(); field.text = "qa-layout@example.invalid"
+		var original = scroll.get_rect()
+		var logical = Safe.logical_keyboard_height(item.raw,item.pixels,item.view.y,1,true)
+		ok(logical < item.view.y*.55,"native ratio converts physical pixels despite wrong point transform")
+		helper.apply_keyboard_metrics(item.raw,item.pixels,item.view.y,1,true)
+		await process_frame; await process_frame
+		ok(scroll.size.y >= 72 and scroll.get_rect().end.y <= item.view.y-logical,"full scroll aperture stays above keyboard")
+		ok(scroll.get_global_rect().encloses(field.get_global_rect()),"focused email stays completely in visible aperture")
+		ok(field.has_focus() and field.text == "qa-layout@example.invalid","email focus and draft stay intact")
+		ok(scroll.get_v_scroll_bar().max_value > scroll.size.y,"form below the keyboard remains scrollable")
+		if item.view == Vector2(480,712):
+			helper.apply_keyboard_metrics(item.raw,1170.0,390.0,1,true)
+			await process_frame; await process_frame
+			ok(scroll.size.y >= 72 and scroll.size.y < 370,"orientation change reapplies despite identical raw keyboard pixels")
+			ok(scroll.get_global_rect().encloses(field.get_global_rect()) and field.has_focus(),"orientation preserves editable field visibility and focus")
+			helper.apply_keyboard_metrics(item.raw,0.0,item.view.y,1,true)
+			await process_frame; await process_frame
+			ok(scroll.size.y >= 132 and scroll.get_global_rect().encloses(field.get_global_rect()),"stale native metrics cannot blank the pane")
+		helper.apply_keyboard_metrics(0.0,item.pixels,item.view.y,1,true)
+		await process_frame; await process_frame
+		ok(scroll.get_rect() == original and field.has_focus() and field.text == "qa-layout@example.invalid","keyboard close restores canvas while preserving email")
+		view.queue_free(); await process_frame
 	for recovery in [false,true]:
 		var form = load("res://ui/recovery_screen.gd" if recovery else "res://ui/email_screen.gd").new()
 		form.size = Vector2(390,640)
